@@ -1,0 +1,5 @@
+parameters:
+    tmpDir: cache/phpstan
+    level: 9
+    paths:
+        - src

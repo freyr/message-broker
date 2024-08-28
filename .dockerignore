@@ -1,0 +1,9 @@
+*
+!src
+!tests
+
+!composer.json
+!Dockerfile
+!ecs.php
+!phpstan.neon
+!phpunit.xml

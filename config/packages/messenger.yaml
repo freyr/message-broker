@@ -1,0 +1,53 @@
+framework:
+  messenger:
+    default_bus: messenger.bus.default
+    buses:
+      messenger.bus.default:
+        middleware:
+          - 'dispatch_after_current_bus'
+    serializer:
+      default_serializer: messenger.transport.serializer
+
+    transports:
+      # https://symfony.com/doc/current/messenger.html#transport-configuration
+      amqp:
+        dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+        serializer: messenger.transport.serializer
+        options:
+          exchange:
+            name: 'import'
+            type: 'direct'
+          queues:
+            client.1.member_bucket.1:
+              binding_keys: [ 'client.1.member_bucket.1' ]
+            client.1.member_bucket.2:
+              binding_keys: [ 'client.1.member_bucket.2' ]
+            client.1.member_bucket.3:
+              binding_keys: [ 'client.1.member_bucket.3' ]
+            client.1.member_bucket.4:
+              binding_keys: [ 'client.1.member_bucket.4' ]
+            client.1.member_bucket.5:
+              binding_keys: [ 'client.1.member_bucket.5' ]
+            client.2.member_bucket.1:
+              binding_keys: [ 'client.2.member_bucket.1' ]
+            client.2.member_bucket.2:
+              binding_keys: [ 'client.2.member_bucket.2' ]
+            client.2.member_bucket.3:
+              binding_keys: [ 'client.2.member_bucket.3' ]
+            client.2.member_bucket.4:
+              binding_keys: [ 'client.2.member_bucket.4' ]
+            client.2.member_bucket.5:
+              binding_keys: [ 'client.2.member_bucket.5' ]
+            client.3.member_bucket.1:
+              binding_keys: [ 'client.3.member_bucket.1' ]
+            client.3.member_bucket.2:
+              binding_keys: [ 'client.3.member_bucket.2' ]
+            client.3.member_bucket.3:
+              binding_keys: [ 'client.3.member_bucket.3' ]
+            client.3.member_bucket.4:
+              binding_keys: [ 'client.3.member_bucket.4' ]
+            client.3.member_bucket.5:
+              binding_keys: [ 'client.3.member_bucket.5' ]
+    routing:
+      # Route your messages to the transports
+      'Freyr\MessageBroker\Message\SleepMessage': amqp
