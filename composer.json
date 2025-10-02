@@ -1,0 +1,55 @@
+{
+    "name": "freyr/messenger",
+    "description": "Reliable Inbox & Outbox Patterns for Symfony Messenger with transactional guarantees and automatic deduplication",
+    "type": "library",
+    "license": "proprietary",
+    "keywords": [
+        "symfony",
+        "messenger",
+        "inbox-pattern",
+        "outbox-pattern",
+        "event-driven",
+        "amqp",
+        "rabbitmq",
+        "deduplication",
+        "uuid-v7"
+    ],
+    "authors": [
+        {
+            "name": "Freyr Development Team"
+        }
+    ],
+    "require": {
+        "php": ">=8.4",
+        "symfony/messenger": "^7.3",
+        "symfony/console": "^7.3",
+        "symfony/doctrine-messenger": "7.3.*",
+        "doctrine/dbal": "^3.0|^4.0",
+        "doctrine/orm": "^3.0",
+        "freyr/identity": "^0.2",
+        "php-amqplib/php-amqplib": "^3.7",
+        "nesbot/carbon": "^2.0|^3.0"
+    },
+    "require-dev": {
+        "phpstan/phpstan": "^2.1",
+        "phpunit/phpunit": "^10.0|^11.0",
+        "symfony/phpunit-bridge": "^7.3"
+    },
+    "autoload": {
+        "psr-4": {
+            "Freyr\\Messenger\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Freyr\\Messenger\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "preferred-install": "dist",
+        "optimize-autoloader": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
