@@ -7,7 +7,10 @@ This package provides production-ready implementations of the Inbox and Outbox p
 ## Features
 
 ✅ **Transactional Outbox** - Publish events reliably with your business transactions
+✅ **Strategy-Based Publishing** - Extensible architecture supporting multiple targets (AMQP, HTTP, etc.)
+✅ **Automatic DLQ Routing** - Unmatched events automatically routed to dead-letter queue
 ✅ **Automatic Deduplication** - Inbox pattern with binary UUID primary key deduplication
+✅ **Message ID Validation** - Enforced UUID v7 `messageId` in all outbox events
 ✅ **Symfony Messenger Integration** - Built on top of Symfony's robust messaging framework
 ✅ **AMQP/RabbitMQ Support** - Seamless integration with message brokers
 ✅ **Binary UUID v7** - Efficient storage and chronological ordering
@@ -43,21 +46,21 @@ framework:
         failure_transport: failed
 
         transports:
-            # Outbox - stores events in database (transactional)
+            # Outbox - dedicated table for performance isolation
             outbox:
-                dsn: 'doctrine://default?queue_name=outbox'
+                dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
                 serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxEventSerializer'
                 options:
-                    auto_setup: false
+                    auto_setup: false  # Use migrations
 
-            # Inbox - stores incoming events with deduplication
+            # Inbox - dedicated table with INSERT IGNORE deduplication
             inbox:
-                dsn: 'inbox://default?queue_name=inbox'
-                serializer: 'Freyr\Messenger\Inbox\Serializer\InboxEventSerializer'
+                dsn: 'inbox://default?table_name=messenger_inbox&queue_name=inbox'
+                serializer: 'Freyr\Messenger\Inbox\Serializer\TypedInboxSerializer'
                 options:
-                    auto_setup: true
+                    auto_setup: false  # Use migrations
 
-            # AMQP - publishes to RabbitMQ
+            # AMQP - external message broker
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
                 serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxEventSerializer'
@@ -65,10 +68,16 @@ framework:
                     auto_setup: true
                     exchange:
                         name: 'your.exchange'
-                        type: fanout
+                        type: topic
                         durable: true
 
-            # Failed - stores failed messages
+            # DLQ - dead-letter queue (uses standard messenger_messages table)
+            dlq:
+                dsn: 'doctrine://default?queue_name=dlq'
+                options:
+                    auto_setup: false
+
+            # Failed - failed messages from inbox/outbox (standard table)
             failed:
                 dsn: 'doctrine://default?queue_name=failed'
                 options:
@@ -78,8 +87,9 @@ framework:
             # Route your domain events to outbox
             'App\Domain\Event\YourEvent': outbox
 
-            # Route inbox messages to inbox transport
-            'Freyr\Messenger\Inbox\Message\InboxEventMessage': inbox
+            # Route typed inbox messages
+            'App\Message\OrderPlaced': inbox
+            'App\Message\UserRegistered': inbox
 ```
 
 #### 2. Doctrine Configuration (`config/packages/doctrine.yaml`)
@@ -98,12 +108,12 @@ doctrine:
 ```yaml
 services:
     # Inbox Transport Factory
-    Freyr\Messenger\Inbox\Transport\DoctrineDedupTransportFactory:
+    Freyr\Messenger\Inbox\Transport\DoctrineInboxTransportFactory:
         arguments:
             $connection: '@doctrine.dbal.default_connection'
         tags: ['messenger.transport_factory']
 
-    # Event Handler Registry
+    # Event Handler Registry (for array-based handlers)
     Freyr\Messenger\Inbox\Handler\EventHandlerRegistry:
         arguments:
             $handlers: !tagged_iterator { tag: 'app.event_handler' }
@@ -118,17 +128,43 @@ services:
         class: Freyr\Messenger\Outbox\Routing\DefaultAmqpRoutingStrategy
         arguments:
             $exchangeName: 'your.exchange'
+
+    # Publishing Strategies
+    Freyr\Messenger\Outbox\Publishing\AmqpPublishingStrategy:
+        tags: ['messenger.outbox.publishing_strategy']
+
+    # Publishing Strategy Registry
+    Freyr\Messenger\Outbox\Publishing\PublishingStrategyRegistry:
+        arguments:
+            $strategies: !tagged_iterator 'messenger.outbox.publishing_strategy'
+
+    # Outbox Bridge
+    Freyr\Messenger\Outbox\EventBridge\OutboxToAmqpBridge:
+        arguments:
+            $dlqTransportName: 'dlq'
+
+    # Cleanup Command (optional)
+    Freyr\Messenger\Outbox\Command\CleanupOutboxCommand:
+        arguments:
+            $connection: '@doctrine.dbal.default_connection'
+            $tableName: 'messenger_outbox'
+            $queueName: 'outbox'
 ```
 
 #### 4. Database Migration
 
-Run migration to create `messenger_messages` table:
+Create the required tables using Doctrine migrations. The package uses a **3-table approach**:
+
+- `messenger_outbox` - Dedicated outbox table
+- `messenger_inbox` - Dedicated inbox table (binary UUID primary key)
+- `messenger_messages` - Standard table for failed/DLQ
+
+See [Database Schema Guide](../docs/database-schema.md) for complete migration examples.
 
 ```bash
+php bin/console doctrine:migrations:diff
 php bin/console doctrine:migrations:migrate
 ```
-
-The inbox uses binary(16) UUID as primary key instead of bigint auto-increment.
 
 #### 5. Environment Variables (`.env`)
 
@@ -155,12 +191,16 @@ use Carbon\CarbonImmutable;
 final readonly class OrderPlaced
 {
     public function __construct(
+        public Id $messageId,        // ✨ REQUIRED: UUID v7 for correlation/deduplication
         public Id $orderId,
         public Id $customerId,
         public float $totalAmount,
         public CarbonImmutable $placedAt,
     ) {}
 }
+```
+
+**Important:** All outbox domain events MUST have a public `messageId` property of type `Id` (UUID v7). This is validated by the serializer.
 ```
 
 #### 2. Dispatch the Event
@@ -181,6 +221,7 @@ class OrderService
 
         // Dispatch event (saved to outbox in same transaction)
         $this->eventBus->dispatch(new OrderPlaced(
+            messageId: Id::generate(),   // ✨ Generate UUID v7
             orderId: $order->getId(),
             customerId: $order->getCustomerId(),
             totalAmount: $order->getTotalAmount(),
@@ -417,11 +458,19 @@ php bin/console messenger:failed:show
 php bin/console messenger:failed:retry
 ```
 
-## Cleanup
+## Cleanup (Optional Maintenance)
 
 ```bash
 # Clean up old outbox messages (older than 7 days)
-php bin/console app:cleanup-outbox --days=7
+php bin/console messenger:cleanup-outbox --days=7 --batch-size=1000
+```
+
+**Note:** This is optional housekeeping. Symfony Messenger marks messages as delivered but doesn't auto-delete them. Run this periodically (e.g., via cron) to prevent table growth.
+
+Failed messages are managed separately via Symfony's built-in commands:
+```bash
+php bin/console messenger:failed:show
+php bin/console messenger:failed:remove <id>
 ```
 
 ## Architecture
@@ -453,11 +502,13 @@ messenger/
 │   │   ├── Handler/                # Message handlers
 │   │   ├── Message/                # Message DTOs
 │   │   ├── Serializer/             # Serialization
+│   │   ├── Stamp/                  # Custom stamps
 │   │   └── Transport/              # Custom transport
 │   └── Outbox/                     # Outbox Pattern
-│       ├── Command/                # Console commands
-│       ├── EventBridge/            # Outbox-to-AMQP bridge
-│       ├── Routing/                # Routing strategies
+│       ├── Command/                # Console commands (cleanup)
+│       ├── EventBridge/            # Generic outbox bridge
+│       ├── Publishing/             # Publishing strategies ✨
+│       ├── Routing/                # AMQP routing strategies
 │       ├── Serializer/             # Serialization
 │       └── MessageName.php         # Attribute for marking messages
 ├── config/                         # Configuration examples
@@ -467,9 +518,80 @@ messenger/
 
 ## Advanced Topics
 
-### Custom Routing Strategy
+### Custom Publishing Strategy
 
-Implement `AmqpRoutingStrategyInterface`:
+Create strategies for different publishing targets (HTTP webhooks, SQS, Kafka, etc.):
+
+```php
+<?php
+
+namespace App\Outbox\Publishing;
+
+use Freyr\Messenger\Outbox\Publishing\PublishingStrategyInterface;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
+
+final readonly class HttpWebhookPublishingStrategy implements PublishingStrategyInterface
+{
+    public function __construct(
+        private HttpClientInterface $httpClient,
+        private string $webhookUrl,
+    ) {}
+
+    public function supports(object $event): bool
+    {
+        // Only handle events implementing WebhookEvent
+        return $event instanceof WebhookEvent;
+    }
+
+    public function publish(object $event): void
+    {
+        $this->httpClient->post($this->webhookUrl, [
+            'json' => [
+                'event' => $event::class,
+                'data' => $this->serialize($event),
+            ],
+        ]);
+    }
+
+    public function getName(): string
+    {
+        return 'http_webhook';
+    }
+}
+```
+
+Register with tag:
+```yaml
+services:
+    App\Outbox\Publishing\HttpWebhookPublishingStrategy:
+        tags: ['messenger.outbox.publishing_strategy']
+```
+
+Multiple strategies can coexist - the registry will find the first matching strategy for each event.
+
+### AMQP Routing
+
+The default routing strategy uses **convention-based routing** with **attribute overrides**:
+
+**Default Behavior:**
+- Exchange: First 2 parts of message name (`order.placed` → `order.placed`)
+- Routing Key: Full message name (`order.placed`)
+
+**Override with Attributes:**
+```php
+use Freyr\Messenger\Outbox\Routing\{AmqpExchange, AmqpRoutingKey};
+
+#[MessageName('order.placed')]
+#[AmqpExchange('commerce')]           // Custom exchange
+#[AmqpRoutingKey('order.*.placed')]   // Wildcard routing key
+final readonly class OrderPlaced { ... }
+```
+
+See [AMQP Routing Guide](../docs/amqp-routing-guide.md) for complete documentation.
+
+### Custom AMQP Routing Strategy
+
+Implement `AmqpRoutingStrategyInterface` for custom logic:
 
 ```php
 <?php
@@ -480,25 +602,30 @@ use Freyr\Messenger\Outbox\Routing\AmqpRoutingStrategyInterface;
 
 final readonly class CustomRoutingStrategy implements AmqpRoutingStrategyInterface
 {
-    public function getExchange(string $eventName): string
+    public function getExchange(object $event, string $messageName): string
     {
+        // Custom logic based on event properties
+        if ($event instanceof CriticalEvent) {
+            return 'critical.events';
+        }
+
         return match(true) {
-            str_starts_with($eventName, 'order.') => 'orders',
-            str_starts_with($eventName, 'user.') => 'users',
+            str_starts_with($messageName, 'order.') => 'orders',
+            str_starts_with($messageName, 'user.') => 'users',
             default => 'events',
         };
     }
 
-    public function getRoutingKey(string $eventName): string
+    public function getRoutingKey(object $event, string $messageName): string
     {
-        return $eventName;
+        return $messageName;
     }
 
-    public function getHeaders(string $eventName): array
+    public function getHeaders(string $messageName): array
     {
         return [
-            'event_name' => $eventName,
-            'app_version' => '1.0.0',
+            'x-message-name' => $messageName,
+            'x-app-version' => '1.0.0',
         ];
     }
 }

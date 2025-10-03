@@ -23,6 +23,7 @@
         "php": ">=8.4",
         "symfony/messenger": "^7.3",
         "symfony/console": "^7.3",
+        "symfony/amqp-messenger": "7.3.*",
         "symfony/doctrine-messenger": "7.3.*",
         "doctrine/dbal": "^3.0|^4.0",
         "doctrine/orm": "^3.0",
