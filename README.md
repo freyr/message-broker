@@ -37,17 +37,47 @@ composer require freyr/message-broker
 php bin/console doctrine:migrations:migrate
 ```
 
+## How it works
+
+1. You emit your event (e.g., `inventory.stock.received`) from Application A (Inventory management)
+
+2. Messenger routing directs it to the **outbox** transport (Doctrine/database), inserting it in the same transaction as your business logic
+
+3. `php bin/console messenger:consume outbox -vv` fetches events from outbox and publishes them to AMQP
+   - Default routing: exchange = `inventory.stock`, routing key = `inventory.stock.received`
+   - Transactional outbox provides **at-least-once delivery** (events may be sent multiple times)
+   - Deduplication must happen at the receiving end
+
+4. Application B (Procurement) sets up AMQP infrastructure:
+   - Queue: `inventory_stock`
+   - Binds to exchange: `inventory.stock`
+   - Binding key: `inventory.stock.*`
+
+5. `php bin/console inbox:ingest --queue=inventory_stock` fetches events from AMQP and saves to inbox database
+   - Uses Doctrine transport with UUID v7 (binary(16)) as primary key
+   - Uses INSERT IGNORE for automatic deduplication
+   - PK is extracted from the `message_id` field, preventing duplicate processing
+
+6. `php bin/console messenger:consume inbox -vv` fetches events from inbox database and dispatches to handlers
+   - Pure Symfony Messenger flow with typed message deserialization
+   - Messages deserialized based on `message_name` (must match sender, e.g., `inventory.stock.received`)
+   - Doctrine transport uses `SELECT ... FOR UPDATE SKIP LOCKED` for concurrency
+   - Message fetch, handler execution, and acknowledgment happen atomically
+
 ### Start Workers
 
 ```bash
-# Consume from AMQP and save to inbox database
-php bin/console inbox:ingest --queue=your.queue
-
 # Process outbox (publish events to AMQP)
 php bin/console messenger:consume outbox -vv
 
 # Process inbox database (dispatch to handlers)
 php bin/console messenger:consume inbox -vv
+
+# Consume from AMQP and save to inbox database
+php bin/console inbox:ingest --queue=your.queue
+
+
+
 ```
 
 ## Usage
@@ -81,6 +111,29 @@ final readonly class OrderPlaced
 **Important:** All outbox events MUST have:
 - `#[MessageName('domain.action')]` attribute
 - Public `messageId` property of type `Id` (UUID v7)
+
+**AMQP Routing:**
+
+By default, events are published using convention-based routing:
+- **Exchange**: First 2 parts of message name (`order.placed` → `order.placed`)
+- **Routing Key**: Full message name (`order.placed`)
+
+You can override this with attributes:
+
+```php
+use Freyr\MessageBroker\Outbox\Routing\AmqpExchange;
+use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingKey;
+
+#[MessageName('order.placed')]
+#[AmqpExchange('commerce')]           // Custom exchange
+#[AmqpRoutingKey('commerce.order.placed')]   // Custom routing key
+final readonly class OrderPlaced
+{
+    // ...
+}
+```
+
+See [AMQP Routing Guide](docs/amqp-routing-guide.md) for complete documentation.
 
 #### 2. Configure Routing
 
@@ -272,65 +325,6 @@ You can customize:
 - AMQP connection in `.env`
 - Failed/DLQ transport names
 
-## Advanced Topics
-
-### AMQP Routing
-
-**Default Convention:**
-- Exchange: First 2 parts of message name (`order.placed` → `order.placed`)
-- Routing Key: Full message name (`order.placed`)
-
-**Override with Attributes:**
-```php
-use Freyr\MessageBroker\Outbox\Routing\{AmqpExchange, AmqpRoutingKey};
-
-#[MessageName('order.placed')]
-#[AmqpExchange('commerce')]           // Custom exchange
-#[AmqpRoutingKey('order.*.placed')]   // Wildcard routing key
-final readonly class OrderPlaced { /* ... */ }
-```
-
-See [AMQP Routing Guide](docs/amqp-routing-guide.md) for details.
-
-### Custom Publishing Strategy
-
-Support additional publishing targets (HTTP webhooks, SQS, Kafka):
-
-```php
-<?php
-
-namespace App\Outbox\Publishing;
-
-use Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyInterface;
-
-final readonly class HttpWebhookPublishingStrategy implements PublishingStrategyInterface
-{
-    public function supports(object $event): bool
-    {
-        return $event instanceof WebhookEvent;
-    }
-
-    public function publish(object $event): void
-    {
-        // Publish to HTTP endpoint
-    }
-
-    public function getName(): string
-    {
-        return 'http_webhook';
-    }
-}
-```
-
-Register with tag:
-```yaml
-services:
-    App\Outbox\Publishing\HttpWebhookPublishingStrategy:
-        tags: ['message_broker.outbox.publishing_strategy']
-```
-
-Multiple strategies can coexist - the first matching strategy handles each event.
-
 ## Production Deployment
 
 ### Docker Compose
@@ -360,72 +354,6 @@ services:
     restart: always
     deploy:
       replicas: 3
-```
-
-### Systemd
-
-**Inbox Ingest Worker** (`/etc/systemd/system/inbox-ingest.service`):
-
-```ini
-[Unit]
-Description=Message Broker Inbox Ingest (AMQP → Database)
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/var/www/app
-ExecStart=/usr/bin/php bin/console inbox:ingest --queue=your.queue
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-**Inbox Consumer Worker** (`/etc/systemd/system/inbox-consumer.service`):
-
-```ini
-[Unit]
-Description=Message Broker Inbox Consumer (Database → Handlers)
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/var/www/app
-ExecStart=/usr/bin/php bin/console messenger:consume inbox --time-limit=3600
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-**Outbox Worker** (`/etc/systemd/system/outbox.service`):
-
-```ini
-[Unit]
-Description=Message Broker Outbox (Database → AMQP)
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/var/www/app
-ExecStart=/usr/bin/php bin/console messenger:consume outbox --time-limit=3600
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start all services:
-
-```bash
-sudo systemctl enable inbox-ingest inbox-consumer outbox
-sudo systemctl start inbox-ingest inbox-consumer outbox
 ```
 
 ### Monitoring
