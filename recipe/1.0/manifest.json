@@ -1,0 +1,42 @@
+{
+    "bundles": {
+        "Freyr\\MessageBroker\\FreyrMessageBrokerBundle": ["all"]
+    },
+    "copy-from-recipe": {
+        "config/": "%CONFIG_DIR%/",
+        "migrations/": "%MIGRATIONS_DIR%/"
+    },
+    "env": {
+        "MESSENGER_AMQP_DSN": "amqp://guest:guest@localhost:5672/%2f"
+    },
+    "post-install-output": [
+        "<bg=blue;fg=white>                                        </>",
+        "<bg=blue;fg=white> Freyr Message Broker installed!       </>",
+        "<bg=blue;fg=white>                                        </>",
+        "",
+        "  <fg=green>✓</> Bundle registered",
+        "  <fg=green>✓</> Configuration files created",
+        "  <fg=green>✓</> Database migrations created",
+        "",
+        "<comment>Next steps:</>",
+        "",
+        "  1. Configure your inbox message types in <info>config/packages/message_broker.yaml</>",
+        "",
+        "  2. Review messenger transports in <info>config/packages/messenger.yaml</>",
+        "",
+        "  3. Run database migrations:",
+        "     <info>php bin/console doctrine:migrations:migrate</>",
+        "",
+        "  4. Start consuming messages:",
+        "     <info>php bin/console messenger:consume inbox outbox -vv</>",
+        "",
+        "<comment>Documentation:</>",
+        "  • README: <info>vendor/freyr/message-broker/README.md</>",
+        "  • Docs: <info>vendor/freyr/message-broker/docs/</>",
+        "",
+        "<comment>Example usage:</>",
+        "  • Outbox: <info>vendor/freyr/message-broker/docs/outbox-pattern.md</>",
+        "  • Inbox: <info>vendor/freyr/message-broker/docs/inbox-implementation.md</>",
+        ""
+    ]
+}

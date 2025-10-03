@@ -1,0 +1,23 @@
+message_broker:
+    # Inbox configuration
+    inbox:
+        # Table name for inbox messages (uses binary UUID v7 as PK)
+        table_name: messenger_inbox
+
+        # Message type mapping: message_name => PHP class
+        # Add your consumer message classes here
+        message_types:
+            # Example:
+            # 'order.placed': 'App\Message\OrderPlaced'
+            # 'user.registered': 'App\Message\UserRegistered'
+
+        # Failed transport name (where failed inbox messages go)
+        failed_transport: failed
+
+    # Outbox configuration
+    outbox:
+        # Table name for outbox messages (uses binary UUID v7 as PK)
+        table_name: messenger_outbox
+
+        # Dead Letter Queue transport (for unmatched events)
+        dlq_transport: dlq

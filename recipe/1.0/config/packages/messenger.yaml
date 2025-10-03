@@ -1,0 +1,51 @@
+framework:
+    messenger:
+        # Failure transport for handling failed messages
+        failure_transport: failed
+
+        transports:
+            # Outbox transport - stores events in database with transactional guarantees
+            outbox:
+                dsn: 'outbox://default?table_name=messenger_outbox&queue_name=outbox'
+                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer'
+                options:
+                    auto_setup: false  # Use migrations instead
+
+            # Inbox transport - receives messages from AMQP with deduplication
+            inbox:
+                dsn: 'inbox://default?table_name=messenger_inbox&queue_name=inbox'
+                serializer: 'Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer'
+                options:
+                    auto_setup: false  # Use migrations instead
+
+            # AMQP transport - external message broker
+            amqp:
+                dsn: '%env(MESSENGER_AMQP_DSN)%'
+                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer'
+                options:
+                    auto_setup: false
+                retry_strategy:
+                    max_retries: 3
+                    delay: 1000
+                    multiplier: 2
+
+            # Dead Letter Queue - for unmatched outbox events
+            dlq:
+                dsn: 'doctrine://default?queue_name=dlq'
+                options:
+                    auto_setup: false
+
+            # Failed transport - for all failed messages
+            failed:
+                dsn: 'doctrine://default?queue_name=failed'
+                options:
+                    auto_setup: false
+
+        routing:
+            # Route InboxEventMessage to inbox transport
+            'Freyr\MessageBroker\Inbox\Message\InboxEventMessage': inbox
+
+            # Route your domain events to outbox
+            # Example:
+            # 'App\Domain\Event\OrderPlaced': outbox
+            # 'App\Domain\Event\UserRegistered': outbox

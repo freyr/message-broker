@@ -1,189 +1,67 @@
-# Freyr Messenger
+# Freyr Message Broker
 
-**Reliable Inbox & Outbox Patterns for Symfony Messenger**
+**Production-Ready Inbox & Outbox Patterns for Symfony Messenger**
 
-This package provides production-ready implementations of the Inbox and Outbox patterns for Symfony applications, ensuring reliable event publishing and consumption with transactional guarantees and automatic deduplication.
+A Symfony bundle providing reliable event publishing and consumption with transactional guarantees, automatic deduplication, and seamless AMQP integration.
 
 ## Features
 
-- **Transactional Outbox** - Publish events reliably with your business transactions
-- **Strategy-Based Publishing** - Extensible architecture supporting multiple targets (AMQP, HTTP, etc.)
-- **Automatic DLQ Routing** - Unmatched events automatically routed to dead-letter queue
-- **Automatic Deduplication** - Inbox pattern with binary UUID primary key deduplication
-- **Message ID Validation** - Enforced UUID v7 `messageId` in all outbox events
-- **Symfony Messenger Integration** - Built on top of Symfony's robust messaging framework
-- **AMQP/RabbitMQ Support** - Seamless integration with message brokers
-- **Binary UUID v7** - Efficient storage and chronological ordering
-- **Horizontal Scaling** - Support for multiple workers with SKIP LOCKED
-- **Production Ready** - Battle-tested patterns with comprehensive error handling
+- ✅ **Transactional Outbox** - Publish events reliably within your business transactions
+- ✅ **Automatic Deduplication at the Inbox** - Binary UUID v7 primary key prevents duplicate processing
+- ✅ **Typed Message Handlers** - Type-safe event consumption with IDE autocomplete
+- ✅ **Automatic DLQ Routing** - Unmatched events routed to dead-letter queue
+- ✅ **Horizontal Scaling** - Multiple workers with database-level SKIP LOCKED
+
+## Restrictions
+- **Only Mysql Support** - (planned) PostgresSQL support
+- **Zero Configuration** - (in progress) Symfony Flex recipe automates installation
+- **AMQP support only** - There is no plan do add Kafka/SQS etc.
 
 ## Quick Start
 
 ### Installation
 
-1. Add to your `composer.json`:
-
-```json
-{
-    "require": {
-        "freyr/messenger": "^0.1.0"
-    }
-}
-```
-
-2. Run composer:
 ```bash
-composer dump-autoload
+composer require freyr/message-broker
 ```
 
-### Configuration
+**That's it!** Symfony Flex automatically:
+- ✅ Registers the bundle
+- ✅ Creates configuration files
+- ✅ Adds database migrations
+- ✅ Sets up environment variables
 
-#### 1. Messenger Configuration (`config/packages/messenger.yaml`)
-
-```yaml
-framework:
-    messenger:
-        failure_transport: failed
-
-        transports:
-            # Outbox - dedicated table for performance isolation
-            outbox:
-                dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
-                serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxEventSerializer'
-                options:
-                    auto_setup: false  # Use migrations
-
-            # Inbox - dedicated table with INSERT IGNORE deduplication
-            inbox:
-                dsn: 'inbox://default?table_name=messenger_inbox&queue_name=inbox'
-                serializer: 'Freyr\Messenger\Inbox\Serializer\TypedInboxSerializer'
-                options:
-                    auto_setup: false  # Use migrations
-
-            # AMQP - external message broker
-            amqp:
-                dsn: '%env(MESSENGER_AMQP_DSN)%'
-                serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxEventSerializer'
-                options:
-                    auto_setup: true
-                    exchange:
-                        name: 'your.exchange'
-                        type: topic
-                        durable: true
-
-            # DLQ - dead-letter queue (uses standard messenger_messages table)
-            dlq:
-                dsn: 'doctrine://default?queue_name=dlq'
-                options:
-                    auto_setup: false
-
-            # Failed - failed messages from inbox/outbox (standard table)
-            failed:
-                dsn: 'doctrine://default?queue_name=failed'
-                options:
-                    auto_setup: false
-
-        routing:
-            # Route your domain events to outbox
-            'App\Domain\Event\YourEvent': outbox
-
-            # Route typed inbox messages
-            'App\Message\OrderPlaced': inbox
-            'App\Message\UserRegistered': inbox
-```
-
-#### 2. Doctrine Configuration (`config/packages/doctrine.yaml`)
-
-Register the custom UUID type:
-
-```yaml
-doctrine:
-    dbal:
-        types:
-            id_binary: Freyr\Messenger\Doctrine\Type\IdType
-```
-
-#### 3. Services Configuration (`config/services.yaml`)
-
-```yaml
-services:
-    # Inbox Transport Factory
-    Freyr\Messenger\Inbox\Transport\DoctrineInboxTransportFactory:
-        arguments:
-            $connection: '@doctrine.dbal.default_connection'
-        tags: ['messenger.transport_factory']
-
-    # Event Handler Registry (for array-based handlers)
-    Freyr\Messenger\Inbox\Handler\EventHandlerRegistry:
-        arguments:
-            $handlers: !tagged_iterator { tag: 'app.event_handler' }
-
-    # Register your event handlers
-    App\EventHandler\:
-        resource: '../src/EventHandler/*'
-        tags: ['app.event_handler']
-
-    # AMQP Routing Strategy
-    Freyr\Messenger\Outbox\Routing\AmqpRoutingStrategyInterface:
-        class: Freyr\Messenger\Outbox\Routing\DefaultAmqpRoutingStrategy
-        arguments:
-            $exchangeName: 'your.exchange'
-
-    # Publishing Strategies
-    Freyr\Messenger\Outbox\Publishing\AmqpPublishingStrategy:
-        tags: ['messenger.outbox.publishing_strategy']
-
-    # Publishing Strategy Registry
-    Freyr\Messenger\Outbox\Publishing\PublishingStrategyRegistry:
-        arguments:
-            $strategies: !tagged_iterator 'messenger.outbox.publishing_strategy'
-
-    # Outbox Bridge
-    Freyr\Messenger\Outbox\EventBridge\OutboxToAmqpBridge:
-        arguments:
-            $dlqTransportName: 'dlq'
-
-    # Cleanup Command (optional)
-    Freyr\Messenger\Outbox\Command\CleanupOutboxCommand:
-        arguments:
-            $connection: '@doctrine.dbal.default_connection'
-            $tableName: 'messenger_outbox'
-            $queueName: 'outbox'
-```
-
-#### 4. Database Migration
-
-Create the required tables using Doctrine migrations. The package uses a **3-table approach**:
-
-- `messenger_outbox` - Dedicated outbox table
-- `messenger_inbox` - Dedicated inbox table (binary UUID primary key)
-- `messenger_messages` - Standard table for failed/DLQ
-
-See [Database Schema Guide](docs/database-schema.md) for complete migration examples.
+### Setup Database
 
 ```bash
-php bin/console doctrine:migrations:diff
 php bin/console doctrine:migrations:migrate
 ```
 
-#### 5. Environment Variables (`.env`)
+### Start Workers
 
-```env
-MESSENGER_AMQP_DSN=amqp://guest:guest@rabbitmq:5672/%2f
+```bash
+# Consume from AMQP and save to inbox database
+php bin/console inbox:ingest --queue=your.queue
+
+# Process outbox (publish events to AMQP)
+php bin/console messenger:consume outbox -vv
+
+# Process inbox database (dispatch to handlers)
+php bin/console messenger:consume inbox -vv
 ```
 
 ## Usage
 
-### Outbox Pattern (Publishing Events)
+### Publishing Events (Outbox Pattern)
 
-#### 1. Define a Domain Event
+#### 1. Define Your Event
 
 ```php
 <?php
 
 namespace App\Domain\Event;
 
-use Freyr\Messenger\Outbox\MessageName;
+use Freyr\MessageBroker\Outbox\MessageName;
 use Freyr\Identity\Id;
 use Carbon\CarbonImmutable;
 
@@ -191,7 +69,7 @@ use Carbon\CarbonImmutable;
 final readonly class OrderPlaced
 {
     public function __construct(
-        public Id $messageId,        // ✨ REQUIRED: UUID v7 for correlation/deduplication
+        public Id $messageId,        // Required for correlation
         public Id $orderId,
         public Id $customerId,
         public float $totalAmount,
@@ -200,18 +78,31 @@ final readonly class OrderPlaced
 }
 ```
 
-**Important:** All outbox domain events MUST have a public `messageId` property of type `Id` (UUID v7). This is validated by the serializer.
+**Important:** All outbox events MUST have:
+- `#[MessageName('domain.action')]` attribute
+- Public `messageId` property of type `Id` (UUID v7)
+
+#### 2. Configure Routing
+
+Edit `config/packages/messenger.yaml`:
+
+```yaml
+framework:
+    messenger:
+        routing:
+            'App\Domain\Event\OrderPlaced': outbox
 ```
 
-#### 2. Dispatch the Event
+#### 3. Dispatch the Event
 
 ```php
 use Symfony\Component\Messenger\MessageBusInterface;
+use Freyr\Identity\Id;
 
 class OrderService
 {
     public function __construct(
-        private MessageBusInterface $eventBus,
+        private MessageBusInterface $messageBus,
     ) {}
 
     public function placeOrder(Order $order): void
@@ -220,92 +111,27 @@ class OrderService
         $this->entityManager->persist($order);
 
         // Dispatch event (saved to outbox in same transaction)
-        $this->eventBus->dispatch(new OrderPlaced(
-            messageId: Id::generate(),   // ✨ Generate UUID v7
+        $this->messageBus->dispatch(new OrderPlaced(
+            messageId: Id::new(),
             orderId: $order->getId(),
             customerId: $order->getCustomerId(),
             totalAmount: $order->getTotalAmount(),
             placedAt: CarbonImmutable::now()
         ));
 
-        // Commit transaction (order + event saved atomically)
+        // Commit (order + event saved atomically)
         $this->entityManager->flush();
     }
 }
 ```
 
-#### 3. Process Outbox
+The event is now stored in the outbox. Workers will publish it to AMQP asynchronously.
 
-```bash
-# Process outbox and publish to AMQP
-php bin/console messenger:consume outbox -vv
-```
+### Consuming Events (Inbox Pattern)
 
-### Inbox Pattern (Consuming Events)
+#### 1. Define Consumer Message
 
-#### 1. Consume from AMQP
-
-Messages arriving via AMQP must have the following JSON structure:
-
-```json
-{
-  "message_name": "order.placed",
-  "message_id": "01234567-89ab-cdef-0123-456789abcdef",
-  "payload": {
-    "orderId": "...",
-    "customerId": "..."
-  }
-}
-```
-
-**Required fields:**
-- `message_name` (string): Message name in format `domain.subdomain.action` (aligns with `#[MessageName]` attribute)
-- `message_id` (string): Unique UUID for deduplication (must be set by publisher)
-- `payload` (object): Event data
-
-```bash
-# Consume from RabbitMQ and dispatch to inbox
-php bin/console inbox:ingest --queue=your.queue
-```
-
-#### 2. Create Event Handler
-
-**Option A: Generic Array-Based (Simple)**
-
-```php
-<?php
-
-namespace App\EventHandler;
-
-use Freyr\Messenger\EventHandlerInterface;
-
-final readonly class OrderPlacedHandler implements EventHandlerInterface
-{
-    public function supports(): string
-    {
-        return 'order.placed';
-    }
-
-    public function handle(array $payload): void
-    {
-        $orderId = $payload['orderId'];
-        $customerId = $payload['customerId'];
-
-        // Process the event
-        // ...
-    }
-}
-```
-
-Tag the handler in `services.yaml`:
-```yaml
-App\EventHandler\OrderPlacedHandler:
-    tags: ['app.event_handler']
-```
-
-**Option B: Typed Message Handler (Recommended)**
-
-Create a message class that matches your JSON structure:
+Create a message class matching the event structure:
 
 ```php
 <?php
@@ -318,6 +144,7 @@ use Carbon\CarbonImmutable;
 final readonly class OrderPlaced
 {
     public function __construct(
+        public Id $messageId,      // Must match publisher
         public Id $orderId,
         public Id $customerId,
         public float $totalAmount,
@@ -326,31 +153,21 @@ final readonly class OrderPlaced
 }
 ```
 
-Configure message type mapping in `config/services.yaml`:
+**Important:** Consumer message properties must match the publisher event exactly.
+
+#### 2. Configure Message Type Mapping
+
+Edit `config/packages/message_broker.yaml`:
 
 ```yaml
-parameters:
-    inbox.message_types:
-        'order.placed': 'App\Message\OrderPlaced'
-
-services:
-    Freyr\Messenger\Inbox\Serializer\TypedInboxSerializer:
-        arguments:
-            $messageTypes: '%inbox.message_types%'
+message_broker:
+    inbox:
+        message_types:
+            'order.placed': 'App\Message\OrderPlaced'
 ```
 
-Update inbox transport to use TypedInboxSerializer in `config/packages/messenger.yaml`:
+#### 3. Create Handler
 
-```yaml
-framework:
-    messenger:
-        transports:
-            inbox:
-                dsn: 'inbox://default?queue_name=inbox'
-                serializer: 'Freyr\Messenger\Inbox\Serializer\TypedInboxSerializer'
-```
-
-Create handler:
 ```php
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
@@ -359,33 +176,218 @@ final readonly class OrderPlacedHandler
 {
     public function __invoke(OrderPlaced $message): void
     {
-        // Type-safe access with IDE autocomplete!
+        // Type-safe with IDE autocomplete!
         $orderId = $message->orderId;
-        $customerId = $message->customerId;
+        $amount = $message->totalAmount;
 
-        // Process...
+        // Process the event...
     }
 }
 ```
 
-See [Typed Inbox Messages Guide](docs/inbox-typed-messages.md) for complete documentation.
+#### 4. Consume from AMQP
 
-#### 3. Process Inbox
+**Prerequisites:** RabbitMQ queue must already exist with proper bindings.
 
 ```bash
-# Process inbox with deduplication
+# Ingest from AMQP → Inbox transport
+php bin/console inbox:ingest --queue=your.queue
+
+# Process inbox messages → Handlers
 php bin/console messenger:consume inbox -vv
 ```
 
-## Running in Production
+### Message Format
 
-### Systemd Service Example
+AMQP messages must follow this JSON structure:
 
-Create `/etc/systemd/system/messenger-inbox.service`:
+```json
+{
+  "message_name": "order.placed",
+  "message_id": "01234567-89ab-cdef-0123-456789abcdef",
+  "payload": {
+    "messageId": "01234567-89ab-cdef-0123-456789abcdef",
+    "orderId": "...",
+    "customerId": "...",
+    "totalAmount": 99.99,
+    "placedAt": "2024-01-01T12:00:00+00:00"
+  }
+}
+```
+
+**Required fields:**
+- `message_name` - Matches `#[MessageName]` attribute
+- `message_id` - Used as primary key for deduplication
+- `payload` - Must contain all consumer message constructor parameters
+
+## Configuration
+
+### After Installation
+
+Symfony Flex creates these configuration files:
+
+**config/packages/message_broker.yaml:**
+```yaml
+message_broker:
+    inbox:
+        table_name: messenger_inbox
+        message_types: {}  # Add your mappings here
+        failed_transport: failed
+    outbox:
+        table_name: messenger_outbox
+        dlq_transport: dlq
+```
+
+**config/packages/messenger.yaml:**
+```yaml
+framework:
+    messenger:
+        transports:
+            outbox:
+                dsn: 'outbox://default?table_name=messenger_outbox&queue_name=outbox'
+            inbox:
+                dsn: 'inbox://default?table_name=messenger_inbox&queue_name=inbox'
+            amqp:
+                dsn: '%env(MESSENGER_AMQP_DSN)%'
+            dlq:
+                dsn: 'doctrine://default?queue_name=dlq'
+            failed:
+                dsn: 'doctrine://default?queue_name=failed'
+        routing:
+            'Freyr\MessageBroker\Inbox\Message\InboxEventMessage': inbox
+            # Add your domain events here:
+            # 'App\Domain\Event\OrderPlaced': outbox
+```
+
+**.env:**
+```env
+MESSENGER_AMQP_DSN=amqp://guest:guest@localhost:5672/%2f
+```
+
+### Customization
+
+You can customize:
+- Table names in `message_broker.yaml`
+- Transport DSNs in `messenger.yaml`
+- AMQP connection in `.env`
+- Failed/DLQ transport names
+
+## Advanced Topics
+
+### AMQP Routing
+
+**Default Convention:**
+- Exchange: First 2 parts of message name (`order.placed` → `order.placed`)
+- Routing Key: Full message name (`order.placed`)
+
+**Override with Attributes:**
+```php
+use Freyr\MessageBroker\Outbox\Routing\{AmqpExchange, AmqpRoutingKey};
+
+#[MessageName('order.placed')]
+#[AmqpExchange('commerce')]           // Custom exchange
+#[AmqpRoutingKey('order.*.placed')]   // Wildcard routing key
+final readonly class OrderPlaced { /* ... */ }
+```
+
+See [AMQP Routing Guide](docs/amqp-routing-guide.md) for details.
+
+### Custom Publishing Strategy
+
+Support additional publishing targets (HTTP webhooks, SQS, Kafka):
+
+```php
+<?php
+
+namespace App\Outbox\Publishing;
+
+use Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyInterface;
+
+final readonly class HttpWebhookPublishingStrategy implements PublishingStrategyInterface
+{
+    public function supports(object $event): bool
+    {
+        return $event instanceof WebhookEvent;
+    }
+
+    public function publish(object $event): void
+    {
+        // Publish to HTTP endpoint
+    }
+
+    public function getName(): string
+    {
+        return 'http_webhook';
+    }
+}
+```
+
+Register with tag:
+```yaml
+services:
+    App\Outbox\Publishing\HttpWebhookPublishingStrategy:
+        tags: ['message_broker.outbox.publishing_strategy']
+```
+
+Multiple strategies can coexist - the first matching strategy handles each event.
+
+## Production Deployment
+
+### Docker Compose
+
+```yaml
+services:
+  # Consume from AMQP and save to inbox database
+  worker-inbox-ingest:
+    image: your-app:latest
+    command: php bin/console inbox:ingest --queue=your.queue
+    restart: always
+    deploy:
+      replicas: 2
+
+  # Process outbox database and publish to AMQP
+  worker-outbox:
+    image: your-app:latest
+    command: php bin/console messenger:consume outbox --time-limit=3600
+    restart: always
+    deploy:
+      replicas: 2
+
+  # Process inbox database and dispatch to handlers
+  worker-inbox:
+    image: your-app:latest
+    command: php bin/console messenger:consume inbox --time-limit=3600
+    restart: always
+    deploy:
+      replicas: 3
+```
+
+### Systemd
+
+**Inbox Ingest Worker** (`/etc/systemd/system/inbox-ingest.service`):
 
 ```ini
 [Unit]
-Description=Messenger Inbox Worker
+Description=Message Broker Inbox Ingest (AMQP → Database)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/app
+ExecStart=/usr/bin/php bin/console inbox:ingest --queue=your.queue
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Inbox Consumer Worker** (`/etc/systemd/system/inbox-consumer.service`):
+
+```ini
+[Unit]
+Description=Message Broker Inbox Consumer (Database → Handlers)
 After=network.target
 
 [Service]
@@ -400,52 +402,33 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
-Start the service:
-```bash
-sudo systemctl enable messenger-inbox
-sudo systemctl start messenger-inbox
-```
-
-### Supervisor Example
+**Outbox Worker** (`/etc/systemd/system/outbox.service`):
 
 ```ini
-[program:messenger-inbox]
-command=php /var/www/app/bin/console messenger:consume inbox --time-limit=3600
-user=www-data
-numprocs=4
-autostart=true
-autorestart=true
-process_name=%(program_name)s_%(process_num)02d
+[Unit]
+Description=Message Broker Outbox (Database → AMQP)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/app
+ExecStart=/usr/bin/php bin/console messenger:consume outbox --time-limit=3600
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-### Docker Compose Example
-
-```yaml
-services:
-  worker-inbox:
-    image: your-app:latest
-    command: php bin/console messenger:consume inbox --time-limit=3600
-    restart: always
-    deploy:
-      replicas: 3
-    environment:
-      DATABASE_URL: mysql://user:pass@db:3306/app
-      MESSENGER_AMQP_DSN: amqp://guest:guest@rabbitmq:5672/%2f
-```
-
-## Testing
-
-### Test Deduplication
+Enable and start all services:
 
 ```bash
-# Send 3 identical messages
-php bin/console fsm:test-inbox-dedup
-
-# Check database - should have only 1 row
-php bin/console dbal:run-sql "SELECT HEX(id), queue_name FROM messenger_messages WHERE queue_name='inbox'"
+sudo systemctl enable inbox-ingest inbox-consumer outbox
+sudo systemctl start inbox-ingest inbox-consumer outbox
 ```
 
-## Monitoring
+### Monitoring
 
 ```bash
 # View queue statistics
@@ -458,184 +441,294 @@ php bin/console messenger:failed:show
 php bin/console messenger:failed:retry
 ```
 
-## Cleanup (Optional Maintenance)
+### Cleanup (Optional)
 
 ```bash
-# Clean up old outbox messages (older than 7 days)
+# Clean up old delivered messages (older than 7 days)
 php bin/console messenger:cleanup-outbox --days=7 --batch-size=1000
 ```
 
-**Note:** This is optional housekeeping. Symfony Messenger marks messages as delivered but doesn't auto-delete them. Run this periodically (e.g., via cron) to prevent table growth.
-
-Failed messages are managed separately via Symfony's built-in commands:
-```bash
-php bin/console messenger:failed:show
-php bin/console messenger:failed:remove <id>
-```
+**Note:** Symfony Messenger marks messages as delivered but doesn't auto-delete them. Run this periodically via cron to prevent table growth.
 
 ## Architecture
 
-For detailed architecture documentation, see:
-- [Architecture Overview](docs/architecture.md)
-- [Inbox Pattern](docs/inbox-implementation.md)
-- [Outbox Pattern](docs/outbox-pattern.md)
+### 3-Table Design
+
+The bundle uses dedicated tables for optimal performance:
+
+- **messenger_outbox** - Outbox events (binary UUID v7)
+- **messenger_inbox** - Inbox events with deduplication (binary UUID v7 from `message_id`)
+- **messenger_messages** - Failed/DLQ messages (standard bigint)
+
+**Benefits:**
+- No lock contention between inbox/outbox
+- Optimized indexes per use case
+- Independent cleanup policies
+- Unified failed message monitoring
+
+### Flow Diagrams
+
+**Outbox (Publishing):**
+```
+Domain Event → Message Bus → Outbox Transport (database)
+→ messenger:consume outbox → OutboxToAmqpBridge
+→ PublishingStrategyRegistry → AmqpPublishingStrategy → AMQP
+```
+
+**Inbox (Consuming):**
+```
+AMQP → inbox:ingest → InboxEventMessage → Inbox Transport (database)
+→ INSERT IGNORE (deduplication) → messenger:consume inbox
+→ TypedInboxSerializer → Typed Message → Your Handler
+```
+
+See [Architecture Documentation](docs/) for detailed explanations.
 
 ## Requirements
 
 - PHP 8.4+
-- Symfony 7.3+
+- Symfony 6.4+ or 7.0+
 - MySQL 8.0+ or MariaDB 10.5+ (binary UUID support)
 - Doctrine DBAL 3+
-- Doctrine ORM 3+
-- freyr/identity 0.2+
-- php-amqplib 3.7+
+- Doctrine ORM 3+ (optional, for entities)
+- freyr/identity 0.2+ (UUID v7 support)
+- php-amqplib 3.7+ (for AMQP)
 
-## Package Structure
+## Documentation
 
+- [Architecture Overview](docs/architecture.md)
+- [Outbox Pattern Guide](docs/outbox-pattern.md)
+- [Inbox Implementation](docs/inbox-implementation.md)
+- [Database Schema](docs/database-schema.md)
+- [AMQP Routing Guide](docs/amqp-routing-guide.md)
+
+## Troubleshooting
+
+**Issue:** Events not being published
+- Check outbox worker is running: `php bin/console messenger:consume outbox -vv`
+- Verify event is routed to outbox in `messenger.yaml`
+
+**Issue:** Duplicate messages being processed
+- Ensure `message_id` is unique and consistent
+- Check inbox table has binary UUID primary key
+
+**Issue:** Messages not consumed from AMQP
+- Verify RabbitMQ queue exists with proper bindings
+- Check AMQP DSN in `.env` is correct
+- Ensure message format matches required JSON structure
+
+**Issue:** Missing required parameter errors
+- Consumer message properties must match publisher event exactly
+- All constructor parameters must be present in payload
+
+## Manual Installation (Without Symfony Flex)
+
+If Symfony Flex is not available in your project, follow these manual installation steps:
+
+### 1. Install via Composer
+
+```bash
+composer require freyr/message-broker --no-scripts
 ```
-messenger/
-├── src/
-│   ├── Doctrine/                   # Doctrine Integration
-│   │   └── Type/                   # IdType (binary UUID v7 Doctrine type)
-│   ├── Inbox/                      # Inbox Pattern
-│   │   ├── Command/                # Console commands
-│   │   ├── Handler/                # Message handlers
-│   │   ├── Message/                # Message DTOs
-│   │   ├── Serializer/             # Serialization
-│   │   ├── Stamp/                  # Custom stamps
-│   │   └── Transport/              # Custom transport
-│   └── Outbox/                     # Outbox Pattern
-│       ├── Command/                # Console commands (cleanup)
-│       ├── EventBridge/            # Generic outbox bridge
-│       ├── Publishing/             # Publishing strategies ✨
-│       ├── Routing/                # AMQP routing strategies
-│       ├── Serializer/             # Serialization
-│       └── MessageName.php         # Attribute for marking messages
-├── config/                         # Configuration examples
-├── docs/                           # Documentation
-└── README.md
+
+### 2. Register the Bundle
+
+Edit `config/bundles.php`:
+
+```php
+return [
+    // ... other bundles
+    Freyr\MessageBroker\FreyrMessageBrokerBundle::class => ['all' => true],
+];
 ```
 
-## Advanced Topics
+### 3. Create Configuration Files
 
-### Custom Publishing Strategy
+**config/packages/message_broker.yaml:**
 
-Create strategies for different publishing targets (HTTP webhooks, SQS, Kafka, etc.):
+```yaml
+message_broker:
+    inbox:
+        table_name: messenger_inbox
+        message_types: {}  # Add your message type mappings here
+        failed_transport: failed
+    outbox:
+        table_name: messenger_outbox
+        dlq_transport: dlq
+```
+
+**config/packages/messenger.yaml:**
+
+```yaml
+framework:
+    messenger:
+        failure_transport: failed
+
+        transports:
+            # Outbox - stores events in database with binary UUID v7
+            outbox:
+                dsn: 'outbox://default?table_name=messenger_outbox&queue_name=outbox'
+                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer'
+                options:
+                    auto_setup: false
+
+            # Inbox - custom transport with deduplication
+            inbox:
+                dsn: 'inbox://default?table_name=messenger_inbox&queue_name=inbox'
+                serializer: 'Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer'
+                options:
+                    auto_setup: false
+
+            # AMQP - external message broker
+            amqp:
+                dsn: '%env(MESSENGER_AMQP_DSN)%'
+                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer'
+                options:
+                    auto_setup: false
+                retry_strategy:
+                    max_retries: 3
+                    delay: 1000
+                    multiplier: 2
+
+            # Dead Letter Queue - for unmatched outbox events
+            dlq:
+                dsn: 'doctrine://default?queue_name=dlq'
+                options:
+                    auto_setup: false
+
+            # Failed transport - for all failed messages
+            failed:
+                dsn: 'doctrine://default?queue_name=failed'
+                options:
+                    auto_setup: false
+
+        routing:
+            # Route InboxEventMessage to inbox transport
+            'Freyr\MessageBroker\Inbox\Message\InboxEventMessage': inbox
+
+            # Add your domain events routing here:
+            # 'App\Domain\Event\OrderPlaced': outbox
+```
+
+**config/packages/doctrine.yaml:**
+
+```yaml
+doctrine:
+    dbal:
+        types:
+            id_binary: Freyr\MessageBroker\Doctrine\Type\IdType
+```
+
+### 4. Create Database Migration
+
+Create `migrations/VersionYYYYMMDDHHIISS.php`:
 
 ```php
 <?php
 
-namespace App\Outbox\Publishing;
+declare(strict_types=1);
 
-use Freyr\Messenger\Outbox\Publishing\PublishingStrategyInterface;
-use Symfony\Contracts\HttpClient\HttpClientInterface;
+namespace DoctrineMigrations;
 
-final readonly class HttpWebhookPublishingStrategy implements PublishingStrategyInterface
+use Doctrine\DBAL\Schema\Schema;
+use Doctrine\Migrations\AbstractMigration;
+
+final class VersionYYYYMMDDHHIISS extends AbstractMigration
 {
-    public function __construct(
-        private HttpClientInterface $httpClient,
-        private string $webhookUrl,
-    ) {}
-
-    public function supports(object $event): bool
+    public function getDescription(): string
     {
-        // Only handle events implementing WebhookEvent
-        return $event instanceof WebhookEvent;
+        return 'Create Freyr Message Broker tables (outbox, inbox, messages)';
     }
 
-    public function publish(object $event): void
+    public function up(Schema $schema): void
     {
-        $this->httpClient->post($this->webhookUrl, [
-            'json' => [
-                'event' => $event::class,
-                'data' => $this->serialize($event),
-            ],
-        ]);
+        // Create messenger_outbox table with binary UUID v7
+        $this->addSql("
+            CREATE TABLE messenger_outbox (
+                id BINARY(16) NOT NULL PRIMARY KEY COMMENT '(DC2Type:id_binary)',
+                body LONGTEXT NOT NULL,
+                headers LONGTEXT NOT NULL,
+                queue_name VARCHAR(190) NOT NULL DEFAULT 'outbox',
+                created_at DATETIME NOT NULL,
+                available_at DATETIME NOT NULL,
+                delivered_at DATETIME DEFAULT NULL,
+                INDEX idx_queue_available (queue_name, available_at),
+                INDEX idx_delivered_at (delivered_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+
+        // Create messenger_inbox table with binary UUID v7
+        $this->addSql("
+            CREATE TABLE messenger_inbox (
+                id BINARY(16) NOT NULL PRIMARY KEY COMMENT '(DC2Type:id_binary)',
+                body LONGTEXT NOT NULL,
+                headers LONGTEXT NOT NULL,
+                queue_name VARCHAR(190) NOT NULL DEFAULT 'inbox',
+                created_at DATETIME NOT NULL,
+                available_at DATETIME NOT NULL,
+                delivered_at DATETIME DEFAULT NULL,
+                INDEX idx_queue_available (queue_name, available_at),
+                INDEX idx_delivered_at (delivered_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+
+        // Create standard messenger_messages table (for failed/DLQ)
+        $this->addSql("
+            CREATE TABLE messenger_messages (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                body LONGTEXT NOT NULL,
+                headers LONGTEXT NOT NULL,
+                queue_name VARCHAR(190) NOT NULL,
+                created_at DATETIME NOT NULL,
+                available_at DATETIME NOT NULL,
+                delivered_at DATETIME DEFAULT NULL,
+                INDEX idx_queue_available (queue_name, available_at),
+                INDEX idx_delivered_at (delivered_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
     }
 
-    public function getName(): string
+    public function down(Schema $schema): void
     {
-        return 'http_webhook';
+        $this->addSql('DROP TABLE messenger_outbox');
+        $this->addSql('DROP TABLE messenger_inbox');
+        $this->addSql('DROP TABLE messenger_messages');
     }
 }
 ```
 
-Register with tag:
-```yaml
-services:
-    App\Outbox\Publishing\HttpWebhookPublishingStrategy:
-        tags: ['messenger.outbox.publishing_strategy']
+### 5. Add Environment Variables
+
+Edit `.env`:
+
+```env
+###> freyr/message-broker ###
+MESSENGER_AMQP_DSN=amqp://guest:guest@localhost:5672/%2f
+###< freyr/message-broker ###
 ```
 
-Multiple strategies can coexist - the registry will find the first matching strategy for each event.
+### 6. Run Migrations
 
-### AMQP Routing
-
-The default routing strategy uses **convention-based routing** with **attribute overrides**:
-
-**Default Behavior:**
-- Exchange: First 2 parts of message name (`order.placed` → `order.placed`)
-- Routing Key: Full message name (`order.placed`)
-
-**Override with Attributes:**
-```php
-use Freyr\Messenger\Outbox\Routing\{AmqpExchange, AmqpRoutingKey};
-
-#[MessageName('order.placed')]
-#[AmqpExchange('commerce')]           // Custom exchange
-#[AmqpRoutingKey('order.*.placed')]   // Wildcard routing key
-final readonly class OrderPlaced { ... }
+```bash
+php bin/console doctrine:migrations:migrate
 ```
 
-See [AMQP Routing Guide](docs/amqp-routing-guide.md) for complete documentation.
+### 7. Verify Installation
 
-### Custom AMQP Routing Strategy
+```bash
+# Check bundle is registered
+php bin/console debug:container | grep MessageBroker
 
-Implement `AmqpRoutingStrategyInterface` for custom logic:
+# Check transports are available
+php bin/console debug:messenger
 
-```php
-<?php
-
-namespace App\Messenger;
-
-use Freyr\Messenger\Outbox\Routing\AmqpRoutingStrategyInterface;
-
-final readonly class CustomRoutingStrategy implements AmqpRoutingStrategyInterface
-{
-    public function getExchange(object $event, string $messageName): string
-    {
-        // Custom logic based on event properties
-        if ($event instanceof CriticalEvent) {
-            return 'critical.events';
-        }
-
-        return match(true) {
-            str_starts_with($messageName, 'order.') => 'orders',
-            str_starts_with($messageName, 'user.') => 'users',
-            default => 'events',
-        };
-    }
-
-    public function getRoutingKey(object $event, string $messageName): string
-    {
-        return $messageName;
-    }
-
-    public function getHeaders(string $messageName): array
-    {
-        return [
-            'x-message-name' => $messageName,
-            'x-app-version' => '1.0.0',
-        ];
-    }
-}
+# Start workers
+php bin/console inbox:ingest --queue=your.queue    # AMQP → inbox database
+php bin/console messenger:consume outbox -vv       # Outbox database → AMQP
+php bin/console messenger:consume inbox -vv        # Inbox database → handlers
 ```
 
-Register in services:
-```yaml
-Freyr\Messenger\Outbox\Routing\AmqpRoutingStrategyInterface:
-    class: App\Messenger\CustomRoutingStrategy
-```
+You're now ready to use the bundle! Continue with the [Usage](#usage) section above.
 
 ## License
 

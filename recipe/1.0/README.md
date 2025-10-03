@@ -1,0 +1,145 @@
+# Symfony Flex Recipe for Freyr Message Broker
+
+This directory contains the Symfony Flex recipe for automated installation and configuration of the Freyr Message Broker bundle.
+
+## What This Recipe Does
+
+When you run `composer require freyr/message-broker`, this recipe automatically:
+
+1. ✅ Registers `FreyrMessageBrokerBundle` in your application
+2. ✅ Creates `config/packages/message_broker.yaml` with default configuration
+3. ✅ Creates `config/packages/messenger.yaml` with transport configuration
+4. ✅ Copies database migration to `migrations/` directory
+5. ✅ Adds `MESSENGER_AMQP_DSN` to your `.env` file
+6. ✅ Displays post-install instructions
+
+## Recipe Structure
+
+```
+recipe/1.0/
+├── manifest.json                           # Recipe configuration
+├── config/packages/
+│   ├── message_broker.yaml                 # Bundle configuration
+│   └── messenger.yaml                      # Messenger transports
+├── migrations/
+│   └── Version20250103000000.php           # Database tables migration
+└── README.md                               # This file
+```
+
+## Using This Recipe
+
+### Option 1: Private Recipe Repository (Recommended for Testing)
+
+For testing or private use, you can configure Composer to use this recipe from your local package:
+
+1. Add to your `composer.json`:
+
+```json
+{
+    "extra": {
+        "symfony": {
+            "endpoint": [
+                "https://api.github.com/repos/YOUR-USERNAME/symfony-recipes/contents/index.json",
+                "flex://defaults"
+            ]
+        }
+    }
+}
+```
+
+2. Create a private recipe repository following Symfony's structure
+3. Reference this recipe in your repository
+
+See: https://symfony.com/doc/current/setup/flex_private_recipes.html
+
+### Option 2: Contribute to symfony/recipes-contrib (Public)
+
+To make this recipe available to all Symfony users:
+
+1. Fork https://github.com/symfony/recipes-contrib
+2. Copy this `recipe/1.0/` directory to `freyr/message-broker/1.0/` in the fork
+3. Create a Pull Request
+4. Wait for approval from Symfony recipe maintainers
+
+Once merged, anyone can install with automatic configuration:
+
+```bash
+composer require freyr/message-broker
+```
+
+## Testing the Recipe Locally
+
+To test this recipe without publishing:
+
+1. In your test Symfony project, add this to `composer.json`:
+
+```json
+{
+    "extra": {
+        "symfony": {
+            "allow-contrib": true
+        }
+    }
+}
+```
+
+2. Create a local recipes repository or use Flex's testing features
+
+## Recipe Versioning
+
+- `1.0/` - Initial recipe for version 1.x of the bundle
+- Future versions can be added as `2.0/`, `3.0/`, etc.
+
+## What Gets Installed
+
+### Configuration Files
+
+**config/packages/message_broker.yaml:**
+- Inbox/outbox table names
+- Message type mappings (needs user customization)
+- Transport names for failed/DLQ
+
+**config/packages/messenger.yaml:**
+- 5 transports: `outbox`, `inbox`, `amqp`, `dlq`, `failed`
+- Default routing for InboxEventMessage
+- Comments showing where to add domain event routing
+
+### Database Migration
+
+**migrations/Version20250103000000.php:**
+- Creates `messenger_outbox` table (binary UUID v7)
+- Creates `messenger_inbox` table (binary UUID v7)
+- Creates `messenger_messages` table (standard for failed/DLQ)
+
+### Environment Variables
+
+**\.env:**
+- `MESSENGER_AMQP_DSN` - Default RabbitMQ connection string
+
+## Post-Installation Steps
+
+After running `composer require freyr/message-broker`, users need to:
+
+1. Configure inbox message types in `config/packages/message_broker.yaml`
+2. Route domain events to outbox in `config/packages/messenger.yaml`
+3. Run migrations: `php bin/console doctrine:migrations:migrate`
+4. Start workers: `php bin/console messenger:consume inbox outbox -vv`
+
+## Customization
+
+Users can customize:
+- Table names in `message_broker.yaml`
+- Transport DSNs in `messenger.yaml`
+- AMQP connection string in `.env`
+- Failed/DLQ transport names
+
+## Documentation
+
+Full documentation is available in the package:
+- `vendor/freyr/message-broker/README.md`
+- `vendor/freyr/message-broker/docs/`
+
+## Support
+
+- Issues: https://github.com/freyr/message-broker/issues
+- Discussions: https://github.com/freyr/message-broker/discussions
