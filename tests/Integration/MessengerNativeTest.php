@@ -122,6 +122,7 @@ final class MessengerNativeTest extends IntegrationTestCase
             'message_name' => 'order.placed',
             'message_id' => $messageId->__toString(),
             'payload' => [
+                'messageId' => $messageId->__toString(),
                 'orderId' => $orderId->__toString(),
                 'customerId' => $customerId->__toString(),
                 'amount' => 100.50,

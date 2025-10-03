@@ -4,10 +4,16 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Outbox\Transport;
 
+use Closure;
+use DateTimeImmutable;
 use Doctrine\DBAL\Exception;
+use Doctrine\DBAL\Schema\Schema;
 use Doctrine\DBAL\Types\Types;
 use Freyr\Identity\Id;
+use RuntimeException;
 use Symfony\Component\Messenger\Bridge\Doctrine\Transport\Connection;
+
+use function sprintf;
 
 /**
  * Doctrine Outbox Connection.
@@ -23,13 +29,13 @@ class DoctrineOutboxConnection extends Connection
      */
     public function send(string $body, array $headers, int $delay = 0): string
     {
-        $now = new \DateTimeImmutable('UTC');
-        $availableAt = $now->modify(\sprintf('%+d seconds', $delay / 1000));
+        $now = new DateTimeImmutable('UTC');
+        $availableAt = $now->modify(sprintf('%+d seconds', $delay / 1000));
 
         // Extract message_id from body (set by OutboxEventSerializer)
         $bodyData = json_decode($body, true);
         if (!isset($bodyData['message_id'])) {
-            throw new \RuntimeException('message_id is required in outbox event body');
+            throw new RuntimeException('message_id is required in outbox event body');
         }
 
         $id = Id::fromString($bodyData['message_id']);
@@ -73,7 +79,7 @@ class DoctrineOutboxConnection extends Connection
     /**
      * Override configureSchema to use binary(16) for id column instead of bigint.
      */
-    public function configureSchema(\Doctrine\DBAL\Schema\Schema $schema, \Doctrine\DBAL\Connection $forConnection, \Closure $isSameDatabase): void
+    public function configureSchema(Schema $schema, \Doctrine\DBAL\Connection $forConnection, Closure $isSameDatabase): void
     {
         /** @var string $tableName */
         $tableName = $this->configuration['table_name'];

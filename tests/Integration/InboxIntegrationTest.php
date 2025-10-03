@@ -57,6 +57,7 @@ final class InboxIntegrationTest extends IntegrationTestCase
         // Given
         $messageId = Id::new();
         $payload = [
+            'messageId' => Id::new(),
             'orderId' => Id::new()->__toString(),
             'customerId' => Id::new()->__toString(),
             'amount' => 100.50,
@@ -97,6 +98,7 @@ final class InboxIntegrationTest extends IntegrationTestCase
         // Given - Same message_id sent twice
         $messageId = Id::new();
         $payload = [
+            'messageId' => Id::new(),
             'orderId' => Id::new()->__toString(),
             'customerId' => Id::new()->__toString(),
             'amount' => 100.50,
@@ -131,11 +133,13 @@ final class InboxIntegrationTest extends IntegrationTestCase
     public function test_typed_inbox_serializer_deserializes_to_php_objects(): void
     {
         // Given
+        $messageId = Id::new();
         $orderId = Id::new();
         $customerId = Id::new();
         $placedAt = CarbonImmutable::now();
 
         $payload = [
+            'messageId' => $messageId->__toString(),
             'orderId' => $orderId->__toString(),
             'customerId' => $customerId->__toString(),
             'amount' => 100.50,
@@ -175,7 +179,8 @@ final class InboxIntegrationTest extends IntegrationTestCase
                 'message_name' => 'order.placed',
                 'message_id' => Id::new()->__toString(),
                 'payload' => [
-                    'orderId' => Id::new()->__toString(),
+                'messageId' => Id::new(),
+                'orderId' => Id::new()->__toString(),
                     'customerId' => Id::new()->__toString(),
                     'amount' => 100.50,
                     'placedAt' => CarbonImmutable::now()->toIso8601String(),

@@ -147,6 +147,7 @@ class OutboxToInboxFlowTest extends KernelTestCase
         $inboxMessage = new InboxEventMessage(
             messageName: 'order.placed',
             payload: [
+                'messageId' => (string) $messageId,
                 'orderId' => (string) $orderId,
                 'customerId' => (string) $customerId,
                 'amount' => 99.99,
@@ -198,6 +199,7 @@ class OutboxToInboxFlowTest extends KernelTestCase
         $receivedMessage = $messages[0];
 
         $this->assertInstanceOf(OrderPlacedMessage::class, $receivedMessage);
+        $this->assertEquals($messageId, $receivedMessage->messageId);
         $this->assertEquals($orderId, $receivedMessage->orderId);
         $this->assertEquals(99.99, $receivedMessage->amount);
     }
@@ -211,6 +213,7 @@ class OutboxToInboxFlowTest extends KernelTestCase
         $inboxMessage = new InboxEventMessage(
             messageName: 'order.placed',
             payload: [
+                'messageId' => (string) $messageId,
                 'orderId' => (string) $orderId,
                 'customerId' => (string) $customerId,
                 'amount' => 99.99,

@@ -3,6 +3,10 @@ services:
         autowire: true
         autoconfigure: true
 
+    # Disable messenger logging in tests
+    logger:
+        class: Psr\Log\NullLogger
+
     # Test fixtures
     Freyr\MessageBroker\Tests\Fixtures\:
         resource: '../../Fixtures/'
