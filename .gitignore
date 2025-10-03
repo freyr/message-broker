@@ -18,3 +18,4 @@ phpstan-baseline.neon
 /phpunit.xml
 /.phpunit.cache/
 compose.override.yaml
+composer.lock

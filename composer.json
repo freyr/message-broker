@@ -1,8 +1,8 @@
 {
     "name": "freyr/messenger",
     "description": "Reliable Inbox & Outbox Patterns for Symfony Messenger with transactional guarantees and automatic deduplication",
-    "type": "library",
-    "license": "proprietary",
+    "type": "symfony-bundle",
+    "license": "MIT",
     "keywords": [
         "symfony",
         "messenger",
@@ -21,10 +21,13 @@
     ],
     "require": {
         "php": ">=8.4",
-        "symfony/messenger": "^7.3",
-        "symfony/console": "^7.3",
-        "symfony/amqp-messenger": "7.3.*",
-        "symfony/doctrine-messenger": "7.3.*",
+        "symfony/messenger": "^6.4|^7.0",
+        "symfony/console": "^6.4|^7.0",
+        "symfony/config": "^6.4|^7.0",
+        "symfony/dependency-injection": "^6.4|^7.0",
+        "symfony/http-kernel": "^6.4|^7.0",
+        "symfony/amqp-messenger": "^6.4|^7.0",
+        "symfony/doctrine-messenger": "^6.4|^7.0",
         "doctrine/dbal": "^3.0|^4.0",
         "doctrine/orm": "^3.0",
         "freyr/identity": "^0.2",
