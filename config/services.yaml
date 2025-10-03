@@ -47,6 +47,7 @@ services:
     Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyRegistry:
         arguments:
             $strategies: !tagged_iterator 'message_broker.outbox.publishing_strategy'
+            $logger: '@logger'
 
     # AMQP Publishing Strategy
     Freyr\MessageBroker\Outbox\Publishing\AmqpPublishingStrategy:

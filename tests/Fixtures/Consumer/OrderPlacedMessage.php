@@ -17,6 +17,7 @@ use Freyr\Identity\Id;
 final readonly class OrderPlacedMessage
 {
     public function __construct(
+        public Id $messageId,
         public Id $orderId,
         public Id $customerId,
         public float $amount,

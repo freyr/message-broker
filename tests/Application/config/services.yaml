@@ -1,0 +1,13 @@
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+
+    # Test fixtures
+    Freyr\MessageBroker\Tests\Fixtures\:
+        resource: '../../Fixtures/'
+
+    # Test message collector (not auto-configured as handler)
+    Freyr\MessageBroker\Tests\Functional\Handler\TestMessageCollector:
+        public: true
+        autoconfigure: true

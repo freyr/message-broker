@@ -1,0 +1,12 @@
+message_broker:
+    inbox:
+        table_name: 'messenger_inbox'
+        failed_transport: 'failed'
+        message_types:
+            'order.placed': 'Freyr\MessageBroker\Tests\Fixtures\Consumer\OrderPlacedMessage'
+            'user.premium.upgraded': 'Freyr\MessageBroker\Tests\Fixtures\Consumer\UserPremiumUpgradedMessage'
+            'sla.calculation.started': 'Freyr\MessageBroker\Tests\Fixtures\Consumer\SlaCalculationStartedMessage'
+
+    outbox:
+        table_name: 'messenger_outbox'
+        dlq_transport: 'failed'

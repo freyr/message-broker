@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Inbox\Serializer;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
+use Freyr\MessageBroker\Inbox\Message\InboxEventMessage;
 use Freyr\MessageBroker\Inbox\Stamp\MessageIdStamp;
 use Freyr\MessageBroker\Inbox\Stamp\MessageNameStamp;
 use Freyr\MessageBroker\Inbox\Stamp\SourceQueueStamp;
@@ -118,8 +119,13 @@ final readonly class TypedInboxSerializer implements SerializerInterface
             throw new \RuntimeException('Message must have SourceQueueStamp');
         }
 
-        // Serialize message back to payload
-        $payload = $this->serializeMessage($message);
+        // Special handling for InboxEventMessage - it's a DTO wrapper
+        if ($message instanceof InboxEventMessage) {
+            $payload = $message->payload;
+        } else {
+            // Serialize typed message back to payload
+            $payload = $this->serializeMessage($message);
+        }
 
         $body = json_encode([
             'message_name' => $messageNameStamp->messageName,
