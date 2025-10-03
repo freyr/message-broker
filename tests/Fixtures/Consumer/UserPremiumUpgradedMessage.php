@@ -16,6 +16,7 @@ use Freyr\Identity\Id;
 final readonly class UserPremiumUpgradedMessage
 {
     public function __construct(
+        public Id $messageId,
         public Id $userId,
         public string $plan,
         public CarbonImmutable $upgradedAt,

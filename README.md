@@ -6,16 +6,16 @@ This package provides production-ready implementations of the Inbox and Outbox p
 
 ## Features
 
-✅ **Transactional Outbox** - Publish events reliably with your business transactions
-✅ **Strategy-Based Publishing** - Extensible architecture supporting multiple targets (AMQP, HTTP, etc.)
-✅ **Automatic DLQ Routing** - Unmatched events automatically routed to dead-letter queue
-✅ **Automatic Deduplication** - Inbox pattern with binary UUID primary key deduplication
-✅ **Message ID Validation** - Enforced UUID v7 `messageId` in all outbox events
-✅ **Symfony Messenger Integration** - Built on top of Symfony's robust messaging framework
-✅ **AMQP/RabbitMQ Support** - Seamless integration with message brokers
-✅ **Binary UUID v7** - Efficient storage and chronological ordering
-✅ **Horizontal Scaling** - Support for multiple workers with SKIP LOCKED
-✅ **Production Ready** - Battle-tested patterns with comprehensive error handling
+- **Transactional Outbox** - Publish events reliably with your business transactions
+- **Strategy-Based Publishing** - Extensible architecture supporting multiple targets (AMQP, HTTP, etc.)
+- **Automatic DLQ Routing** - Unmatched events automatically routed to dead-letter queue
+- **Automatic Deduplication** - Inbox pattern with binary UUID primary key deduplication
+- **Message ID Validation** - Enforced UUID v7 `messageId` in all outbox events
+- **Symfony Messenger Integration** - Built on top of Symfony's robust messaging framework
+- **AMQP/RabbitMQ Support** - Seamless integration with message brokers
+- **Binary UUID v7** - Efficient storage and chronological ordering
+- **Horizontal Scaling** - Support for multiple workers with SKIP LOCKED
+- **Production Ready** - Battle-tested patterns with comprehensive error handling
 
 ## Quick Start
 
@@ -26,7 +26,7 @@ This package provides production-ready implementations of the Inbox and Outbox p
 ```json
 {
     "require": {
-        "freyr/messenger": "^1.0"
+        "freyr/messenger": "^0.1.0"
     }
 }
 ```
@@ -159,7 +159,7 @@ Create the required tables using Doctrine migrations. The package uses a **3-tab
 - `messenger_inbox` - Dedicated inbox table (binary UUID primary key)
 - `messenger_messages` - Standard table for failed/DLQ
 
-See [Database Schema Guide](../docs/database-schema.md) for complete migration examples.
+See [Database Schema Guide](docs/database-schema.md) for complete migration examples.
 
 ```bash
 php bin/console doctrine:migrations:diff
@@ -476,9 +476,9 @@ php bin/console messenger:failed:remove <id>
 ## Architecture
 
 For detailed architecture documentation, see:
-- [Architecture Overview](../docs/architecture.md)
-- [Inbox Pattern](../docs/inbox-implementation.md)
-- [Outbox Pattern](../docs/outbox-pattern.md)
+- [Architecture Overview](docs/architecture.md)
+- [Inbox Pattern](docs/inbox-implementation.md)
+- [Outbox Pattern](docs/outbox-pattern.md)
 
 ## Requirements
 
@@ -587,7 +587,7 @@ use Freyr\Messenger\Outbox\Routing\{AmqpExchange, AmqpRoutingKey};
 final readonly class OrderPlaced { ... }
 ```
 
-See [AMQP Routing Guide](../docs/amqp-routing-guide.md) for complete documentation.
+See [AMQP Routing Guide](docs/amqp-routing-guide.md) for complete documentation.
 
 ### Custom AMQP Routing Strategy
 

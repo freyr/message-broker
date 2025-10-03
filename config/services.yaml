@@ -59,15 +59,13 @@ services:
         tags: ['message_broker.outbox.publishing_strategy']
 
     # Outbox Bridge (generic handler for all outbox events)
+    # Note: Handler is auto-configured via #[AsMessageHandler(fromTransport: 'outbox')] attribute
     Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
-        autoconfigure: false
         arguments:
             $strategyRegistry: '@Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyRegistry'
             $eventBus: '@messenger.default_bus'
             $logger: '@logger'
             $dlqTransportName: '%message_broker.outbox.dlq_transport%'
-        tags:
-            - { name: 'messenger.message_handler', from_transport: 'outbox', handles: '*' }
 
     # Outbox Cleanup Command (optional maintenance)
     Freyr\MessageBroker\Outbox\Command\CleanupOutboxCommand:
