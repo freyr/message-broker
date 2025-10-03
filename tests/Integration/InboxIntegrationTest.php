@@ -2,15 +2,15 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Tests\Integration;
+namespace Freyr\MessageBroker\Tests\Integration;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\Messenger\Inbox\Serializer\TypedInboxSerializer;
-use Freyr\Messenger\Inbox\Transport\DoctrineInboxConnection;
-use Freyr\Messenger\Tests\Fixtures\Consumer\OrderPlacedMessage;
-use Freyr\Messenger\Tests\Fixtures\Consumer\SlaCalculationStartedMessage;
-use Freyr\Messenger\Tests\Fixtures\Consumer\UserPremiumUpgradedMessage;
+use Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer;
+use Freyr\MessageBroker\Inbox\Transport\DoctrineInboxConnection;
+use Freyr\MessageBroker\Tests\Fixtures\Consumer\OrderPlacedMessage;
+use Freyr\MessageBroker\Tests\Fixtures\Consumer\SlaCalculationStartedMessage;
+use Freyr\MessageBroker\Tests\Fixtures\Consumer\UserPremiumUpgradedMessage;
 use Symfony\Component\Messenger\Bridge\Doctrine\Transport\Connection;
 use Symfony\Component\Messenger\Bridge\Doctrine\Transport\DoctrineTransport;
 use Symfony\Component\Messenger\Envelope;

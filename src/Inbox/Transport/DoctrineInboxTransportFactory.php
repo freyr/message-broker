@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Inbox\Transport;
+namespace Freyr\MessageBroker\Inbox\Transport;
 
 use Doctrine\DBAL\Connection as DBALConnection;
 use Symfony\Component\Messenger\Bridge\Doctrine\Transport\Connection;

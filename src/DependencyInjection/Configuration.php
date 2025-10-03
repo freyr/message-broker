@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\DependencyInjection;
+namespace Freyr\MessageBroker\DependencyInjection;
 
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
@@ -11,7 +11,7 @@ final class Configuration implements ConfigurationInterface
 {
     public function getConfigTreeBuilder(): TreeBuilder
     {
-        $treeBuilder = new TreeBuilder('freyr_messenger');
+        $treeBuilder = new TreeBuilder('message_broker');
         $rootNode = $treeBuilder->getRootNode();
 
         $rootNode

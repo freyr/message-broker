@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Inbox\Serializer;
+namespace Freyr\MessageBroker\Inbox\Serializer;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\Messenger\Inbox\Stamp\MessageIdStamp;
-use Freyr\Messenger\Inbox\Stamp\MessageNameStamp;
-use Freyr\Messenger\Inbox\Stamp\SourceQueueStamp;
+use Freyr\MessageBroker\Inbox\Stamp\MessageIdStamp;
+use Freyr\MessageBroker\Inbox\Stamp\MessageNameStamp;
+use Freyr\MessageBroker\Inbox\Stamp\SourceQueueStamp;
 use ReflectionClass;
 use ReflectionNamedType;
 use Symfony\Component\Messenger\Envelope;

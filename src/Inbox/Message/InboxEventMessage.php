@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Inbox\Message;
+namespace Freyr\MessageBroker\Inbox\Message;
 
 /**
  * Inbox Event Message.

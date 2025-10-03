@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Outbox\Transport;
+namespace Freyr\MessageBroker\Outbox\Transport;
 
 use Doctrine\DBAL\Exception;
 use Doctrine\DBAL\Types\Types;

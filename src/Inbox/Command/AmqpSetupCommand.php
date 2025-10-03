@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Inbox\Command;
+namespace Freyr\MessageBroker\Inbox\Command;
 
 use Exception;
 use PhpAmqpLib\Channel\AMQPChannel;

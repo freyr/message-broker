@@ -1,5 +1,5 @@
 {
-    "name": "freyr/messenger",
+    "name": "freyr/message-broker",
     "description": "Reliable Inbox & Outbox Patterns for Symfony Messenger with transactional guarantees and automatic deduplication",
     "type": "symfony-bundle",
     "license": "MIT",
@@ -37,16 +37,19 @@
     "require-dev": {
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^10.0|^11.0",
-        "symfony/phpunit-bridge": "^7.3"
+        "symfony/phpunit-bridge": "^6.4|^7.0",
+        "symfony/framework-bundle": "^6.4|^7.0",
+        "symfony/yaml": "^6.4|^7.0",
+        "doctrine/doctrine-bundle": "^2.11"
     },
     "autoload": {
         "psr-4": {
-            "Freyr\\Messenger\\": "src/"
+            "Freyr\\MessageBroker\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "Freyr\\Messenger\\Tests\\": "tests/"
+            "Freyr\\MessageBroker\\Tests\\": "tests/"
         }
     },
     "config": {

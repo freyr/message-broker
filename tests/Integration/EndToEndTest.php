@@ -2,23 +2,23 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Tests\Integration;
+namespace Freyr\MessageBroker\Tests\Integration;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\Messenger\Inbox\Serializer\TypedInboxSerializer;
-use Freyr\Messenger\Inbox\Transport\DoctrineInboxConnection;
-use Freyr\Messenger\Outbox\Publishing\AmqpPublishingStrategy;
-use Freyr\Messenger\Outbox\Publishing\PublishingStrategyRegistry;
-use Freyr\Messenger\Outbox\Routing\DefaultAmqpRoutingStrategy;
-use Freyr\Messenger\Outbox\Serializer\OutboxEventSerializer;
-use Freyr\Messenger\Outbox\Transport\DoctrineOutboxConnection;
-use Freyr\Messenger\Tests\Fixtures\Consumer\OrderPlacedMessage;
-use Freyr\Messenger\Tests\Fixtures\Consumer\SlaCalculationStartedMessage;
-use Freyr\Messenger\Tests\Fixtures\Consumer\UserPremiumUpgradedMessage;
-use Freyr\Messenger\Tests\Fixtures\Publisher\OrderPlacedEvent;
-use Freyr\Messenger\Tests\Fixtures\Publisher\SlaCalculationStartedEvent;
-use Freyr\Messenger\Tests\Fixtures\Publisher\UserPremiumUpgradedEvent;
+use Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer;
+use Freyr\MessageBroker\Inbox\Transport\DoctrineInboxConnection;
+use Freyr\MessageBroker\Outbox\Publishing\AmqpPublishingStrategy;
+use Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyRegistry;
+use Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy;
+use Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer;
+use Freyr\MessageBroker\Outbox\Transport\DoctrineOutboxConnection;
+use Freyr\MessageBroker\Tests\Fixtures\Consumer\OrderPlacedMessage;
+use Freyr\MessageBroker\Tests\Fixtures\Consumer\SlaCalculationStartedMessage;
+use Freyr\MessageBroker\Tests\Fixtures\Consumer\UserPremiumUpgradedMessage;
+use Freyr\MessageBroker\Tests\Fixtures\Publisher\OrderPlacedEvent;
+use Freyr\MessageBroker\Tests\Fixtures\Publisher\SlaCalculationStartedEvent;
+use Freyr\MessageBroker\Tests\Fixtures\Publisher\UserPremiumUpgradedEvent;
 use PhpAmqpLib\Message\AMQPMessage;
 use Psr\Log\NullLogger;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;

@@ -2,18 +2,18 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Tests\Integration;
+namespace Freyr\MessageBroker\Tests\Integration;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\Messenger\Outbox\Publishing\AmqpPublishingStrategy;
-use Freyr\Messenger\Outbox\Publishing\PublishingStrategyRegistry;
-use Freyr\Messenger\Outbox\Routing\DefaultAmqpRoutingStrategy;
-use Freyr\Messenger\Outbox\Serializer\OutboxEventSerializer;
-use Freyr\Messenger\Outbox\Transport\DoctrineOutboxConnection;
-use Freyr\Messenger\Tests\Fixtures\Publisher\OrderPlacedEvent;
-use Freyr\Messenger\Tests\Fixtures\Publisher\SlaCalculationStartedEvent;
-use Freyr\Messenger\Tests\Fixtures\Publisher\UserPremiumUpgradedEvent;
+use Freyr\MessageBroker\Outbox\Publishing\AmqpPublishingStrategy;
+use Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyRegistry;
+use Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy;
+use Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer;
+use Freyr\MessageBroker\Outbox\Transport\DoctrineOutboxConnection;
+use Freyr\MessageBroker\Tests\Fixtures\Publisher\OrderPlacedEvent;
+use Freyr\MessageBroker\Tests\Fixtures\Publisher\SlaCalculationStartedEvent;
+use Freyr\MessageBroker\Tests\Fixtures\Publisher\UserPremiumUpgradedEvent;
 use Psr\Log\NullLogger;
 use Symfony\Component\Messenger\Bridge\Doctrine\Transport\Connection;
 use Symfony\Component\Messenger\Bridge\Doctrine\Transport\DoctrineTransport;

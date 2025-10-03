@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Outbox;
+namespace Freyr\MessageBroker\Outbox;
 
 use Attribute;
 

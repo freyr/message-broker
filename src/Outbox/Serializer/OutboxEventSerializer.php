@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Outbox\Serializer;
+namespace Freyr\MessageBroker\Outbox\Serializer;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
 use ReflectionClass;
 use ReflectionNamedType;
-use Freyr\Messenger\Outbox\MessageName;
+use Freyr\MessageBroker\Outbox\MessageName;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\MessageDecodingFailedException;
 use Symfony\Component\Messenger\Stamp\BusNameStamp;

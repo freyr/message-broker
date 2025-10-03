@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Outbox\Routing;
+namespace Freyr\MessageBroker\Outbox\Routing;
 
 /**
  * AMQP Routing Strategy Interface.

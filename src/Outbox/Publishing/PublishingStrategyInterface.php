@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Outbox\Publishing;
+namespace Freyr\MessageBroker\Outbox\Publishing;
 
 /**
  * Publishing Strategy Interface.

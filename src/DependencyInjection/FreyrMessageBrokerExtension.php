@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\DependencyInjection;
+namespace Freyr\MessageBroker\DependencyInjection;
 
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Extension\Extension;
 use Symfony\Component\DependencyInjection\Loader\YamlFileLoader;
 
-final class FreyrMessengerExtension extends Extension
+final class FreyrMessageBrokerExtension extends Extension
 {
     public function load(array $configs, ContainerBuilder $container): void
     {
@@ -17,11 +17,11 @@ final class FreyrMessengerExtension extends Extension
         $config = $this->processConfiguration($configuration, $configs);
 
         // Set parameters from configuration
-        $container->setParameter('freyr_messenger.inbox.table_name', $config['inbox']['table_name']);
-        $container->setParameter('freyr_messenger.inbox.message_types', $config['inbox']['message_types']);
-        $container->setParameter('freyr_messenger.inbox.failed_transport', $config['inbox']['failed_transport']);
-        $container->setParameter('freyr_messenger.outbox.table_name', $config['outbox']['table_name']);
-        $container->setParameter('freyr_messenger.outbox.dlq_transport', $config['outbox']['dlq_transport']);
+        $container->setParameter('message_broker.inbox.table_name', $config['inbox']['table_name']);
+        $container->setParameter('message_broker.inbox.message_types', $config['inbox']['message_types']);
+        $container->setParameter('message_broker.inbox.failed_transport', $config['inbox']['failed_transport']);
+        $container->setParameter('message_broker.outbox.table_name', $config['outbox']['table_name']);
+        $container->setParameter('message_broker.outbox.dlq_transport', $config['outbox']['dlq_transport']);
 
         $loader = new YamlFileLoader(
             $container,
@@ -33,6 +33,6 @@ final class FreyrMessengerExtension extends Extension
 
     public function getAlias(): string
     {
-        return 'freyr_messenger';
+        return 'message_broker';
     }
 }

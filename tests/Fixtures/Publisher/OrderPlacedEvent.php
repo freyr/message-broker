@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Tests\Fixtures\Publisher;
+namespace Freyr\MessageBroker\Tests\Fixtures\Publisher;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\Messenger\Outbox\MessageName;
+use Freyr\MessageBroker\Outbox\MessageName;
 
 /**
  * Test Domain Event - Publisher Side (Outbox).

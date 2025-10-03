@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Tests\Integration;
+namespace Freyr\MessageBroker\Tests\Integration;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
-use Freyr\Messenger\Doctrine\Type\IdType;
-use Freyr\Messenger\Tests\Fixtures\AmqpTestSetup;
+use Freyr\MessageBroker\Doctrine\Type\IdType;
+use Freyr\MessageBroker\Tests\Fixtures\AmqpTestSetup;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PHPUnit\Framework\TestCase;
 

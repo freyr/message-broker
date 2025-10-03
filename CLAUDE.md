@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is the **Freyr Messenger** package - a standalone Symfony bundle providing production-ready implementations of the **Inbox** and **Outbox** patterns for reliable event publishing and consumption with transactional guarantees and automatic deduplication.
+This is the **Freyr Message Broker** package - a standalone Symfony bundle providing production-ready implementations of the **Inbox** and **Outbox** patterns for reliable event publishing and consumption with transactional guarantees and automatic deduplication.
 
 **Key Technology Stack:**
 - PHP 8.4+
@@ -149,21 +149,21 @@ framework:
             # Outbox - dedicated table for performance isolation
             outbox:
                 dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
-                serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxEventSerializer'
+                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer'
                 options:
                     auto_setup: false  # Use migrations
 
             # Inbox - dedicated table with custom transport
             inbox:
                 dsn: 'inbox://default?table_name=messenger_inbox&queue_name=inbox'
-                serializer: 'Freyr\Messenger\Inbox\Serializer\TypedInboxSerializer'
+                serializer: 'Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer'
                 options:
                     auto_setup: false  # Use migrations
 
             # AMQP - external broker
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
-                serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxEventSerializer'
+                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer'
 
             # DLQ - standard messenger_messages table
             dlq:
@@ -192,7 +192,7 @@ Register the custom UUID type in `config/packages/doctrine.yaml`:
 doctrine:
     dbal:
         types:
-            id_binary: Freyr\Messenger\Doctrine\Type\IdType
+            id_binary: Freyr\MessageBroker\Doctrine\Type\IdType
 ```
 
 ### Services Configuration
@@ -205,12 +205,12 @@ parameters:
 
 services:
     # Typed Inbox Serializer
-    Freyr\Messenger\Inbox\Serializer\TypedInboxSerializer:
+    Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer:
         arguments:
             $messageTypes: '%inbox.message_types%'
 
     # Inbox Transport Factory (REQUIRED - registers inbox:// DSN)
-    Freyr\Messenger\Inbox\Transport\DoctrineInboxTransportFactory:
+    Freyr\MessageBroker\Inbox\Transport\DoctrineInboxTransportFactory:
         arguments:
             $connection: '@doctrine.dbal.default_connection'
         tags: ['messenger.transport_factory']
@@ -218,25 +218,25 @@ services:
     # AMQP Routing Strategy (Outbox) ✨
     # Uses convention-based routing: first 2 parts of message name → exchange
     # Supports #[AmqpExchange] and #[AmqpRoutingKey] attribute overrides
-    Freyr\Messenger\Outbox\Routing\AmqpRoutingStrategyInterface:
-        class: Freyr\Messenger\Outbox\Routing\DefaultAmqpRoutingStrategy
+    Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface:
+        class: Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy
 
     # Publishing Strategies (tagged services) ✨
-    Freyr\Messenger\Outbox\Publishing\AmqpPublishingStrategy:
+    Freyr\MessageBroker\Outbox\Publishing\AmqpPublishingStrategy:
         tags: ['messenger.outbox.publishing_strategy']
 
     # Publishing Strategy Registry ✨
-    Freyr\Messenger\Outbox\Publishing\PublishingStrategyRegistry:
+    Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyRegistry:
         arguments:
             $strategies: !tagged_iterator 'messenger.outbox.publishing_strategy'
 
     # Outbox Bridge (Generic Handler) ✨
-    Freyr\Messenger\Outbox\EventBridge\OutboxToAmqpBridge:
+    Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
         arguments:
             $dlqTransportName: 'dlq'  # Optional: customize DLQ transport
 
     # Cleanup Command (optional maintenance) ✨
-    Freyr\Messenger\Outbox\Command\CleanupOutboxCommand:
+    Freyr\MessageBroker\Outbox\Command\CleanupOutboxCommand:
         arguments:
             $connection: '@doctrine.dbal.default_connection'
             $tableName: 'messenger_outbox'  # Match transport table_name
@@ -247,8 +247,8 @@ services:
 
 ### Domain Events Must Use #[MessageName] Attribute and messageId Property ✨
 ```php
-use Freyr\Messenger\Outbox\MessageName;
-use Freyr\Messenger\Outbox\Routing\{AmqpExchange, AmqpRoutingKey};
+use Freyr\MessageBroker\Outbox\MessageName;
+use Freyr\MessageBroker\Outbox\Routing\{AmqpExchange, AmqpRoutingKey};
 use Freyr\Identity\Id;
 
 #[MessageName('order.placed')]  // REQUIRED: Message name for routing
@@ -286,7 +286,7 @@ See `docs/amqp-routing-guide.md` for complete routing documentation.
 **Key Points:**
 - Inbox and outbox use **separate tables** for performance isolation
 - Failed messages from both → `messenger_messages` table (unified monitoring)
-- Required Doctrine custom type: `id_binary` (provided by `Freyr\Messenger\Doctrine\Type\IdType`)
+- Required Doctrine custom type: `id_binary` (provided by `Freyr\MessageBroker\Doctrine\Type\IdType`)
 - Register the type in Doctrine configuration
 - Deduplication is handled at database level via primary key constraint with INSERT IGNORE
 
@@ -322,7 +322,7 @@ parameters:
         'order.placed': 'App\Message\OrderPlaced'
 
 services:
-    Freyr\Messenger\Inbox\Serializer\TypedInboxSerializer:
+    Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer:
         arguments:
             $messageTypes: '%inbox.message_types%'
 ```
@@ -428,9 +428,9 @@ public function __invoke(object $event): void {
 
 ## Namespace Convention
 
-All classes in this package use the `Freyr\Messenger` namespace:
-- `Freyr\Messenger\Inbox\*`
-- `Freyr\Messenger\Outbox\*`
+All classes in this package use the `Freyr\MessageBroker` namespace:
+- `Freyr\MessageBroker\Inbox\*`
+- `Freyr\MessageBroker\Outbox\*`
 
 ## Documentation
 

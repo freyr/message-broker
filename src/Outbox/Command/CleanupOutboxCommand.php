@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Outbox\Command;
+namespace Freyr\MessageBroker\Outbox\Command;
 
 use Carbon\CarbonImmutable;
 use Doctrine\DBAL\Connection;

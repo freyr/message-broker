@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Outbox\Publishing;
+namespace Freyr\MessageBroker\Outbox\Publishing;
 
 use Psr\Log\LoggerInterface;
-use Freyr\Messenger\Outbox\Routing\AmqpRoutingStrategyInterface;
-use Freyr\Messenger\Outbox\Serializer\OutboxEventSerializer;
+use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface;
+use Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer;
 use RuntimeException;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
 use Symfony\Component\Messenger\Envelope;

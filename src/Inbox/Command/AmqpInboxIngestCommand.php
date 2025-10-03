@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Inbox\Command;
+namespace Freyr\MessageBroker\Inbox\Command;
 
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
-use Freyr\Messenger\Inbox\Message\InboxEventMessage;
-use Freyr\Messenger\Inbox\Stamp\MessageIdStamp;
-use Freyr\Messenger\Inbox\Stamp\MessageNameStamp;
-use Freyr\Messenger\Inbox\Stamp\SourceQueueStamp;
+use Freyr\MessageBroker\Inbox\Message\InboxEventMessage;
+use Freyr\MessageBroker\Inbox\Stamp\MessageIdStamp;
+use Freyr\MessageBroker\Inbox\Stamp\MessageNameStamp;
+use Freyr\MessageBroker\Inbox\Stamp\SourceQueueStamp;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;

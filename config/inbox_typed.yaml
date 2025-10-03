@@ -12,12 +12,12 @@ parameters:
 # 2. Configure services
 services:
     # Typed inbox serializer
-    Freyr\Messenger\Inbox\Serializer\TypedInboxSerializer:
+    Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer:
         arguments:
             $messageTypes: '%inbox.message_types%'
 
     # Inbox transport factory (required for inbox://)
-    Freyr\Messenger\Inbox\Transport\DoctrineInboxTransportFactory:
+    Freyr\MessageBroker\Inbox\Transport\DoctrineInboxTransportFactory:
         arguments:
             $connection: '@doctrine.dbal.default_connection'
         tags: ['messenger.transport_factory']
@@ -28,7 +28,7 @@ framework:
         transports:
             inbox:
                 dsn: 'inbox://default?queue_name=inbox'
-                serializer: 'Freyr\Messenger\Inbox\Serializer\TypedInboxSerializer'
+                serializer: 'Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer'
                 options:
                     auto_setup: true
 

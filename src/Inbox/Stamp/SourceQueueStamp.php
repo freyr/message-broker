@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Inbox\Stamp;
+namespace Freyr\MessageBroker\Inbox\Stamp;
 
 use Symfony\Component\Messenger\Stamp\StampInterface;
 

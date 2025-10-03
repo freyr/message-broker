@@ -5,63 +5,73 @@ services:
         public: false
 
     # Doctrine Integration
-    Freyr\Messenger\Doctrine\Type\IdType:
+    Freyr\MessageBroker\Doctrine\Type\IdType:
         tags:
             - { name: 'doctrine.dbal.types', type: 'id_binary' }
 
     # Inbox Transport Factory (registers inbox:// DSN)
-    Freyr\Messenger\Inbox\Transport\DoctrineInboxTransportFactory:
+    Freyr\MessageBroker\Inbox\Transport\DoctrineInboxTransportFactory:
+        arguments:
+            $connection: '@doctrine.dbal.default_connection'
+        tags: ['messenger.transport_factory']
+
+    # Outbox Transport Factory (registers outbox:// DSN)
+    Freyr\MessageBroker\Outbox\Transport\DoctrineOutboxTransportFactory:
         arguments:
             $connection: '@doctrine.dbal.default_connection'
         tags: ['messenger.transport_factory']
 
     # Inbox Serializer (requires user configuration for message type mappings)
     # Users must configure this in their own services.yaml with message_types parameter
-    Freyr\Messenger\Inbox\Serializer\TypedInboxSerializer:
+    Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer:
         arguments:
-            $messageTypes: '%freyr_messenger.inbox.message_types%'
+            $messageTypes: '%message_broker.inbox.message_types%'
 
     # Inbox Commands
-    Freyr\Messenger\Inbox\Command\AmqpInboxIngestCommand:
+    Freyr\MessageBroker\Inbox\Command\AmqpInboxIngestCommand:
         arguments:
             $messageBus: '@messenger.default_bus'
         tags: ['console.command']
 
-    Freyr\Messenger\Inbox\Command\AmqpSetupCommand:
+    Freyr\MessageBroker\Inbox\Command\AmqpSetupCommand:
         tags: ['console.command']
 
     # Outbox Serializer
-    Freyr\Messenger\Outbox\Serializer\OutboxEventSerializer:
+    Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer:
 
     # AMQP Routing Strategy (default convention-based routing)
-    Freyr\Messenger\Outbox\Routing\AmqpRoutingStrategyInterface:
-        class: Freyr\Messenger\Outbox\Routing\DefaultAmqpRoutingStrategy
+    Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface:
+        class: Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy
 
     # Publishing Strategy Registry
-    Freyr\Messenger\Outbox\Publishing\PublishingStrategyRegistry:
+    Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyRegistry:
         arguments:
-            $strategies: !tagged_iterator 'freyr_messenger.outbox.publishing_strategy'
+            $strategies: !tagged_iterator 'message_broker.outbox.publishing_strategy'
 
     # AMQP Publishing Strategy
-    Freyr\Messenger\Outbox\Publishing\AmqpPublishingStrategy:
+    Freyr\MessageBroker\Outbox\Publishing\AmqpPublishingStrategy:
         arguments:
-            $amqpDsn: '%env(MESSENGER_AMQP_DSN)%'
-            $routingStrategy: '@Freyr\Messenger\Outbox\Routing\AmqpRoutingStrategyInterface'
-        tags: ['freyr_messenger.outbox.publishing_strategy']
+            $eventBus: '@messenger.default_bus'
+            $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
+            $serializer: '@Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer'
+            $logger: '@logger'
+        tags: ['message_broker.outbox.publishing_strategy']
 
     # Outbox Bridge (generic handler for all outbox events)
-    Freyr\Messenger\Outbox\EventBridge\OutboxToAmqpBridge:
+    Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
+        autoconfigure: false
         arguments:
-            $strategyRegistry: '@Freyr\Messenger\Outbox\Publishing\PublishingStrategyRegistry'
-            $messageBus: '@messenger.default_bus'
-            $dlqTransportName: '%freyr_messenger.outbox.dlq_transport%'
+            $strategyRegistry: '@Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyRegistry'
+            $eventBus: '@messenger.default_bus'
+            $logger: '@logger'
+            $dlqTransportName: '%message_broker.outbox.dlq_transport%'
         tags:
-            - { name: 'messenger.message_handler', from_transport: 'outbox' }
+            - { name: 'messenger.message_handler', from_transport: 'outbox', handles: '*' }
 
     # Outbox Cleanup Command (optional maintenance)
-    Freyr\Messenger\Outbox\Command\CleanupOutboxCommand:
+    Freyr\MessageBroker\Outbox\Command\CleanupOutboxCommand:
         arguments:
             $connection: '@doctrine.dbal.default_connection'
-            $tableName: '%freyr_messenger.outbox.table_name%'
+            $tableName: '%message_broker.outbox.table_name%'
             $queueName: 'outbox'
         tags: ['console.command']

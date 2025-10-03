@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Outbox\EventBridge;
+namespace Freyr\MessageBroker\Outbox\EventBridge;
 
 use Psr\Log\LoggerInterface;
-use Freyr\Messenger\Outbox\Publishing\PublishingStrategyRegistry;
+use Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyRegistry;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Messenger\Envelope;

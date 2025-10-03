@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\Messenger\Tests\Fixtures\Consumer;
+namespace Freyr\MessageBroker\Tests\Fixtures\Consumer;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
