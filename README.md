@@ -70,12 +70,11 @@ php bin/console doctrine:migrations:migrate
 # Process outbox (publish events to AMQP)
 php bin/console messenger:consume outbox -vv
 
-# Process inbox database (dispatch to handlers)
-php bin/console messenger:consume inbox -vv
-
 # Consume from AMQP and save to inbox database
 php bin/console inbox:ingest --queue=your.queue
 
+# Process inbox database (dispatch to handlers)
+php bin/console messenger:consume inbox -vv
 
 
 ```
@@ -109,7 +108,7 @@ final readonly class OrderPlaced
 ```
 
 **Important:** All outbox events MUST have:
-- `#[MessageName('domain.action')]` attribute
+- `#[MessageName('domain.subdomain.action')]` attribute
 - Public `messageId` property of type `Id` (UUID v7)
 
 **AMQP Routing:**
