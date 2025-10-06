@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Inbox\Transport;
 
 use Doctrine\DBAL\Exception;
+use Doctrine\DBAL\Schema\PrimaryKeyConstraint;
 use Doctrine\DBAL\Types\Types;
 use Freyr\Identity\Id;
 use Symfony\Component\Messenger\Bridge\Doctrine\Transport\Connection;
@@ -99,7 +100,11 @@ class DoctrineInboxConnection extends Connection
             $table->addColumn('available_at', Types::DATETIME_IMMUTABLE, ['notnull' => true]);
             $table->addColumn('delivered_at', Types::DATETIME_IMMUTABLE, ['notnull' => false]);
 
-            $table->setPrimaryKey(['id']);
+            $table->addPrimaryKeyConstraint(
+                PrimaryKeyConstraint::editor()
+                    ->setUnquotedColumnNames('id')
+                    ->create()
+            );
             $table->addIndex(['queue_name'], 'IDX_75EA56E0FB7336F0');
             $table->addIndex(['available_at'], 'IDX_75EA56E0E3BD61CE');
             $table->addIndex(['delivered_at'], 'IDX_75EA56E016BA31DB');
