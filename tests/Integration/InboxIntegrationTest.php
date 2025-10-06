@@ -6,7 +6,7 @@ namespace Freyr\MessageBroker\Tests\Integration;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer;
+use Freyr\MessageBroker\Inbox\Serializer\InboxSerializer;
 use Freyr\MessageBroker\Inbox\Transport\DoctrineInboxConnection;
 use Freyr\MessageBroker\Tests\Fixtures\Consumer\OrderPlacedMessage;
 use Freyr\MessageBroker\Tests\Fixtures\Consumer\SlaCalculationStartedMessage;
@@ -22,14 +22,14 @@ use Symfony\Component\Messenger\Stamp\TransportMessageIdStamp;
  * Tests:
  * 1. Messages are saved to inbox table with message_id as PK
  * 2. Deduplication via INSERT IGNORE works
- * 3. TypedInboxSerializer deserializes to typed PHP objects
+ * 3. InboxSerializer deserializes to typed PHP objects
  * 4. Inbox transport handles binary UUID properly
  */
 final class InboxIntegrationTest extends IntegrationTestCase
 {
     private DoctrineInboxConnection $inboxConnection;
     private DoctrineTransport $inboxTransport;
-    private TypedInboxSerializer $serializer;
+    private InboxSerializer $serializer;
 
     protected function setUp(): void
     {
@@ -42,7 +42,7 @@ final class InboxIntegrationTest extends IntegrationTestCase
             'user.premium.upgraded' => UserPremiumUpgradedMessage::class,
         ];
 
-        $this->serializer = new TypedInboxSerializer($messageTypes);
+        $this->serializer = new InboxSerializer($messageTypes, $this->createSerializer());
 
         // Create inbox transport with custom connection
         $config = Connection::buildConfiguration(

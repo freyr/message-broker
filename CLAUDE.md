@@ -22,17 +22,14 @@ Events are stored in a database table within the same transaction as business da
 ```
 Domain Event → Event Bus (Messenger) → Outbox Transport (doctrine://)
 → messenger_messages table (transactional) → messenger:consume outbox
-→ OutboxToAmqpBridge (Generic Handler) → PublishingStrategyRegistry
-→ AmqpPublishingStrategy (or custom strategies) → AMQP/HTTP/etc.
-
-Unmatched Events → DLQ Transport
+→ OutboxToAmqpBridge → AMQP (with routing strategy)
 ```
 
 **Key Features:**
 - **Generic Handler:** Single `__invoke()` method handles all events
-- **Strategy Registry:** Finds matching publishing strategy for each event
+- **AMQP Routing Strategy:** Determines exchange, routing key, and headers
 - **Message ID Validation:** Enforces `messageId` (UUID v7) in all events
-- **Automatic DLQ:** Events without matching strategy routed to dead-letter queue
+- **Convention-Based Routing:** Automatic routing with attribute overrides
 
 ### Inbox Pattern (Consuming Events)
 Events are consumed from AMQP with deduplication using binary UUID v7 as primary key:
@@ -58,16 +55,17 @@ messenger/
 │   ├── Inbox/                      # Inbox Pattern Implementation
 │   │   ├── Command/                # ConsumeAmqpToMessengerCommand, AmqpSetupCommand
 │   │   ├── Message/                # InboxEventMessage (wrapper DTO)
-│   │   ├── Serializer/             # TypedInboxSerializer
+│   │   ├── Serializer/             # InboxSerializer
 │   │   ├── Stamp/                  # MessageNameStamp, MessageIdStamp, SourceQueueStamp
 │   │   └── Transport/              # DoctrineInboxConnection, DoctrineInboxTransportFactory
-│   └── Outbox/                     # Outbox Pattern Implementation
-│       ├── Command/                # CleanupOutboxCommand (generic, DBAL-based)
-│       ├── EventBridge/            # OutboxToAmqpBridge (generic handler)
-│       ├── Publishing/             # PublishingStrategyInterface, Registry, AmqpStrategy ✨
-│       ├── Routing/                # AmqpRoutingStrategyInterface, DefaultAmqpRoutingStrategy
-│       ├── Serializer/             # OutboxEventSerializer (validates messageId)
-│       └── MessageName.php         # Attribute for marking messages with semantic names
+│   ├── Outbox/                     # Outbox Pattern Implementation
+│   │   ├── Command/                # CleanupOutboxCommand (generic, DBAL-based)
+│   │   ├── EventBridge/            # OutboxToAmqpBridge (AMQP publisher)
+│   │   ├── Routing/                # AmqpRoutingStrategyInterface, DefaultAmqpRoutingStrategy
+│   │   ├── Serializer/             # OutboxSerializer (validates messageId)
+│   │   └── MessageName.php         # Attribute for marking messages with semantic names
+│   └── Serializer/                 # Serialization Infrastructure ✨
+│       └── Normalizer/             # Built-in normalizers (IdNormalizer, CarbonImmutableNormalizer)
 ├── docs/                           # Comprehensive architecture documentation
 ├── config/                         # Configuration examples (empty placeholder)
 └── README.md                       # Full user guide
@@ -127,7 +125,7 @@ php bin/console messenger:cleanup-outbox --days=7 --batch-size=1000
 
 1. **`messenger_outbox`** - Dedicated outbox table (isolated from inbox)
 2. **`messenger_inbox`** - Dedicated inbox table (binary UUID PK with INSERT IGNORE)
-3. **`messenger_messages`** - Standard table for failed/DLQ (shared monitoring)
+3. **`messenger_messages`** - Standard table for failed messages (shared monitoring)
 
 **Benefits:**
 - ✅ No lock contention between inbox/outbox
@@ -149,27 +147,21 @@ framework:
             # Outbox - dedicated table for performance isolation
             outbox:
                 dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
-                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer'
+                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
                 options:
                     auto_setup: false  # Use migrations
 
             # Inbox - dedicated table with custom transport
             inbox:
                 dsn: 'inbox://default?table_name=messenger_inbox&queue_name=inbox'
-                serializer: 'Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer'
+                serializer: 'Freyr\MessageBroker\Inbox\Serializer\InboxSerializer'
                 options:
                     auto_setup: false  # Use migrations
 
             # AMQP - external broker
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
-                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer'
-
-            # DLQ - standard messenger_messages table
-            dlq:
-                dsn: 'doctrine://default?queue_name=dlq'
-                options:
-                    auto_setup: false
+                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
 
             # Failed - standard messenger_messages table
             failed:
@@ -204,10 +196,22 @@ parameters:
         'user.registered': 'App\Message\UserRegistered'
 
 services:
-    # Typed Inbox Serializer
-    Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer:
-        arguments:
-            $messageTypes: '%inbox.message_types%'
+    # Custom Normalizers/Denormalizers (optional - you can add your own)
+    # The package auto-registers normalizers from Serializer/Normalizer/ folder
+    # Applications can add their own by tagging with Symfony's native 'serializer.normalizer'
+
+    # Example: Auto-register all your normalizers from a folder
+    # App\Serializer\Normalizer\:
+    #     resource: '../src/Serializer/Normalizer/'
+    #     tags: ['serializer.normalizer']
+
+    # Example: Single normalizer with custom priority
+    # App\Serializer\Normalizer\MoneyNormalizer:
+    #     tags:
+    #         - { name: 'serializer.normalizer', priority: 10 }  # Higher priority = earlier in chain
+
+    # Note: InboxSerializer and OutboxSerializer use Symfony's @serializer service
+    # which automatically collects all normalizers tagged with 'serializer.normalizer'
 
     # Inbox Transport Factory (REQUIRED - registers inbox:// DSN)
     Freyr\MessageBroker\Inbox\Transport\DoctrineInboxTransportFactory:
@@ -221,19 +225,13 @@ services:
     Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface:
         class: Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy
 
-    # Publishing Strategies (tagged services) ✨
-    Freyr\MessageBroker\Outbox\Publishing\AmqpPublishingStrategy:
-        tags: ['messenger.outbox.publishing_strategy']
-
-    # Publishing Strategy Registry ✨
-    Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyRegistry:
-        arguments:
-            $strategies: !tagged_iterator 'messenger.outbox.publishing_strategy'
-
-    # Outbox Bridge (Generic Handler) ✨
+    # Outbox Bridge (AMQP Publisher) ✨
     Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
         arguments:
-            $dlqTransportName: 'dlq'  # Optional: customize DLQ transport
+            $eventBus: '@messenger.default_bus'
+            $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
+            $serializer: '@Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
+            $logger: '@logger'
 
     # Cleanup Command (optional maintenance) ✨
     Freyr\MessageBroker\Outbox\Command\CleanupOutboxCommand:
@@ -281,7 +279,7 @@ See `docs/amqp-routing-guide.md` for complete routing documentation.
 **Tables:**
 1. **`messenger_outbox`** - Outbox-specific (binary(16) id, standard Doctrine transport)
 2. **`messenger_inbox`** - Inbox-specific (binary(16) id from message_id, INSERT IGNORE deduplication)
-3. **`messenger_messages`** - Standard (bigint auto-increment for failed/DLQ)
+3. **`messenger_messages`** - Standard (bigint auto-increment for failed)
 
 **Key Points:**
 - Inbox and outbox use **separate tables** for performance isolation
@@ -294,7 +292,7 @@ See `docs/amqp-routing-guide.md` for complete routing documentation.
 
 ### Inbox Message Handling (Typed Objects)
 
-The inbox uses `TypedInboxSerializer` to automatically deserialize JSON payloads into typed PHP objects:
+The inbox uses `InboxSerializer` to automatically deserialize JSON payloads into typed PHP objects:
 
 **1. Define Message Class**
 ```php
@@ -322,7 +320,7 @@ parameters:
         'order.placed': 'App\Message\OrderPlaced'
 
 services:
-    Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer:
+    Freyr\MessageBroker\Inbox\Serializer\InboxSerializer:
         arguments:
             $messageTypes: '%inbox.message_types%'
 ```
@@ -352,31 +350,115 @@ final readonly class OrderPlacedHandler
 
 See `docs/inbox-typed-messages.md` for complete guide.
 
-### Outbox Bridge Pattern ✨ **REFACTORED**
-The `OutboxToAmqpBridge` is now a **generic handler** that uses the strategy registry pattern:
+### Custom Serialization with Normalizers/Denormalizers ✨
 
-**Old Approach (Deprecated):**
+The package uses **Symfony Serializer** with custom normalizers/denormalizers for type handling. This allows applications to add their own serialization logic for custom types.
+
+**Package-Provided Normalizers:**
+- `IdNormalizer` - For `Freyr\Identity\Id` (UUID v7) - implements both NormalizerInterface and DenormalizerInterface
+- `CarbonImmutableNormalizer` - For `Carbon\CarbonImmutable` - implements both NormalizerInterface and DenormalizerInterface
+
+**Adding Custom Normalizers:**
+
+1. **Create a Normalizer (implements both interfaces):**
 ```php
-// ❌ Required explicit methods for each event type
-#[AsMessageHandler(fromTransport: 'outbox')]
-public function handleOrderPlaced(OrderPlaced $event): void
+namespace App\Serializer\Normalizer;
+
+use App\ValueObject\Money;
+use Symfony\Component\Serializer\Normalizer\DenormalizerInterface;
+use Symfony\Component\Serializer\Normalizer\NormalizerInterface;
+
+final readonly class MoneyNormalizer implements NormalizerInterface, DenormalizerInterface
+{
+    public function normalize(mixed $object, ?string $format = null, array $context = []): array
+    {
+        return [
+            'amount' => $object->getAmount(),
+            'currency' => $object->getCurrency(),
+        ];
+    }
+
+    public function supportsNormalization(mixed $data, ?string $format = null, array $context = []): bool
+    {
+        return $data instanceof Money;
+    }
+
+    public function denormalize(mixed $data, string $type, ?string $format = null, array $context = []): Money
+    {
+        return new Money($data['amount'], $data['currency']);
+    }
+
+    public function supportsDenormalization(mixed $data, string $type, ?string $format = null, array $context = []): bool
+    {
+        return $type === Money::class;
+    }
+
+    public function getSupportedTypes(?string $format): array
+    {
+        return [Money::class => true];
+    }
+}
 ```
 
-**New Approach (Current):**
+2. **Auto-register all normalizers from a folder:**
+```yaml
+services:
+    App\Serializer\Normalizer\:
+        resource: '../src/Serializer/Normalizer/'
+        tags: ['serializer.normalizer']
+```
+
+3. **Control normalizer order with priority (optional):**
+```yaml
+services:
+    # Higher priority = earlier in the normalizer chain
+    App\Serializer\Normalizer\MoneyNormalizer:
+        tags:
+            - { name: 'serializer.normalizer', priority: 10 }
+
+    # Lower priority = later in the normalizer chain
+    App\Serializer\Normalizer\GenericValueObjectNormalizer:
+        tags:
+            - { name: 'serializer.normalizer', priority: -50 }
+```
+
+**How It Works:**
+- Both serializers (`InboxSerializer` and `OutboxSerializer`) use Symfony's native `@serializer` service
+- Symfony automatically collects all normalizers tagged with `serializer.normalizer`
+- Normalizers are ordered by priority (higher priority = earlier in chain, default = 0)
+- Symfony's built-in `ObjectNormalizer` has low priority (always last as a fallback)
+- The serializer uses the appropriate normalizer based on type detection
+
+**Benefits:**
+- ✅ Uses Symfony's native serializer service - standard and well-tested
+- ✅ Applications can add serialization for their own types
+- ✅ No manual enumeration needed - normalizers are auto-discovered via tagged iterator
+- ✅ Priority system allows fine-grained control over normalization order
+- ✅ Extensible architecture - add normalizers by simply tagging them with `serializer.normalizer`
+- ✅ Follows Symfony best practices
+- ✅ Supports complex nested objects
+- ✅ Normalizers work with any Symfony component that uses the serializer service
+
+### Outbox Bridge Pattern ✨ **SIMPLIFIED**
+The `OutboxToAmqpBridge` is a **generic handler** that publishes all outbox events to AMQP:
+
 ```php
 // ✅ Single generic handler for ALL events
 #[AsMessageHandler(fromTransport: 'outbox')]
 public function __invoke(object $event): void {
-    $strategy = $this->strategyRegistry->findStrategyFor($event);
-    $strategy ? $strategy->publish($event) : $this->sendToDlq($event);
+    // Get AMQP routing (exchange, routing key, headers)
+    $routing = $this->routingStrategy->getRoutingFor($event);
+
+    // Publish to AMQP
+    $this->eventBus->dispatch(new Envelope($event, [new AmqpStamp(...)]));
 }
 ```
 
 **Benefits:**
 - No code changes needed when adding new events
-- Events automatically published if matching strategy exists
-- Unmatched events automatically routed to DLQ
-- Supports multiple publishing targets (AMQP, HTTP, SQS, etc.)
+- All events automatically published to AMQP
+- Convention-based routing with attribute overrides
+- Failed publishing handled by Messenger's retry/failed transport
 
 ### Scaling Considerations
 - Run multiple inbox workers: `messenger:consume inbox` (uses SKIP LOCKED automatically)
@@ -389,7 +471,7 @@ public function __invoke(object $event): void {
 1. **3-Table Architecture**: The package uses dedicated tables for inbox/outbox:
    - `messenger_outbox` (table_name in doctrine:// DSN)
    - `messenger_inbox` (table_name in inbox:// DSN)
-   - `messenger_messages` (standard for failed/DLQ)
+   - `messenger_messages` (standard for failed)
 
    This prevents lock contention and allows independent scaling/cleanup.
 

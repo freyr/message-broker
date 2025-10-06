@@ -6,9 +6,9 @@ namespace Freyr\MessageBroker\Tests\Integration;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer;
+use Freyr\MessageBroker\Inbox\Serializer\InboxSerializer;
 use Freyr\MessageBroker\Inbox\Transport\DoctrineInboxConnection;
-use Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer;
+use Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer;
 use Freyr\MessageBroker\Outbox\Transport\DoctrineOutboxConnection;
 use Freyr\MessageBroker\Tests\Fixtures\Consumer\OrderPlacedMessage;
 use Freyr\MessageBroker\Tests\Fixtures\Publisher\OrderPlacedEvent;
@@ -45,7 +45,7 @@ final class MessengerNativeTest extends IntegrationTestCase
             'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
         );
         $outboxConnection = new DoctrineOutboxConnection($outboxConfig, $this->getConnection());
-        $this->outboxTransport = new DoctrineTransport($outboxConnection, new OutboxEventSerializer());
+        $this->outboxTransport = new DoctrineTransport($outboxConnection, new OutboxSerializer($this->createSerializer()));
 
         // Setup inbox transport
         $inboxConfig = Connection::buildConfiguration(
@@ -55,7 +55,7 @@ final class MessengerNativeTest extends IntegrationTestCase
         $messageTypes = [
             'order.placed' => OrderPlacedMessage::class,
         ];
-        $this->inboxTransport = new DoctrineTransport($inboxConnection, new TypedInboxSerializer($messageTypes));
+        $this->inboxTransport = new DoctrineTransport($inboxConnection, new InboxSerializer($messageTypes, $this->createSerializer()));
 
         // Setup message bus with handlers
         $this->bus = $this->createMessageBus();

@@ -7,9 +7,16 @@ namespace Freyr\MessageBroker\Tests\Integration;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
 use Freyr\MessageBroker\Doctrine\Type\IdType;
+use Freyr\MessageBroker\Serializer\Normalizer\CarbonImmutableNormalizer;
+use Freyr\MessageBroker\Serializer\Normalizer\IdNormalizer;
 use Freyr\MessageBroker\Tests\Fixtures\AmqpTestSetup;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\PropertyInfo\Extractor\ReflectionExtractor;
+use Symfony\Component\PropertyInfo\PropertyInfoExtractor;
+use Symfony\Component\Serializer\Normalizer\DateTimeNormalizer;
+use Symfony\Component\Serializer\Normalizer\ObjectNormalizer;
+use Symfony\Component\Serializer\Serializer;
 
 /**
  * Base Integration Test Case.
@@ -150,5 +157,29 @@ abstract class IntegrationTestCase extends TestCase
     protected function getAmqpConnection(): AMQPStreamConnection
     {
         return self::$amqpConnection;
+    }
+
+    /**
+     * Creates a Symfony Serializer with all necessary normalizers for testing.
+     */
+    protected function createSerializer(): Serializer
+    {
+        $reflectionExtractor = new ReflectionExtractor();
+        $propertyTypeExtractor = new PropertyInfoExtractor(
+            typeExtractors: [$reflectionExtractor]
+        );
+
+        $normalizers = [
+            new IdNormalizer(),
+            new CarbonImmutableNormalizer(),
+            new DateTimeNormalizer(),
+            new ObjectNormalizer(
+                propertyTypeExtractor: $propertyTypeExtractor,
+                // Disable type enforcement to allow int->float coercion
+                defaultContext: [ObjectNormalizer::DISABLE_TYPE_ENFORCEMENT => true]
+            ),
+        ];
+
+        return new Serializer($normalizers, []);
     }
 }

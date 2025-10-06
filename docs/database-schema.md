@@ -183,21 +183,21 @@ framework:
             # Outbox - dedicated table
             outbox:
                 dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
-                serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxEventSerializer'
+                serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxSerializer'
                 options:
                     auto_setup: false  # Use migrations instead
 
             # Inbox - dedicated table with custom transport
             inbox:
                 dsn: 'inbox://default?table_name=messenger_inbox&queue_name=inbox'
-                serializer: 'Freyr\Messenger\Inbox\Serializer\TypedInboxSerializer'
+                serializer: 'Freyr\Messenger\Inbox\Serializer\InboxSerializer'
                 options:
                     auto_setup: false  # Use migrations instead
 
             # AMQP - external broker
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
-                serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxEventSerializer'
+                serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxSerializer'
 
             # DLQ - uses standard messenger_messages table
             dlq:

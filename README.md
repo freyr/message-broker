@@ -406,7 +406,7 @@ Domain Event → Message Bus → Outbox Transport (database)
 ```
 AMQP → inbox:ingest → InboxEventMessage → Inbox Transport (database)
 → INSERT IGNORE (deduplication) → messenger:consume inbox
-→ TypedInboxSerializer → Typed Message → Your Handler
+→ InboxSerializer → Typed Message → Your Handler
 ```
 
 See [Architecture Documentation](docs/) for detailed explanations.
@@ -495,21 +495,21 @@ framework:
             # Outbox - stores events in database with binary UUID v7
             outbox:
                 dsn: 'outbox://default?table_name=messenger_outbox&queue_name=outbox'
-                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer'
+                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
                 options:
                     auto_setup: false
 
             # Inbox - custom transport with deduplication
             inbox:
                 dsn: 'inbox://default?table_name=messenger_inbox&queue_name=inbox'
-                serializer: 'Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer'
+                serializer: 'Freyr\MessageBroker\Inbox\Serializer\InboxSerializer'
                 options:
                     auto_setup: false
 
             # AMQP - external message broker
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
-                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer'
+                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
                 options:
                     auto_setup: false
                 retry_strategy:

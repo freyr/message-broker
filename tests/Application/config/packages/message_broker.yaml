@@ -9,4 +9,3 @@ message_broker:
 
     outbox:
         table_name: 'messenger_outbox'
-        dlq_transport: 'failed'

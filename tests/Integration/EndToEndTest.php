@@ -6,12 +6,12 @@ namespace Freyr\MessageBroker\Tests\Integration;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer;
+use Freyr\MessageBroker\Inbox\Serializer\InboxSerializer;
 use Freyr\MessageBroker\Inbox\Transport\DoctrineInboxConnection;
 use Freyr\MessageBroker\Outbox\Publishing\AmqpPublishingStrategy;
 use Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyRegistry;
 use Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy;
-use Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer;
+use Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer;
 use Freyr\MessageBroker\Outbox\Transport\DoctrineOutboxConnection;
 use Freyr\MessageBroker\Tests\Fixtures\Consumer\OrderPlacedMessage;
 use Freyr\MessageBroker\Tests\Fixtures\Consumer\SlaCalculationStartedMessage;
@@ -41,22 +41,22 @@ use Symfony\Component\Messenger\Stamp\TransportNamesStamp;
  */
 final class EndToEndTest extends IntegrationTestCase
 {
-    private OutboxEventSerializer $outboxSerializer;
-    private TypedInboxSerializer $inboxSerializer;
+    private OutboxSerializer $outboxSerializer;
+    private InboxSerializer $inboxSerializer;
     private DefaultAmqpRoutingStrategy $routingStrategy;
 
     protected function setUp(): void
     {
         parent::setUp();
 
-        $this->outboxSerializer = new OutboxEventSerializer();
+        $this->outboxSerializer = new OutboxSerializer($this->createSerializer());
 
         $messageTypes = [
             'order.placed' => OrderPlacedMessage::class,
             'sla.calculation.started' => SlaCalculationStartedMessage::class,
             'user.premium.upgraded' => UserPremiumUpgradedMessage::class,
         ];
-        $this->inboxSerializer = new TypedInboxSerializer($messageTypes);
+        $this->inboxSerializer = new InboxSerializer($messageTypes, $this->createSerializer());
         $this->routingStrategy = new DefaultAmqpRoutingStrategy();
     }
 

@@ -184,7 +184,7 @@ class FullEndToEndFlowTest extends KernelTestCase
         $channel = $amqpConnection->channel();
 
         // Serialize the message
-        $serializer = self::getContainer()->get('Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer');
+        $serializer = self::getContainer()->get('Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer');
         $encoded = $serializer->encode($envelope);
         $body = $encoded['body'];
 

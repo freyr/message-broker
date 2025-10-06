@@ -21,11 +21,18 @@ services:
             $connection: '@doctrine.dbal.default_connection'
         tags: ['messenger.transport_factory']
 
+    # Auto-register all Normalizers using Symfony's native tag
+    # These will be automatically added to the @serializer service
+    Freyr\MessageBroker\Serializer\Normalizer\:
+        resource: '../src/Serializer/Normalizer/'
+        tags: ['serializer.normalizer']
+
     # Inbox Serializer (requires user configuration for message type mappings)
     # Users must configure this in their own services.yaml with message_types parameter
-    Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer:
+    Freyr\MessageBroker\Inbox\Serializer\InboxSerializer:
         arguments:
             $messageTypes: '%message_broker.inbox.message_types%'
+            $serializer: '@serializer'
 
     # Inbox Commands
     Freyr\MessageBroker\Inbox\Command\AmqpInboxIngestCommand:
@@ -37,35 +44,22 @@ services:
         tags: ['console.command']
 
     # Outbox Serializer
-    Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer:
+    Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer:
+        arguments:
+            $serializer: '@serializer'
 
     # AMQP Routing Strategy (default convention-based routing)
     Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface:
         class: Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy
 
-    # Publishing Strategy Registry
-    Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyRegistry:
-        arguments:
-            $strategies: !tagged_iterator 'message_broker.outbox.publishing_strategy'
-            $logger: '@logger'
-
-    # AMQP Publishing Strategy
-    Freyr\MessageBroker\Outbox\Publishing\AmqpPublishingStrategy:
-        arguments:
-            $eventBus: '@messenger.default_bus'
-            $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
-            $serializer: '@Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer'
-            $logger: '@logger'
-        tags: ['message_broker.outbox.publishing_strategy']
-
-    # Outbox Bridge (generic handler for all outbox events)
+    # Outbox Bridge (publishes outbox events to AMQP)
     # Note: Handler is auto-configured via #[AsMessageHandler(fromTransport: 'outbox')] attribute
     Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
         arguments:
-            $strategyRegistry: '@Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyRegistry'
             $eventBus: '@messenger.default_bus'
+            $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
+            $serializer: '@Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
             $logger: '@logger'
-            $dlqTransportName: '%message_broker.outbox.dlq_transport%'
 
     # Outbox Cleanup Command (optional maintenance)
     Freyr\MessageBroker\Outbox\Command\CleanupOutboxCommand:

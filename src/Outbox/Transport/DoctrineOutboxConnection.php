@@ -32,7 +32,7 @@ class DoctrineOutboxConnection extends Connection
         $now = new DateTimeImmutable('UTC');
         $availableAt = $now->modify(sprintf('%+d seconds', $delay / 1000));
 
-        // Extract message_id from body (set by OutboxEventSerializer)
+        // Extract message_id from body (set by OutboxSerializer)
         $bodyData = json_decode($body, true);
         if (!isset($bodyData['message_id'])) {
             throw new RuntimeException('message_id is required in outbox event body');

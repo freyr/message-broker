@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `TypedInboxSerializer` allows you to receive typed PHP objects instead of arrays, providing full type safety and IDE support.
+The `InboxSerializer` allows you to receive typed PHP objects instead of arrays, providing full type safety and IDE support.
 
 ## Quick Start
 
@@ -41,9 +41,10 @@ parameters:
         'user.registered': 'App\Message\UserRegistered'
 
 services:
-    Freyr\Messenger\Inbox\Serializer\TypedInboxSerializer:
+    Freyr\MessageBroker\Inbox\Serializer\InboxSerializer:
         arguments:
             $messageTypes: '%inbox.message_types%'
+            $serializer: '@serializer'
 ```
 
 ### 3. Configure Inbox Transport
@@ -56,9 +57,9 @@ framework:
         transports:
             inbox:
                 dsn: 'inbox://default?queue_name=inbox'
-                serializer: 'Freyr\Messenger\Inbox\Serializer\TypedInboxSerializer'
+                serializer: 'Freyr\MessageBroker\Inbox\Serializer\InboxSerializer'
                 options:
-                    auto_setup: true
+                    auto_setup: false  # Use migrations
 
         routing:
             'App\Message\OrderPlaced': inbox
@@ -113,7 +114,7 @@ final readonly class OrderPlacedHandler
 ### Deserialization Flow
 
 1. **AMQP Consumer** receives JSON message
-2. **TypedInboxSerializer** looks up `message_name` → PHP class mapping
+2. **InboxSerializer** looks up `message_name` → PHP class mapping
 3. **Hydrator** deserializes `payload` into typed object
 4. **Stamps attached**: `MessageNameStamp` and `MessageIdStamp`
 5. **Messenger** routes to handler based on class name
@@ -121,13 +122,67 @@ final readonly class OrderPlacedHandler
 
 ## Supported Types
 
-The serializer automatically handles:
+The serializer uses Symfony's native `@serializer` service and automatically handles:
 
 - **Primitives**: `string`, `int`, `float`, `bool`, `array`
-- **Value Objects**: `Freyr\Identity\Id`
-- **Dates**: `Carbon\CarbonImmutable`, `\DateTimeImmutable`
+- **Value Objects**: `Freyr\Identity\Id` (via built-in `IdNormalizer`)
+- **Dates**: `Carbon\CarbonImmutable` (via built-in `CarbonImmutableNormalizer`), `\DateTimeImmutable`
 - **Enums**: PHP 8.1+ BackedEnums
 - **Nullable types**: Optional constructor parameters
+- **Custom types**: Via your own normalizers (see below)
+
+### Adding Custom Type Support
+
+To add serialization support for your own types, create a normalizer:
+
+```php
+namespace App\Serializer\Normalizer;
+
+use App\ValueObject\Money;
+use Symfony\Component\Serializer\Normalizer\DenormalizerInterface;
+use Symfony\Component\Serializer\Normalizer\NormalizerInterface;
+
+final readonly class MoneyNormalizer implements NormalizerInterface, DenormalizerInterface
+{
+    public function normalize(mixed $object, ?string $format = null, array $context = []): array
+    {
+        return [
+            'amount' => $object->getAmount(),
+            'currency' => $object->getCurrency(),
+        ];
+    }
+
+    public function supportsNormalization(mixed $data, ?string $format = null, array $context = []): bool
+    {
+        return $data instanceof Money;
+    }
+
+    public function denormalize(mixed $data, string $type, ?string $format = null, array $context = []): Money
+    {
+        return new Money($data['amount'], $data['currency']);
+    }
+
+    public function supportsDenormalization(mixed $data, string $type, ?string $format = null, array $context = []): bool
+    {
+        return $type === Money::class;
+    }
+
+    public function getSupportedTypes(?string $format): array
+    {
+        return [Money::class => true];
+    }
+}
+```
+
+Register it with Symfony's serializer:
+
+```yaml
+services:
+    App\Serializer\Normalizer\MoneyNormalizer:
+        tags: ['serializer.normalizer']
+```
+
+Your custom types will now be automatically serialized/deserialized in inbox messages!
 
 ### Example with Value Objects
 
@@ -166,9 +221,9 @@ final class GenericMessageHandler
 Use stamps to access message metadata:
 
 ```php
-use Freyr\Messenger\Inbox\Stamp\MessageNameStamp;
-use Freyr\Messenger\Inbox\Stamp\MessageIdStamp;
-use Symfony\Component\Messenger\Stamp\ReceivedStamp;
+use Freyr\MessageBroker\Inbox\Stamp\MessageNameStamp;
+use Freyr\MessageBroker\Inbox\Stamp\MessageIdStamp;
+use Symfony\Component\Messenger\Envelope;
 
 #[AsMessageHandler]
 final class OrderPlacedHandler
@@ -205,7 +260,7 @@ final class OrderPlacedHandler
 
 You can gradually migrate:
 
-1. **Add TypedInboxSerializer** with empty message type mapping
+1. **Add InboxSerializer** with empty message type mapping
 2. **Add one message type** at a time to the mapping
 3. **Update handler** to use typed parameter
 4. **Test** thoroughly

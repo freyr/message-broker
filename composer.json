@@ -28,6 +28,8 @@
         "symfony/http-kernel": "^6.4|^7.0",
         "symfony/amqp-messenger": "^6.4|^7.0",
         "symfony/doctrine-messenger": "^6.4|^7.0",
+        "symfony/serializer": "^6.4|^7.0",
+        "symfony/property-access": "^6.4|^7.0",
         "doctrine/dbal": "^3.0|^4.0",
         "doctrine/orm": "^3.0",
         "freyr/identity": "^0.2",

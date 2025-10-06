@@ -33,7 +33,7 @@ Unmatched Events → DLQ Transport
 ## Components
 
 ### 1. Outbox Serializer
-**Location:** `src/Outbox/Serializer/OutboxEventSerializer.php`
+**Location:** `src/Outbox/Serializer/OutboxSerializer.php`
 
 - Serializes domain events to JSON with semantic event names
 - **Extracts and validates `messageId` (UUID v7) from event objects** ✨
@@ -148,14 +148,14 @@ framework:
             # Outbox - stores events in database
             outbox:
                 dsn: 'doctrine://default?queue_name=outbox'
-                serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxEventSerializer'
+                serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxSerializer'
                 options:
                     auto_setup: false
 
             # AMQP - publishes to RabbitMQ
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
-                serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxEventSerializer'
+                serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxSerializer'
                 options:
                     auto_setup: true
                     exchange:
@@ -235,7 +235,7 @@ $this->eventBus->dispatch(new UserRegistered(
 
 The event is automatically:
 1. Validated for `messageId` presence
-2. Serialized by `OutboxEventSerializer` (includes `message_id` in JSON)
+2. Serialized by `OutboxSerializer` (includes `message_id` in JSON)
 3. Stored in `messenger_messages` table (same transaction)
 4. Committed with your business data
 

@@ -18,7 +18,7 @@ use ReflectionClass;
  *
  * Override with attributes:
  * - #[AmqpExchange('custom.exchange')] - override exchange
- * - #[AmqpRoutingKey('custom.*.key')] - override routing key (supports wildcards)
+ * - #[AmqpRoutingKey('custom.account.key')] - override routing key (supports wildcards)
  */
 final readonly class DefaultAmqpRoutingStrategy implements AmqpRoutingStrategyInterface
 {

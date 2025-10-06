@@ -18,6 +18,3 @@ message_broker:
     outbox:
         # Table name for outbox messages (uses binary UUID v7 as PK)
         table_name: messenger_outbox
-
-        # Dead Letter Queue transport (for unmatched events)
-        dlq_transport: dlq

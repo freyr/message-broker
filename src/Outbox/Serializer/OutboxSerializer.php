@@ -7,20 +7,25 @@ namespace Freyr\MessageBroker\Outbox\Serializer;
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
 use ReflectionClass;
-use ReflectionNamedType;
 use Freyr\MessageBroker\Outbox\MessageName;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\MessageDecodingFailedException;
 use Symfony\Component\Messenger\Stamp\BusNameStamp;
-use Symfony\Component\Messenger\Transport\Serialization\SerializerInterface;
+use Symfony\Component\Messenger\Transport\Serialization\SerializerInterface as MessengerSerializerInterface;
+use Symfony\Component\Serializer\SerializerInterface;
 
 /**
- * Outbox Event Serializer.
+ * Outbox Serializer.
  *
  * Serializes domain events to JSON with semantic event names.
+ * Uses Symfony Serializer with custom normalizers for proper type handling.
  */
-final readonly class OutboxEventSerializer implements SerializerInterface
+final readonly class OutboxSerializer implements MessengerSerializerInterface
 {
+    public function __construct(
+        private SerializerInterface $serializer,
+    ) {
+    }
     /**
      * @param array<string, mixed> $encodedEnvelope
      */
@@ -61,7 +66,7 @@ final readonly class OutboxEventSerializer implements SerializerInterface
         /** @var array<string, mixed> $payload - json_decode with true returns string keys */
         $payload = $rawPayload;
 
-        $event = $this->hydrateEvent($eventClass, $payload);
+        $event = $this->serializer->denormalize($payload, $eventClass);
 
         return new Envelope($event, [
             new BusNameStamp('event.bus'),
@@ -76,7 +81,7 @@ final readonly class OutboxEventSerializer implements SerializerInterface
         $event = $envelope->getMessage();
         $messageName = $this->extractMessageName($event);
         $messageId = $this->extractMessageId($event);
-        $payload = $this->serializeEvent($event);
+        $payload = $this->serializer->normalize($event);
 
         $body = json_encode([
             'message_name' => $messageName,
@@ -145,105 +150,5 @@ final readonly class OutboxEventSerializer implements SerializerInterface
         }
 
         return $messageId;
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function serializeEvent(object $event): array
-    {
-        $reflection = new ReflectionClass($event);
-        $properties = $reflection->getProperties(\ReflectionProperty::IS_PUBLIC);
-
-        /** @var array<string, mixed> $data */
-        $data = [];
-        foreach ($properties as $property) {
-            $name = $property->getName();
-            $value = $property->getValue($event);
-            $data[$name] = $this->serializeValue($value);
-        }
-
-        return $data;
-    }
-
-    private function serializeValue(mixed $value): mixed
-    {
-        return match (true) {
-            $value instanceof Id => $value->__toString(),
-            $value instanceof CarbonImmutable => $value->toIso8601String(),
-            $value instanceof \DateTimeInterface => $value->format(\DateTimeInterface::ATOM),
-            $value instanceof \BackedEnum => $value->value,
-            is_array($value) => array_map($this->serializeValue(...), $value),
-            is_object($value) => throw new \RuntimeException(
-                sprintf('Cannot serialize object of type %s', $value::class)
-            ),
-            default => $value,
-        };
-    }
-
-    /**
-     * @param class-string $eventClass
-     * @param array<string, mixed> $payload
-     */
-    private function hydrateEvent(string $eventClass, array $payload): object
-    {
-        /** @var ReflectionClass<object> $reflection */
-        $reflection = new ReflectionClass($eventClass);
-        $constructor = $reflection->getConstructor();
-
-        if ($constructor === null) {
-            throw new MessageDecodingFailedException("Event {$eventClass} has no constructor");
-        }
-
-        /** @var array<int, mixed> $parameters */
-        $parameters = [];
-        foreach ($constructor->getParameters() as $param) {
-            $name = $param->getName();
-            $value = $payload[$name] ?? null;
-
-            if ($value === null && !$param->allowsNull()) {
-                throw new MessageDecodingFailedException("Missing required parameter: {$name}");
-            }
-
-            $type = $param->getType();
-            if ($type instanceof ReflectionNamedType) {
-                $value = $this->deserializeValue($value, $type);
-            }
-
-            $parameters[] = $value;
-        }
-
-        return $reflection->newInstanceArgs($parameters);
-    }
-
-    private function deserializeValue(mixed $value, ReflectionNamedType $type): mixed
-    {
-        if ($value === null) {
-            return null;
-        }
-
-        $typeName = $type->getName();
-
-        return match ($typeName) {
-            Id::class => is_string($value)
-                ? Id::fromString($value)
-                : throw new MessageDecodingFailedException('Id value must be a string'),
-            CarbonImmutable::class => is_string($value)
-                ? CarbonImmutable::parse($value)
-                : throw new MessageDecodingFailedException('CarbonImmutable value must be a string'),
-            \DateTimeImmutable::class => is_string($value)
-                ? new \DateTimeImmutable($value)
-                : throw new MessageDecodingFailedException('DateTimeImmutable value must be a string'),
-            'int' => is_int($value) ? $value : (is_numeric($value) ? (int) $value : throw new MessageDecodingFailedException('Value cannot be cast to int')),
-            'float' => is_float($value) ? $value : (is_numeric($value) ? (float) $value : throw new MessageDecodingFailedException('Value cannot be cast to float')),
-            'bool' => (bool) $value,
-            'string' => is_string($value) ? $value : (is_scalar($value) ? (string) $value : throw new MessageDecodingFailedException('Value cannot be cast to string')),
-            'array' => (array) $value,
-            default => is_a($typeName, \BackedEnum::class, true)
-                ? (is_int($value) || is_string($value)
-                    ? $typeName::from($value)
-                    : throw new MessageDecodingFailedException('Enum value must be int or string'))
-                : $value,
-        };
     }
 }

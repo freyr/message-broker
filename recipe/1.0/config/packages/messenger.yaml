@@ -7,33 +7,27 @@ framework:
             # Outbox transport - stores events in database with transactional guarantees
             outbox:
                 dsn: 'outbox://default?table_name=messenger_outbox&queue_name=outbox'
-                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer'
+                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
                 options:
                     auto_setup: false  # Use migrations instead
 
             # Inbox transport - receives messages from AMQP with deduplication
             inbox:
                 dsn: 'inbox://default?table_name=messenger_inbox&queue_name=inbox'
-                serializer: 'Freyr\MessageBroker\Inbox\Serializer\TypedInboxSerializer'
+                serializer: 'Freyr\MessageBroker\Inbox\Serializer\InboxSerializer'
                 options:
                     auto_setup: false  # Use migrations instead
 
             # AMQP transport - external message broker
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
-                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxEventSerializer'
+                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
                 options:
                     auto_setup: false
                 retry_strategy:
                     max_retries: 3
                     delay: 1000
                     multiplier: 2
-
-            # Dead Letter Queue - for unmatched outbox events
-            dlq:
-                dsn: 'doctrine://default?queue_name=dlq'
-                options:
-                    auto_setup: false
 
             # Failed transport - for all failed messages
             failed:

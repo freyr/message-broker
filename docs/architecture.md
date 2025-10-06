@@ -93,28 +93,33 @@ messenger/
 
 | Component | Purpose |
 |-----------|---------|
-| `DoctrineDedupConnection` | Custom Doctrine connection using INSERT IGNORE for deduplication |
-| `DoctrineDedupTransport` | Wrapper transport with dedup connection |
-| `DoctrineDedupTransportFactory` | Factory for creating dedup transport instances |
+| `DoctrineInboxConnection` | Custom Doctrine connection using INSERT IGNORE with binary UUID v7 for deduplication |
+| `DoctrineInboxTransportFactory` | Factory for creating inbox transport with custom DSN (inbox://) |
 | `InboxEventMessage` | Message DTO wrapping external events |
-| `InboxEventSerializer` | Serializes messages with message_id in headers |
-| `InboxEventMessageHandler` | Routes messages to domain handlers |
-| `EventHandlerRegistry` | Registry mapping event names to handlers |
-| `ConsumeAmqpToMessengerCommand` | AMQP consumer dispatching to Messenger |
+| `InboxSerializer` | Deserializes JSON to typed PHP objects using Symfony Serializer |
+| `ConsumeAmqpToMessengerCommand` | AMQP consumer dispatching to inbox transport |
+| `AmqpSetupCommand` | Sets up AMQP queues and exchanges |
+| `MessageNameStamp` | Stamp containing semantic message name |
+| `MessageIdStamp` | Stamp containing message UUID for tracing |
+| `SourceQueueStamp` | Stamp containing source AMQP queue name |
 
 ### Outbox Components
 
 | Component | Purpose |
 |-----------|---------|
-| `OutboxEventSerializer` | Serializes domain events to JSON with semantic names |
+| `DoctrineOutboxConnection` | Custom Doctrine connection for outbox with binary UUID v7 |
+| `DoctrineOutboxTransportFactory` | Factory for creating outbox transport with custom DSN (outbox://) |
+| `OutboxSerializer` | Serializes domain events to JSON using Symfony Serializer |
 | `OutboxToAmqpBridge` | Consumes from outbox and publishes to AMQP |
 | `AmqpRoutingStrategyInterface` | Strategy for AMQP routing configuration |
-| `DefaultAmqpRoutingStrategy` | Default routing implementation |
-| `CleanupOutboxCommand` | Cleanup old processed messages |
+| `DefaultAmqpRoutingStrategy` | Convention-based routing with attribute overrides |
+| `MessageName` | Attribute for marking events with semantic names |
+| `CleanupOutboxCommand` | Cleanup old delivered messages |
 
 ## Technology Stack
 
 - **Symfony Messenger:** Core messaging framework
+- **Symfony Serializer:** Object normalization/denormalization with extensible normalizers
 - **Doctrine DBAL:** Database operations and custom types
 - **php-amqplib:** AMQP protocol implementation
 - **freyr/identity:** UUID v7 generation and binary storage
@@ -160,17 +165,8 @@ messenger/
 
 ## Extension Points
 
-1. **Custom Routing:** Implement `AmqpRoutingStrategyInterface`
-2. **Custom Serialization:** Extend serializers for custom types
-3. **Custom Handlers:** Register handlers via `app.event_handler` tag
+1. **Custom Routing:** Implement `AmqpRoutingStrategyInterface` for custom AMQP routing logic
+2. **Custom Type Serialization:** Add normalizers tagged with `serializer.normalizer` for custom value objects
+3. **Custom Handlers:** Standard Symfony Messenger handlers with `#[AsMessageHandler]` attribute
 4. **Monitoring:** Add custom middleware to Messenger bus
 5. **Cleanup Policies:** Customize retention in cleanup command
-
-## Future Enhancements
-
-- [ ] Dead letter queue support
-- [ ] Metrics and monitoring integration (Prometheus)
-- [ ] Multi-tenancy support
-- [ ] Event versioning and schema evolution
-- [ ] Saga pattern support
-- [ ] GraphQL subscription integration

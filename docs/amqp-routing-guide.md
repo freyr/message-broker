@@ -16,13 +16,15 @@ user.account.created   → exchange: user.account
 ```
 
 ### Routing Key
-**Rule:** Full message name
+**Rule:** Full message name (always a concrete value, NO wildcards)
 
 ```
 order.placed           → routing_key: order.placed
 sla.calculation.started → routing_key: sla.calculation.started
 user.account.created   → routing_key: user.account.created
 ```
+
+**Important:** Routing keys are set by the **publisher** and must be concrete strings. They cannot contain wildcards like `*` or `#`. Wildcards are used in **binding keys** on the consumer side when binding queues to topic exchanges.
 
 ### AMQP Headers
 Additional metadata headers are automatically added:
@@ -41,7 +43,7 @@ Additional metadata headers are automatically added:
 ### Example 1: Standard Event
 
 ```php
-use Freyr\Messenger\Outbox\MessageName;
+use Freyr\MessageBroker\Outbox\MessageName;
 use Freyr\Identity\Id;
 
 #[MessageName('order.placed')]
@@ -57,8 +59,12 @@ final readonly class OrderPlaced
 
 **AMQP Routing:**
 - Exchange: `order.placed`
-- Routing Key: `order.placed`
-- Works with topic exchange bindings like `order.*`, `order.placed`, `*.placed`
+- Routing Key: `order.placed` (concrete value)
+
+**Consumer Binding Keys** (on queue side):
+- `order.*` - Receives all order events
+- `order.placed` - Receives only order.placed events
+- `*.placed` - Receives all placed events across domains
 
 ### Example 2: Multi-Part Event
 
@@ -103,36 +109,65 @@ final readonly class OrderPlaced
 
 ### Override Routing Key
 
-Use `#[AmqpRoutingKey]` to specify a custom routing key:
+Use `#[AmqpRoutingKey]` to specify a custom routing key (must be concrete, NO wildcards):
 
 ```php
-use Freyr\Messenger\Outbox\Routing\AmqpRoutingKey;
+use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingKey;
 
 #[MessageName('user.premium.upgraded')]
-#[AmqpRoutingKey('user.*.upgraded')]  // Wildcard pattern
+#[AmqpRoutingKey('user.upgraded')]  // Simplified routing key
 final readonly class UserPremiumUpgraded
 {
     // Exchange: user.premium (default)
-    // Routing Key: user.*.upgraded (overridden)
+    // Routing Key: user.upgraded (overridden)
 }
 ```
 
 **Use Cases:**
-- Wildcard routing patterns
-- Consolidating multiple event types
-- Custom binding schemes
+- Legacy system compatibility (specific routing key format)
+- Simplified routing keys for consolidation
+- Custom routing schemes
+- Backward compatibility with existing queues
+
+**Important:** The `#[AmqpRoutingKey]` attribute sets the routing key used by the **publisher**. It must be a concrete string value. To match multiple routing keys, use wildcard **binding keys** when binding queues to exchanges on the consumer side.
 
 ### Override Both
 
 ```php
 #[MessageName('legacy.system.notification')]
 #[AmqpExchange('legacy.events')]
-#[AmqpRoutingKey('legacy.#')]
+#[AmqpRoutingKey('legacy.notification')]  // Concrete value, no wildcards
 final readonly class LegacySystemNotification
 {
     // Exchange: legacy.events (overridden)
-    // Routing Key: legacy.# (overridden)
+    // Routing Key: legacy.notification (overridden)
 }
+```
+
+## Understanding Routing Keys vs Binding Keys
+
+### Routing Key (Publisher Side)
+- Set by the **publisher** when sending a message
+- Must be a **concrete string** value (e.g., `order.placed`, `user.registered`)
+- **NO wildcards allowed** (`*` or `#`)
+- Specified via `#[AmqpRoutingKey]` attribute or derived from message name
+
+### Binding Key (Consumer Side)
+- Set when **binding a queue to an exchange**
+- **CAN use wildcards** for topic exchanges:
+  - `*` (star) - matches exactly one word
+  - `#` (hash) - matches zero or more words
+- Examples: `order.*`, `*.placed`, `user.#`
+
+**Example:**
+```
+Publisher sends:         routing_key: "order.placed"
+Queue bound with:        binding_key: "order.*"
+Result: Message matches! ✅
+
+Publisher sends:         routing_key: "user.registered"
+Queue bound with:        binding_key: "order.*"
+Result: No match ❌
 ```
 
 ## RabbitMQ Exchange Setup
@@ -146,14 +181,14 @@ rabbitmqadmin declare exchange name=order.placed type=topic durable=true
 # Create queue
 rabbitmqadmin declare queue name=order.processing durable=true
 
-# Bind with wildcard pattern
+# Bind queue with BINDING KEY pattern (consumer side - wildcards allowed)
 rabbitmqadmin declare binding source=order.placed destination=order.processing routing_key="order.*"
 ```
 
-**Supports flexible routing:**
-- `order.*` - All order events
-- `order.placed` - Only order.placed events
-- `*.placed` - All placed events across domains
+**Binding Key Patterns:**
+- `order.*` - Matches all order events (e.g., `order.placed`, `order.cancelled`)
+- `order.placed` - Matches only `order.placed` events (exact match)
+- `*.placed` - Matches all placed events across domains (e.g., `order.placed`, `user.placed`)
 
 ### Declarative Setup (AmqpSetupCommand)
 
@@ -179,11 +214,13 @@ $config = [
         [
             'queue' => 'order.processing',
             'exchange' => 'order.placed',
-            'routing_key' => 'order.*',
+            'routing_key' => 'order.*',  // BINDING KEY - wildcards allowed!
         ],
     ],
 ];
 ```
+
+**Note:** The `routing_key` in bindings is actually a **binding key** (consumer side), so wildcards like `*` and `#` are allowed here.
 
 ## Routing Strategy Configuration
 
@@ -192,8 +229,8 @@ $config = [
 ```yaml
 # config/services.yaml
 services:
-    Freyr\Messenger\Outbox\Routing\AmqpRoutingStrategyInterface:
-        class: Freyr\Messenger\Outbox\Routing\DefaultAmqpRoutingStrategy
+    Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface:
+        class: Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy
 ```
 
 The default strategy:
@@ -207,7 +244,7 @@ The default strategy:
 Implement your own routing logic:
 
 ```php
-use Freyr\Messenger\Outbox\Routing\AmqpRoutingStrategyInterface;
+use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface;
 
 final readonly class CustomAmqpRoutingStrategy implements AmqpRoutingStrategyInterface
 {
@@ -224,7 +261,7 @@ final readonly class CustomAmqpRoutingStrategy implements AmqpRoutingStrategyInt
 
     public function getRoutingKey(object $event, string $messageName): string
     {
-        // Custom routing key logic
+        // Custom routing key logic - MUST return concrete string, NO wildcards
         return $messageName;
     }
 
@@ -290,7 +327,7 @@ When using overrides, document the reasoning:
  */
 #[MessageName('user.migrated')]
 #[AmqpExchange('legacy.events')]
-#[AmqpRoutingKey('user.#')]
+#[AmqpRoutingKey('user.migration')]  // Concrete routing key
 final readonly class UserMigrated { ... }
 ```
 
@@ -360,17 +397,17 @@ Override to use shared exchange:
 
 All commerce events → single `commerce` exchange with topic routing.
 
-### Pattern 3: Wildcard Routing Keys
+### Pattern 3: Simplified Routing Keys
 
 ```php
 #[MessageName('notification.email.sent')]
-#[AmqpRoutingKey('notification.*.sent')]
+#[AmqpRoutingKey('notification.sent')]  // Simplified to common key
 
 #[MessageName('notification.sms.sent')]
-#[AmqpRoutingKey('notification.*.sent')]
+#[AmqpRoutingKey('notification.sent')]  // Same routing key
 ```
 
-Both routed to consumers interested in `notification.*.sent` pattern.
+Both use the same concrete routing key `notification.sent`. Consumers bind with `notification.*` binding key to receive all notification events.
 
 ## Migration Guide
 
@@ -403,13 +440,25 @@ rabbitmqadmin declare binding source=user.registered destination=my.queue routin
 
 ## Reference
 
+### Key Distinction
+
+**Publisher (Routing Keys):**
+- Set via attributes on event classes
+- Must be **concrete strings** (no wildcards)
+- Examples: `order.placed`, `user.registered`, `notification.sent`
+
+**Consumer (Binding Keys):**
+- Set when binding queues to exchanges in RabbitMQ
+- **CAN use wildcards** (`*` and `#`)
+- Examples: `order.*`, `*.placed`, `user.#`
+
 ### Attributes
 
-| Attribute | Purpose | Example |
-|-----------|---------|---------|
-| `#[MessageName]` | Define message name (required) | `#[MessageName('order.placed')]` |
-| `#[AmqpExchange]` | Override exchange | `#[AmqpExchange('commerce')]` |
-| `#[AmqpRoutingKey]` | Override routing key | `#[AmqpRoutingKey('order.*')]` |
+| Attribute | Purpose | Example | Wildcards Allowed |
+|-----------|---------|---------|-------------------|
+| `#[MessageName]` | Define message name (required) | `#[MessageName('order.placed')]` | ❌ No |
+| `#[AmqpExchange]` | Override exchange name | `#[AmqpExchange('commerce')]` | ❌ No |
+| `#[AmqpRoutingKey]` | Override routing key (publisher) | `#[AmqpRoutingKey('order.event')]` | ❌ No - concrete value only |
 
 ### Default Behavior
 

@@ -91,7 +91,7 @@ Tests inbox pattern functionality:
 
 ✅ Messages saved to `messenger_inbox` with `message_id` as PK
 ✅ Deduplication via `INSERT IGNORE` prevents duplicates
-✅ `TypedInboxSerializer` deserializes to typed PHP objects
+✅ `InboxSerializer` deserializes to typed PHP objects
 ✅ Multiple message types handled correctly
 ✅ Missing `message_id` throws exception
 
