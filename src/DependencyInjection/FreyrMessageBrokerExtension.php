@@ -21,7 +21,6 @@ final class FreyrMessageBrokerExtension extends Extension
         $container->setParameter('message_broker.inbox.message_types', $config['inbox']['message_types']);
         $container->setParameter('message_broker.inbox.failed_transport', $config['inbox']['failed_transport']);
         $container->setParameter('message_broker.outbox.table_name', $config['outbox']['table_name']);
-        $container->setParameter('message_broker.outbox.dlq_transport', $config['outbox']['dlq_transport']);
 
         $loader = new YamlFileLoader(
             $container,

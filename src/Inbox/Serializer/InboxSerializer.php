@@ -25,12 +25,12 @@ use Symfony\Component\Serializer\SerializerInterface;
 final readonly class InboxSerializer implements MessengerSerializerInterface
 {
     /**
-     * @param array<string, class-string> $messageTypes Mapping of message_name => PHP class
      * @param SerializerInterface $serializer Symfony serializer with custom normalizers
+     * @param array<string, class-string> $messageTypes Mapping of message_name => PHP class
      */
     public function __construct(
-        private array $messageTypes = [],
         private SerializerInterface $serializer,
+        private array $messageTypes = [],
     ) {
     }
 

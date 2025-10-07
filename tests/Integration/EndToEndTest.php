@@ -56,7 +56,7 @@ final class EndToEndTest extends IntegrationTestCase
             'sla.calculation.started' => SlaCalculationStartedMessage::class,
             'user.premium.upgraded' => UserPremiumUpgradedMessage::class,
         ];
-        $this->inboxSerializer = new InboxSerializer($messageTypes, $this->createSerializer());
+        $this->inboxSerializer = new InboxSerializer($this->createSerializer(), $messageTypes);
         $this->routingStrategy = new DefaultAmqpRoutingStrategy();
     }
 

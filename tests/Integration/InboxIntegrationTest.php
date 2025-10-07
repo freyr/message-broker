@@ -42,7 +42,7 @@ final class InboxIntegrationTest extends IntegrationTestCase
             'user.premium.upgraded' => UserPremiumUpgradedMessage::class,
         ];
 
-        $this->serializer = new InboxSerializer($messageTypes, $this->createSerializer());
+        $this->serializer = new InboxSerializer($this->createSerializer(), $messageTypes);
 
         // Create inbox transport with custom connection
         $config = Connection::buildConfiguration(

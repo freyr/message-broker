@@ -34,7 +34,8 @@
         "doctrine/orm": "^3.0",
         "freyr/identity": "^0.2",
         "php-amqplib/php-amqplib": "^3.7",
-        "nesbot/carbon": "^2.0|^3.0"
+        "nesbot/carbon": "^2.0|^3.0",
+        "ext-curl": "*"
     },
     "require-dev": {
         "phpstan/phpstan": "^2.1",

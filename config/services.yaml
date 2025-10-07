@@ -31,16 +31,19 @@ services:
     # Users must configure this in their own services.yaml with message_types parameter
     Freyr\MessageBroker\Inbox\Serializer\InboxSerializer:
         arguments:
-            $messageTypes: '%message_broker.inbox.message_types%'
             $serializer: '@serializer'
+            $messageTypes: '%message_broker.inbox.message_types%'
 
     # Inbox Commands
     Freyr\MessageBroker\Inbox\Command\AmqpInboxIngestCommand:
         arguments:
             $messageBus: '@messenger.default_bus'
+            $amqpDsn: '%env(MESSENGER_AMQP_DSN)%'
         tags: ['console.command']
 
     Freyr\MessageBroker\Inbox\Command\AmqpSetupCommand:
+        arguments:
+            $amqpDsn: '%env(MESSENGER_AMQP_DSN)%'
         tags: ['console.command']
 
     # Outbox Serializer

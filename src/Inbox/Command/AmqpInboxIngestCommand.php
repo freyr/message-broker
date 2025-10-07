@@ -31,15 +31,25 @@ use Symfony\Component\Messenger\Stamp\TransportNamesStamp;
 )]
 final class AmqpInboxIngestCommand extends Command
 {
+    private readonly string $amqpHost;
+    private readonly int $amqpPort;
+    private readonly string $amqpUser;
+    private readonly string $amqpPassword;
+    private readonly string $amqpVhost;
+
     public function __construct(
         private readonly MessageBusInterface $messageBus,
-        private readonly string $amqpHost = 'localhost',
-        private readonly int $amqpPort = 5672,
-        private readonly string $amqpUser = 'guest',
-        private readonly string $amqpPassword = 'guest',
-        private readonly string $amqpVhost = '/',
+        string $amqpDsn = 'amqp://guest:guest@localhost:5672/%2f',
     ) {
         parent::__construct();
+
+        // Parse AMQP DSN
+        $parsed = parse_url($amqpDsn);
+        $this->amqpHost = $parsed['host'] ?? 'localhost';
+        $this->amqpPort = $parsed['port'] ?? 5672;
+        $this->amqpUser = $parsed['user'] ?? 'guest';
+        $this->amqpPassword = $parsed['pass'] ?? 'guest';
+        $this->amqpVhost = isset($parsed['path']) ? urldecode(ltrim($parsed['path'], '/')) : '/';
     }
 
     protected function configure(): void

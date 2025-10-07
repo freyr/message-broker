@@ -55,7 +55,7 @@ final class MessengerNativeTest extends IntegrationTestCase
         $messageTypes = [
             'order.placed' => OrderPlacedMessage::class,
         ];
-        $this->inboxTransport = new DoctrineTransport($inboxConnection, new InboxSerializer($messageTypes, $this->createSerializer()));
+        $this->inboxTransport = new DoctrineTransport($inboxConnection, new InboxSerializer($this->createSerializer(), $messageTypes));
 
         // Setup message bus with handlers
         $this->bus = $this->createMessageBus();
