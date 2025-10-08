@@ -32,18 +32,25 @@ Domain Event → Event Bus (Messenger) → Outbox Transport (doctrine://)
 - **Convention-Based Routing:** Automatic routing with attribute overrides
 
 ### Inbox Pattern (Consuming Events)
-Events are consumed from AMQP with deduplication using binary UUID v7 as primary key:
+Events are consumed from AMQP natively with deduplication using middleware-based approach:
 
 ```
-AMQP (RabbitMQ) → ConsumeAmqpToMessengerCommand (php-amqplib)
-→ Extract message_id → Create InboxEventMessage → Messenger Inbox Transport (inbox://)
-→ INSERT IGNORE with id as PK (automatic deduplication)
-→ messenger:consume inbox (SKIP LOCKED) → InboxEventMessageHandler
-→ EventHandlerRegistry → Domain Event Handlers
+AMQP Transport (native Symfony Messenger)
+→ MessageNameSerializer translates 'type' header (semantic name → FQN)
+→ Native Symfony Serializer deserializes body + stamps from X-Message-Stamp-* headers
+→ Routes to handler (based on PHP class)
+→ DeduplicationMiddleware (checks message_broker_deduplication table)
+→ If duplicate: skip handler | If new: INSERT + process
+→ Application Handler → Business Logic (all within transaction)
 ```
 
-### Key Innovation: Custom Doctrine Transport with INSERT IGNORE
-The `DoctrineInboxConnection` extends Symfony's `DoctrineTransport` to use binary UUID v7 (from `message_id` header) as primary key with `INSERT IGNORE` for database-level deduplication.
+### Key Innovation: "Fake FQN" Pattern + Native Stamp Handling
+- **Native Transport**: Uses Symfony Messenger's built-in AMQP transport (no custom commands)
+- **MessageNameSerializer**: Translates semantic message names (e.g., `order.placed`) in `type` header to PHP FQN, then delegates to native Symfony Serializer
+- **Native Stamp Handling**: Stamps (MessageIdStamp, MessageNameStamp) automatically serialized/deserialized via `X-Message-Stamp-*` headers by Symfony
+- **DeduplicationMiddleware**: Runs AFTER `doctrine_transaction` middleware (priority -10), ensuring deduplication checks happen within the transaction
+- **Atomic Guarantees**: If handler succeeds, both deduplication entry and business logic changes are committed atomically
+- **Retry Safety**: If handler fails, transaction rolls back, allowing message to be retried
 
 ## Directory Structure
 
@@ -53,19 +60,16 @@ messenger/
 │   ├── Doctrine/                   # Doctrine Integration
 │   │   └── Type/                   # IdType (binary UUID v7 Doctrine type)
 │   ├── Inbox/                      # Inbox Pattern Implementation
-│   │   ├── Command/                # ConsumeAmqpToMessengerCommand, AmqpSetupCommand
-│   │   ├── Message/                # InboxEventMessage (wrapper DTO)
-│   │   ├── Serializer/             # InboxSerializer
-│   │   ├── Stamp/                  # MessageNameStamp, MessageIdStamp, SourceQueueStamp
-│   │   └── Transport/              # DoctrineInboxConnection, DoctrineInboxTransportFactory
+│   │   └── Stamp/                  # MessageNameStamp, MessageIdStamp
 │   ├── Outbox/                     # Outbox Pattern Implementation
 │   │   ├── Command/                # CleanupOutboxCommand (generic, DBAL-based)
-│   │   ├── EventBridge/            # OutboxToAmqpBridge (AMQP publisher)
+│   │   ├── EventBridge/            # OutboxToAmqpBridge (adds MessageIdStamp)
 │   │   ├── Routing/                # AmqpRoutingStrategyInterface, DefaultAmqpRoutingStrategy
-│   │   ├── Serializer/             # OutboxSerializer (validates messageId)
 │   │   └── MessageName.php         # Attribute for marking messages with semantic names
-│   └── Serializer/                 # Serialization Infrastructure ✨
-│       └── Normalizer/             # Built-in normalizers (IdNormalizer, CarbonImmutableNormalizer)
+│   ├── Serializer/                 # Serialization Infrastructure ✨
+│   │   ├── MessageNameSerializer.php  # Unified serializer for inbox & outbox (translates semantic names)
+│   │   └── Normalizer/             # Built-in normalizers (IdNormalizer, CarbonImmutableNormalizer)
+│   └── DeduplicationMiddleware.php # Middleware for inbox deduplication ✨
 ├── docs/                           # Comprehensive architecture documentation
 ├── config/                         # Configuration examples (empty placeholder)
 └── README.md                       # Full user guide
@@ -78,17 +82,19 @@ messenger/
 php bin/console messenger:consume outbox -vv
 ```
 
-### Running Inbox Consumer (AMQP to Messenger)
+### Running Inbox Consumer (AMQP to Handlers)
 **Prerequisites**: Queue must already exist in RabbitMQ with proper bindings configured.
 
+Consume directly from AMQP transport (one worker per queue):
 ```bash
-php bin/console inbox:ingest --queue=your.queue
+# Example: consume from amqp_orders transport
+php bin/console messenger:consume amqp_orders -vv
 ```
 
-### Running Inbox Worker (Processing)
-```bash
-php bin/console messenger:consume inbox -vv
-```
+Messages are automatically:
+1. Deserialized by InboxSerializer into typed PHP objects
+2. Deduplicated by DeduplicationMiddleware
+3. Routed to handlers based on PHP class
 
 ### Testing Deduplication
 ```bash
@@ -119,19 +125,23 @@ php bin/console messenger:cleanup-outbox --days=7 --batch-size=1000
 
 ## Configuration Requirements
 
-### Database Schema - 3-Table Architecture
+### Database Schema - 3-Table Architecture (+ Optional Inbox Buffer)
 
 **IMPORTANT:** The package uses a **3-table approach** for optimal performance:
 
-1. **`messenger_outbox`** - Dedicated outbox table (isolated from inbox)
-2. **`messenger_inbox`** - Dedicated inbox table (binary UUID PK with INSERT IGNORE)
+1. **`messenger_outbox`** - Dedicated outbox table for publishing events
+2. **`message_broker_deduplication`** - Deduplication tracking (binary UUID v7 PK)
 3. **`messenger_messages`** - Standard table for failed messages (shared monitoring)
+4. **`messenger_inbox`** (Optional) - Buffer table if you want to store consumed AMQP messages before processing
 
 **Benefits:**
-- ✅ No lock contention between inbox/outbox
+- ✅ Native AMQP transport consumption (no custom commands)
+- ✅ Middleware-based deduplication (more native to Symfony Messenger)
+- ✅ Transactional guarantees (deduplication + handler in same transaction)
 - ✅ Optimized indexes per use case
 - ✅ Independent cleanup policies
 - ✅ Unified failed message monitoring
+- ✅ Flexible: Direct AMQP→Handler or AMQP→Inbox→Handler
 
 See `docs/database-schema.md` for complete migration examples.
 
@@ -143,25 +153,37 @@ framework:
     messenger:
         failure_transport: failed
 
+        # Middleware configuration - critical for deduplication
+        default_middleware:
+            enabled: true
+            allow_no_handlers: false
+
+        buses:
+            messenger.bus.default:
+                middleware:
+                    - doctrine_transaction  # Priority 0 (starts transaction)
+                    # DeduplicationMiddleware (priority -10) registered via service tag
+                    # Runs after transaction starts, before handlers
+
         transports:
             # Outbox - dedicated table for performance isolation
             outbox:
                 dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
-                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
+                serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
                 options:
                     auto_setup: false  # Use migrations
 
-            # Inbox - dedicated table with custom transport
+            # Inbox - standard Doctrine transport with middleware deduplication
             inbox:
-                dsn: 'inbox://default?table_name=messenger_inbox&queue_name=inbox'
-                serializer: 'Freyr\MessageBroker\Inbox\Serializer\InboxSerializer'
+                dsn: 'doctrine://default?table_name=messenger_inbox&queue_name=inbox'
+                serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
                 options:
                     auto_setup: false  # Use migrations
 
             # AMQP - external broker
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
-                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
+                serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
 
             # Failed - standard messenger_messages table
             failed:
@@ -173,9 +195,10 @@ framework:
             # Outbox messages
             'App\Domain\Event\YourEvent': outbox
 
-            # Inbox messages (route by PHP class)
-            'App\Message\OrderPlaced': inbox
-            'App\Message\UserRegistered': inbox
+            # Inbox messages (route by typed PHP class)
+            # Example:
+            # 'App\Message\OrderPlaced': inbox
+            # 'App\Message\UserRegistered': inbox
 ```
 
 ### Doctrine Configuration
@@ -210,14 +233,21 @@ services:
     #     tags:
     #         - { name: 'serializer.normalizer', priority: 10 }  # Higher priority = earlier in chain
 
-    # Note: InboxSerializer and OutboxSerializer use Symfony's @serializer service
-    # which automatically collects all normalizers tagged with 'serializer.normalizer'
+    # Note: MessageNameSerializer extends native Symfony Serializer
+    # All normalizers tagged with 'serializer.normalizer' are automatically used
 
-    # Inbox Transport Factory (REQUIRED - registers inbox:// DSN)
-    Freyr\MessageBroker\Inbox\Transport\DoctrineInboxTransportFactory:
+    # Inbox Serializer (translates message_name to FQN, delegates to native) ✨
+    Freyr\MessageBroker\Serializer\MessageNameSerializer:
+        arguments:
+            $messageTypes: '%message_broker.inbox.message_types%'
+
+    # Deduplication Middleware (REQUIRED - inbox pattern) ✨
+    Freyr\MessageBroker\DeduplicationMiddleware:
         arguments:
             $connection: '@doctrine.dbal.default_connection'
-        tags: ['messenger.transport_factory']
+            $logger: '@logger'
+        tags:
+            - { name: 'messenger.middleware', priority: -10 }  # After doctrine_transaction
 
     # AMQP Routing Strategy (Outbox) ✨
     # Uses convention-based routing: first 2 parts of message name → exchange
@@ -226,11 +256,11 @@ services:
         class: Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy
 
     # Outbox Bridge (AMQP Publisher) ✨
+    # Adds MessageIdStamp to envelope - stamps automatically serialized to X-Message-Stamp-* headers
     Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
         arguments:
             $eventBus: '@messenger.default_bus'
             $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
-            $serializer: '@Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
             $logger: '@logger'
 
     # Cleanup Command (optional maintenance) ✨
@@ -278,21 +308,26 @@ See `docs/amqp-routing-guide.md` for complete routing documentation.
 
 **Tables:**
 1. **`messenger_outbox`** - Outbox-specific (binary(16) id, standard Doctrine transport)
-2. **`messenger_inbox`** - Inbox-specific (binary(16) id from message_id, INSERT IGNORE deduplication)
+2. **`message_broker_deduplication`** - Deduplication tracking (binary(16) message_id PK)
 3. **`messenger_messages`** - Standard (bigint auto-increment for failed)
 
+**Optional:**
+4. **`messenger_inbox`** - Optional buffer table (binary(16) id) if using inbox transport between AMQP and handlers
+
 **Key Points:**
-- Inbox and outbox use **separate tables** for performance isolation
-- Failed messages from both → `messenger_messages` table (unified monitoring)
+- Outbox table isolated for publishing performance
+- Failed messages → `messenger_messages` table (unified monitoring)
 - Required Doctrine custom type: `id_binary` (provided by `Freyr\MessageBroker\Doctrine\Type\IdType`)
 - Register the type in Doctrine configuration
-- Deduplication is handled at database level via primary key constraint with INSERT IGNORE
+- Deduplication is handled by **DeduplicationMiddleware** using `message_broker_deduplication` table
+- Middleware runs AFTER `doctrine_transaction` → atomic commit of deduplication entry + handler changes
+- **Recommended flow**: AMQP → InboxSerializer → DeduplicationMiddleware → Handler (no inbox transport needed)
 
 **See:** `docs/database-schema.md` for complete migration examples and rationale.
 
 ### Inbox Message Handling (Typed Objects)
 
-The inbox uses `InboxSerializer` to automatically deserialize JSON payloads into typed PHP objects:
+The inbox uses `MessageNameSerializer` to translate semantic message names to PHP classes, then Symfony's native serializer deserializes into typed PHP objects:
 
 **1. Define Message Class**
 ```php
@@ -314,15 +349,12 @@ final readonly class OrderPlaced
 
 **2. Configure Message Type Mapping**
 ```yaml
-# config/services.yaml
-parameters:
-    inbox.message_types:
-        'order.placed': 'App\Message\OrderPlaced'
-
-services:
-    Freyr\MessageBroker\Inbox\Serializer\InboxSerializer:
-        arguments:
-            $messageTypes: '%inbox.message_types%'
+# config/packages/message_broker.yaml
+message_broker:
+    inbox:
+        message_types:
+            'order.placed': 'App\Message\OrderPlaced'
+            'user.registered': 'App\Message\UserRegistered'
 ```
 
 **3. Use Standard Messenger Handlers**
@@ -344,9 +376,11 @@ final readonly class OrderPlacedHandler
 
 **Benefits:**
 - ✅ Type safety and IDE support
-- ✅ Automatic hydration from JSON
-- ✅ Supports value objects (Id, CarbonImmutable, enums)
-- ✅ Fallback to stdClass for unmapped messages
+- ✅ Native Symfony serialization (uses @serializer service)
+- ✅ Supports value objects (Id, CarbonImmutable, enums) via custom normalizers
+- ✅ Semantic message names (language-agnostic)
+- ✅ Stamps automatically handled via X-Message-Stamp-* headers
+- ✅ Minimal custom code (~50 lines in MessageNameSerializer)
 
 See `docs/inbox-typed-messages.md` for complete guide.
 
@@ -446,17 +480,29 @@ The `OutboxToAmqpBridge` is a **generic handler** that publishes all outbox even
 // ✅ Single generic handler for ALL events
 #[AsMessageHandler(fromTransport: 'outbox')]
 public function __invoke(object $event): void {
-    // Get AMQP routing (exchange, routing key, headers)
-    $routing = $this->routingStrategy->getRoutingFor($event);
+    // Extract message name and ID from event
+    $messageName = $this->extractMessageName($event);
+    $messageId = $this->extractMessageId($event);
 
-    // Publish to AMQP
-    $this->eventBus->dispatch(new Envelope($event, [new AmqpStamp(...)]));
+    // Get AMQP routing (exchange, routing key, headers)
+    $routing = $this->routingStrategy->getRoutingFor($event, $messageName);
+
+    // Add MessageIdStamp - automatically serialized to X-Message-Stamp-MessageIdStamp header
+    $envelope = new Envelope($event, [
+        new MessageIdStamp($messageId->__toString()),
+        new AmqpStamp($routingKey, AMQP_NOPARAM, $headers),
+        new TransportNamesStamp(['amqp']),
+    ]);
+
+    // Publish to AMQP (OutboxSerializer sets type header to semantic name)
+    $this->eventBus->dispatch($envelope);
 }
 ```
 
 **Benefits:**
 - No code changes needed when adding new events
 - All events automatically published to AMQP
+- Stamps automatically transported via native Symfony mechanism
 - Convention-based routing with attribute overrides
 - Failed publishing handled by Messenger's retry/failed transport
 
@@ -468,45 +514,65 @@ public function __invoke(object $event): void {
 
 ## Important Implementation Details
 
-1. **3-Table Architecture**: The package uses dedicated tables for inbox/outbox:
-   - `messenger_outbox` (table_name in doctrine:// DSN)
-   - `messenger_inbox` (table_name in inbox:// DSN)
-   - `messenger_messages` (standard for failed)
+1. **3-Table Architecture**: The package uses dedicated tables for outbox/deduplication/failed:
+   - `messenger_outbox` (table_name in doctrine:// DSN for publishing)
+   - `message_broker_deduplication` (deduplication tracking for consumed messages)
+   - `messenger_messages` (standard for failed messages)
 
-   This prevents lock contention and allows independent scaling/cleanup.
+   Note: The `messenger_inbox` table is optional - you can use it for buffering AMQP messages if needed, or consume directly from AMQP to handlers.
 
-2. **AMQP Infrastructure Requirements**: The `inbox:ingest` command assumes RabbitMQ infrastructure is already configured:
+2. **"Fake FQN" Pattern**: The package uses a clever approach to combine semantic naming with native Symfony behavior:
+   - **Publishing**: OutboxSerializer sets `type` header to semantic name (e.g., `order.placed`) instead of PHP FQN
+   - **Consuming**: MessageNameSerializer translates semantic name → FQN, then delegates to native Symfony Serializer
+   - **Stamps**: Automatically serialized/deserialized via `X-Message-Stamp-*` headers by Symfony
+   - **Result**: External systems see semantic names, internal code uses native Symfony patterns
+
+3. **DeduplicationMiddleware**: The middleware runs AFTER `doctrine_transaction` middleware (priority -10):
+   - Checks `MessageIdStamp` and `MessageNameStamp` on incoming messages (restored automatically from headers)
+   - Attempts INSERT into `message_broker_deduplication` table
+   - If duplicate (UniqueConstraintViolationException): skips handler execution
+   - If new: processes message normally
+   - Transaction commits: deduplication entry + handler changes are atomic
+   - Transaction rolls back: deduplication entry is rolled back, message can be retried
+
+4. **AMQP Infrastructure Requirements**: Native AMQP transport consumption assumes RabbitMQ infrastructure is already configured:
    - Queues must exist
    - Exchanges must exist
    - Queue-to-exchange bindings must be configured
 
-   The command only consumes from existing queues; it does not declare or bind queues/exchanges.
+   Symfony Messenger AMQP transport only consumes from existing queues; it does not declare or bind queues/exchanges (unless auto_setup is enabled).
 
-3. **AMQP Consumer ACK Behavior**: The `ConsumeAmqpToMessengerCommand` ACKs messages after successful dispatch to the inbox transport. Messages are NACK'd if they fail validation (missing required fields) or encounter errors during processing.
+5. **AMQP Consumer ACK Behavior**: Native AMQP transport ACKs messages after successful handler execution. Messages are NACK'd if they fail validation (MessageNameSerializer) or if handlers throw exceptions.
 
-4. **Binary UUID v7 Storage**: Inbox and outbox tables use binary(16) for id column. The inbox id comes from `message_id` header (external), outbox id is generated internally. This is a hard requirement enforced by global CLAUDE.md settings.
+6. **Binary UUID v7 Storage**: The `message_broker_deduplication` table uses binary(16) for message_id column (primary key). Inbox and outbox tables use binary(16) for id column. This is a hard requirement enforced by global CLAUDE.md settings.
 
-5. **Cleanup Command**: `CleanupOutboxCommand` is **optional** - Symfony Messenger marks messages as `delivered_at` but doesn't auto-delete. Run periodically to prevent table growth. Failed messages in `messenger_messages` are managed by Symfony's `messenger:failed:*` commands.
+7. **Cleanup Command**: `CleanupOutboxCommand` is **optional** - Symfony Messenger marks messages as `delivered_at` but doesn't auto-delete. Run periodically to prevent table growth. Failed messages in `messenger_messages` are managed by Symfony's `messenger:failed:*` commands. Consider adding a cleanup command for `message_broker_deduplication` table as well.
 
-6. **Message Format**: AMQP messages must follow this strict JSON format (all fields required):
-   ```json
+8. **Message Format**: AMQP messages use native Symfony serialization with semantic `type` header:
+   ```
+   Headers:
+     type: order.placed  (semantic message name)
+     X-Message-Stamp-MessageIdStamp: [{"messageId":"01234567-89ab..."}]  (auto-generated)
+
+   Body:
    {
-     "message_name": "order.placed",
-     "message_id": "01234567-89ab-cdef-0123-456789abcdef",
-     "payload": { ... }
+     "messageId": "01234567-89ab-cdef-0123-456789abcdef",
+     "orderId": "550e8400-e29b-41d4-a716-446655440000",
+     "totalAmount": 123.45,
+     "placedAt": "2025-10-08T13:30:00+00:00"
    }
    ```
-   - `message_name`: Semantic message name matching the `#[MessageName]` attribute format
-   - `message_id`: Unique identifier for deduplication (binary UUID v7 recommended)
-   - `payload`: Event data as object
+   - **type header**: Semantic message name (e.g., `order.placed`) - language-agnostic
+   - **X-Message-Stamp-*** headers: Symfony stamps (MessageIdStamp, etc.) - automatically handled
+   - **Body**: Native Symfony serialization of the message object
 
-   Messages missing any required field will be rejected (NACK'd).
+   The MessageNameSerializer translates the `type` header from semantic name to PHP FQN internally.
 
-7. **Transactional Guarantees**: Outbox ensures events are only published if the business transaction commits successfully (atomicity).
+9. **Transactional Guarantees**:
+   - **Outbox**: Events are only published if the business transaction commits successfully (atomicity)
+   - **Inbox**: Deduplication entry and handler changes are committed in the same transaction (atomicity)
 
-8. **At-Least-Once Delivery**: System guarantees events are delivered at least once; consumers must be idempotent.
-
-9. **Custom Transport Factory**: The `DoctrineInboxTransportFactory` must be registered as a Messenger transport factory to enable the `inbox://` DSN scheme. It supports `table_name` parameter for configurable table names.
+10. **At-Least-Once Delivery**: System guarantees events are delivered at least once; consumers must be idempotent (enforced by DeduplicationMiddleware).
 
 ## Namespace Convention
 

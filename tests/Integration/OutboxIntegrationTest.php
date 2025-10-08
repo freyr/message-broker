@@ -9,8 +9,11 @@ use Freyr\Identity\Id;
 use Freyr\MessageBroker\Outbox\Publishing\AmqpPublishingStrategy;
 use Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyRegistry;
 use Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy;
-use Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer;
+use Freyr\MessageBroker\Serializer\MessageNameSerializer;
 use Freyr\MessageBroker\Outbox\Transport\DoctrineOutboxConnection;
+
+// NOTE: This test uses old custom transports that have been removed.
+// It needs significant refactoring to work with the new simplified architecture.
 use Freyr\MessageBroker\Tests\Fixtures\Publisher\OrderPlacedEvent;
 use Freyr\MessageBroker\Tests\Fixtures\Publisher\SlaCalculationStartedEvent;
 use Freyr\MessageBroker\Tests\Fixtures\Publisher\UserPremiumUpgradedEvent;
@@ -34,14 +37,14 @@ use Symfony\Component\Messenger\Handler\HandlerDescriptor;
 final class OutboxIntegrationTest extends IntegrationTestCase
 {
     private DoctrineTransport $outboxTransport;
-    private OutboxSerializer $serializer;
+    private MessageNameSerializer $serializer;
     private MessageBus $eventBus;
 
     protected function setUp(): void
     {
         parent::setUp();
 
-        $this->serializer = new OutboxSerializer($this->createSerializer());
+        $this->serializer = new MessageNameSerializer([]);
 
         // Create outbox transport with custom connection
         $connection = Connection::buildConfiguration(

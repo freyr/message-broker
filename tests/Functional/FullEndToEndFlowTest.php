@@ -184,7 +184,7 @@ class FullEndToEndFlowTest extends KernelTestCase
         $channel = $amqpConnection->channel();
 
         // Serialize the message
-        $serializer = self::getContainer()->get('Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer');
+        $serializer = self::getContainer()->get('Freyr\MessageBroker\Serializer\MessageNameSerializer');
         $encoded = $serializer->encode($envelope);
         $body = $encoded['body'];
 
@@ -219,24 +219,25 @@ class FullEndToEndFlowTest extends KernelTestCase
         $this->assertEquals('order.placed', $decoded['message_name']);
         $this->assertEquals((string) $messageId, $decoded['message_id']);
 
-        // The AMQP message has outbox format, we need to transform it to inbox format
-        // In production, AmqpInboxIngestCommand does this transformation
-        // Extract the actual payload data
+        // The AMQP message has outbox format
+        // In production, MessageNameSerializer deserializes this to typed consumer message
+        // For testing, we manually create the typed message
         $payload = $decoded['payload'];
 
-        // Create InboxEventMessage with the payload in inbox format
-        $inboxMessage = new \Freyr\MessageBroker\Inbox\Message\InboxEventMessage(
-            messageName: $decoded['message_name'],
-            payload: $payload, // This is already the event data
-            messageId: $decoded['message_id'],
-            sourceQueue: $this->testQueueName
+        // Create typed consumer message (simulates MessageNameSerializer deserialization)
+        $consumerMessage = new OrderPlacedMessage(
+            messageId: Id::fromString($decoded['message_id']),
+            orderId: Id::fromString($payload['orderId']),
+            customerId: Id::fromString($payload['customerId']),
+            amount: $payload['amount'],
+            placedAt: \Carbon\CarbonImmutable::parse($payload['placedAt']),
         );
 
-        $this->messageBus->dispatch($inboxMessage, [
+        // Dispatch with stamps (MessageNameSerializer would add these from AMQP headers)
+        $this->messageBus->dispatch($consumerMessage, [
             new \Symfony\Component\Messenger\Stamp\TransportNamesStamp(['inbox']),
-            new \Freyr\MessageBroker\Inbox\Stamp\MessageNameStamp($decoded['message_name']),
-            new \Freyr\MessageBroker\Inbox\Stamp\MessageIdStamp($decoded['message_id']),
-            new \Freyr\MessageBroker\Inbox\Stamp\SourceQueueStamp($this->testQueueName),
+            new \Freyr\MessageBroker\Inbox\MessageNameStamp($decoded['message_name']),
+            new \Freyr\MessageBroker\Inbox\MessageIdStamp($decoded['message_id']),
         ]);
 
         // ACK RabbitMQ message

@@ -8,15 +8,15 @@ framework:
         transports:
             # Outbox - stores events in database with binary UUID v7
             outbox:
-                dsn: 'outbox://default?table_name=messenger_outbox&queue_name=outbox'
-                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
+                dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
+                serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
                 options:
                     auto_setup: false
 
-            # Inbox - custom transport with deduplication
+            # Inbox - standard Doctrine transport with deduplication middleware
             inbox:
-                dsn: 'inbox://default?table_name=messenger_inbox&queue_name=inbox'
-                serializer: 'Freyr\MessageBroker\Inbox\Serializer\InboxSerializer'
+                dsn: 'doctrine://default?table_name=messenger_inbox&queue_name=inbox'
+                serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
                 options:
                     auto_setup: true
 
@@ -32,7 +32,7 @@ framework:
             # Route test events to outbox
             'Freyr\MessageBroker\Tests\Fixtures\Publisher\*': outbox
 
-            # InboxEventMessage goes to inbox transport
-            'Freyr\MessageBroker\Inbox\Message\InboxEventMessage': inbox
+            # Typed consumer messages go to inbox transport
+            'Freyr\MessageBroker\Tests\Fixtures\Consumer\OrderPlacedMessage': inbox
 
             # Consumer messages are handled directly (no routing to transport)

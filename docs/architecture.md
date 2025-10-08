@@ -84,7 +84,7 @@ messenger/
 3. **Inbox Storage:** Message wrapped and sent to inbox transport
 4. **Deduplication:** `DoctrineDedupConnection` uses INSERT IGNORE with message_id as PK
 5. **Async Processing:** Worker consumes from inbox transport (SKIP LOCKED)
-6. **Handler Dispatch:** `InboxEventMessageHandler` routes to domain handlers via registry
+6. **Handler Dispatch:** Typed messages routed directly to domain handlers
 7. **Business Processing:** Domain event handlers execute business logic
 
 ## Key Components
@@ -93,24 +93,17 @@ messenger/
 
 | Component | Purpose |
 |-----------|---------|
-| `DoctrineInboxConnection` | Custom Doctrine connection using INSERT IGNORE with binary UUID v7 for deduplication |
-| `DoctrineInboxTransportFactory` | Factory for creating inbox transport with custom DSN (inbox://) |
-| `InboxEventMessage` | Message DTO wrapping external events |
-| `InboxSerializer` | Deserializes JSON to typed PHP objects using Symfony Serializer |
-| `ConsumeAmqpToMessengerCommand` | AMQP consumer dispatching to inbox transport |
-| `AmqpSetupCommand` | Sets up AMQP queues and exchanges |
+| `MessageNameSerializer` | Translates semantic message names to FQN, deserializes to typed PHP objects |
 | `MessageNameStamp` | Stamp containing semantic message name |
 | `MessageIdStamp` | Stamp containing message UUID for tracing |
-| `SourceQueueStamp` | Stamp containing source AMQP queue name |
+| `DeduplicationMiddleware` | Middleware for atomic deduplication checks using separate table |
 
 ### Outbox Components
 
 | Component | Purpose |
 |-----------|---------|
-| `DoctrineOutboxConnection` | Custom Doctrine connection for outbox with binary UUID v7 |
-| `DoctrineOutboxTransportFactory` | Factory for creating outbox transport with custom DSN (outbox://) |
-| `OutboxSerializer` | Serializes domain events to JSON using Symfony Serializer |
-| `OutboxToAmqpBridge` | Consumes from outbox and publishes to AMQP |
+| `OutboxSerializer` | Serializes domain events to JSON using Symfony Serializer, sets semantic name in type header |
+| `OutboxToAmqpBridge` | Consumes from outbox and publishes to AMQP, adds MessageIdStamp |
 | `AmqpRoutingStrategyInterface` | Strategy for AMQP routing configuration |
 | `DefaultAmqpRoutingStrategy` | Convention-based routing with attribute overrides |
 | `MessageName` | Attribute for marking events with semantic names |

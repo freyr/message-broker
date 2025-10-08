@@ -95,21 +95,22 @@ To test this recipe without publishing:
 ### Configuration Files
 
 **config/packages/message_broker.yaml:**
-- Inbox/outbox table names
-- Message type mappings (needs user customization)
-- Transport names for failed/DLQ
+- Message type mappings for inbox (needs user customization)
+- Used by MessageNameSerializer to translate semantic names to PHP classes
+- This is the ONLY required configuration for the bundle
 
 **config/packages/messenger.yaml:**
-- 5 transports: `outbox`, `inbox`, `amqp`, `dlq`, `failed`
-- Default routing for InboxEventMessage
+- 3 transports: `outbox`, `amqp`, `failed`
+- Middleware configuration (DeduplicationMiddleware)
 - Comments showing where to add domain event routing
+- Example handler documentation
 
 ### Database Migration
 
 **migrations/Version20250103000000.php:**
-- Creates `messenger_outbox` table (binary UUID v7)
-- Creates `messenger_inbox` table (binary UUID v7)
-- Creates `messenger_messages` table (standard for failed/DLQ)
+- Creates `messenger_outbox` table (standard auto-increment ID)
+- Creates `message_broker_deduplication` table (binary UUID v7 for deduplication)
+- Creates `messenger_messages` table (standard for failed messages)
 
 ### Environment Variables
 
@@ -123,15 +124,15 @@ After running `composer require freyr/message-broker`, users need to:
 1. Configure inbox message types in `config/packages/message_broker.yaml`
 2. Route domain events to outbox in `config/packages/messenger.yaml`
 3. Run migrations: `php bin/console doctrine:migrations:migrate`
-4. Start workers: `php bin/console messenger:consume inbox outbox -vv`
+4. Start workers: `php bin/console messenger:consume outbox amqp -vv`
 
 ## Customization
 
 Users can customize:
-- Table names in `message_broker.yaml`
-- Transport DSNs in `messenger.yaml`
+- Message type mappings in `message_broker.yaml` (inbox deserialization)
+- Transport DSNs in `messenger.yaml` (including table names)
 - AMQP connection string in `.env`
-- Failed/DLQ transport names
+- Middleware priority (DeduplicationMiddleware)
 
 ## Documentation
 

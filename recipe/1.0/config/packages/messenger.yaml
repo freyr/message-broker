@@ -3,25 +3,32 @@ framework:
         # Failure transport for handling failed messages
         failure_transport: failed
 
+        # Middleware configuration
+        # DeduplicationMiddleware runs AFTER doctrine_transaction (priority -10)
+        # This ensures deduplication INSERT is within the transaction
+        default_middleware:
+            enabled: true
+            allow_no_handlers: false
+
+        buses:
+            messenger.bus.default:
+                middleware:
+                    - doctrine_transaction  # Priority 0 (starts transaction)
+                    # DeduplicationMiddleware (priority -10) registered via service tag
+                    # Runs after transaction starts, before handlers
+
         transports:
             # Outbox transport - stores events in database with transactional guarantees
+            # Uses native Doctrine transport with auto-increment ID
             outbox:
-                dsn: 'outbox://default?table_name=messenger_outbox&queue_name=outbox'
-                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
-                options:
-                    auto_setup: false  # Use migrations instead
-
-            # Inbox transport - receives messages from AMQP with deduplication
-            inbox:
-                dsn: 'inbox://default?table_name=messenger_inbox&queue_name=inbox'
-                serializer: 'Freyr\MessageBroker\Inbox\Serializer\InboxSerializer'
-                options:
-                    auto_setup: false  # Use migrations instead
+                dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
+                serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
 
             # AMQP transport - external message broker
+            # For publishing (outbox) and consuming (inbox)
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
-                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
+                serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
                 options:
                     auto_setup: false
                 retry_strategy:
@@ -36,10 +43,15 @@ framework:
                     auto_setup: false
 
         routing:
-            # Route InboxEventMessage to inbox transport
-            'Freyr\MessageBroker\Inbox\Message\InboxEventMessage': inbox
-
-            # Route your domain events to outbox
+            # Outbox messages - route domain events to outbox transport
             # Example:
             # 'App\Domain\Event\OrderPlaced': outbox
             # 'App\Domain\Event\UserRegistered': outbox
+
+            # Inbox messages (consumed from AMQP transports)
+            # Messages are deserialized by MessageNameSerializer into typed objects
+            # DeduplicationMiddleware automatically prevents duplicate processing
+            # Handlers execute synchronously (no routing needed - AMQP transport handles delivery)
+            # Example handlers:
+            # #[AsMessageHandler]
+            # class OrderPlacedHandler { public function __invoke(OrderPlaced $message) {} }

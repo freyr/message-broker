@@ -41,10 +41,9 @@ parameters:
         'user.registered': 'App\Message\UserRegistered'
 
 services:
-    Freyr\MessageBroker\Inbox\Serializer\InboxSerializer:
+    Freyr\MessageBroker\Serializer\MessageNameSerializer:
         arguments:
             $messageTypes: '%inbox.message_types%'
-            $serializer: '@serializer'
 ```
 
 ### 3. Configure Inbox Transport
@@ -56,8 +55,8 @@ framework:
     messenger:
         transports:
             inbox:
-                dsn: 'inbox://default?queue_name=inbox'
-                serializer: 'Freyr\MessageBroker\Inbox\Serializer\InboxSerializer'
+                dsn: 'doctrine://default?table_name=messenger_inbox&queue_name=inbox'
+                serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
                 options:
                     auto_setup: false  # Use migrations
 
@@ -221,9 +220,7 @@ final class GenericMessageHandler
 Use stamps to access message metadata:
 
 ```php
-use Freyr\MessageBroker\Inbox\Stamp\MessageNameStamp;
-use Freyr\MessageBroker\Inbox\Stamp\MessageIdStamp;
-use Symfony\Component\Messenger\Envelope;
+use Freyr\MessageBroker\Inbox\MessageIdStamp;use Freyr\MessageBroker\Inbox\MessageNameStamp;use Symfony\Component\Messenger\Envelope;
 
 #[AsMessageHandler]
 final class OrderPlacedHandler

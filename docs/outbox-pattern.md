@@ -32,8 +32,8 @@ Unmatched Events → DLQ Transport
 
 ## Components
 
-### 1. Outbox Serializer
-**Location:** `src/Outbox/Serializer/OutboxSerializer.php`
+### 1. Message Name Serializer
+**Location:** `src/Serializer/MessageNameSerializer.php`
 
 - Serializes domain events to JSON with semantic event names
 - **Extracts and validates `messageId` (UUID v7) from event objects** ✨
@@ -148,14 +148,14 @@ framework:
             # Outbox - stores events in database
             outbox:
                 dsn: 'doctrine://default?queue_name=outbox'
-                serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxSerializer'
+                serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
                 options:
                     auto_setup: false
 
             # AMQP - publishes to RabbitMQ
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
-                serializer: 'Freyr\Messenger\Outbox\Serializer\OutboxSerializer'
+                serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
                 options:
                     auto_setup: true
                     exchange:
@@ -235,7 +235,7 @@ $this->eventBus->dispatch(new UserRegistered(
 
 The event is automatically:
 1. Validated for `messageId` presence
-2. Serialized by `OutboxSerializer` (includes `message_id` in JSON)
+2. Serialized by `MessageNameSerializer` (includes `message_id` in JSON, sets semantic name in type header)
 3. Stored in `messenger_messages` table (same transaction)
 4. Committed with your business data
 
@@ -278,18 +278,18 @@ php bin/console messenger:cleanup-outbox --days=7 --batch-size=1000
 
 ## Database Schema
 
-The outbox uses a **dedicated table** (`messenger_outbox`) for performance isolation:
+The outbox uses a **dedicated table** (`messenger_outbox`) for performance isolation. Uses standard Symfony Messenger schema with auto-increment ID:
 
 ```sql
 CREATE TABLE messenger_outbox (
-    id BINARY(16) NOT NULL PRIMARY KEY,
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
     body LONGTEXT NOT NULL,
     headers LONGTEXT NOT NULL,
     queue_name VARCHAR(190) NOT NULL DEFAULT 'outbox',
     created_at DATETIME NOT NULL,
     available_at DATETIME NOT NULL,
     delivered_at DATETIME DEFAULT NULL,
-    INDEX idx_available_at (available_at),
+    INDEX idx_queue_available (queue_name, available_at),
     INDEX idx_delivered_at (delivered_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
@@ -297,10 +297,12 @@ CREATE TABLE messenger_outbox (
 **Why a separate table?**
 - ✅ No lock contention with inbox operations
 - ✅ Optimized indexes for outbox-specific queries
+- ✅ Native Symfony Messenger compatibility (standard schema)
+- ✅ Message correlation via `messageId` field in body (not PK)
 - ✅ Independent cleanup/archival policies
 - ✅ Failed messages still go to shared `messenger_messages` table
 
-See [Database Schema Guide](database-schema.md) for complete 3-table architecture.
+See [Database Schema Guide](database-schema.md) for complete 4-table architecture.
 
 ## Error Handling
 

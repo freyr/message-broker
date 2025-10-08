@@ -5,10 +5,8 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Inbox\Message\InboxEventMessage;
-use Freyr\MessageBroker\Inbox\Stamp\MessageIdStamp;
-use Freyr\MessageBroker\Inbox\Stamp\MessageNameStamp;
-use Freyr\MessageBroker\Inbox\Stamp\SourceQueueStamp;
+use Freyr\MessageBroker\Inbox\MessageIdStamp;
+use Freyr\MessageBroker\Inbox\MessageNameStamp;
 use Freyr\MessageBroker\Tests\Application\Kernel;
 use Freyr\MessageBroker\Tests\Fixtures\Consumer\OrderPlacedMessage;
 use Freyr\MessageBroker\Tests\Fixtures\Publisher\OrderPlacedEvent;
@@ -141,27 +139,23 @@ class OutboxToInboxFlowTest extends KernelTestCase
         $this->assertNotEmpty($envelopes, 'Should have message in outbox transport');
 
         // In real scenario, outbox bridge would publish to AMQP
-        // For testing, we simulate AMQP delivery by directly dispatching to inbox
+        // For testing, we simulate AMQP delivery by directly creating the typed consumer message
+        // (MessageNameSerializer would normally deserialize AMQP message to this)
 
-        // Step 3: Simulate AMQP message received and dispatched to inbox
-        $inboxMessage = new InboxEventMessage(
-            messageName: 'order.placed',
-            payload: [
-                'messageId' => (string) $messageId,
-                'orderId' => (string) $orderId,
-                'customerId' => (string) $customerId,
-                'amount' => 99.99,
-                'placedAt' => \Carbon\CarbonImmutable::now()->toIso8601String(),
-            ],
-            messageId: (string) $messageId,
-            sourceQueue: 'test.queue'
+        // Step 3: Simulate AMQP message received and deserialized to typed consumer message
+        $consumerMessage = new OrderPlacedMessage(
+            messageId: $messageId,
+            orderId: $orderId,
+            customerId: $customerId,
+            amount: 99.99,
+            placedAt: \Carbon\CarbonImmutable::now(),
         );
 
-        $this->messageBus->dispatch($inboxMessage, [
+        // Dispatch with stamps (MessageNameSerializer would add these from headers)
+        $this->messageBus->dispatch($consumerMessage, [
             new TransportNamesStamp(['inbox']),
             new MessageNameStamp('order.placed'),
             new MessageIdStamp((string) $messageId),
-            new SourceQueueStamp('test.queue'),
         ]);
 
         // Verify message is in inbox
@@ -210,26 +204,21 @@ class OutboxToInboxFlowTest extends KernelTestCase
         $orderId = Id::new();
         $customerId = Id::new();
 
-        $inboxMessage = new InboxEventMessage(
-            messageName: 'order.placed',
-            payload: [
-                'messageId' => (string) $messageId,
-                'orderId' => (string) $orderId,
-                'customerId' => (string) $customerId,
-                'amount' => 99.99,
-                'placedAt' => \Carbon\CarbonImmutable::now()->toIso8601String(),
-            ],
-            messageId: (string) $messageId,
-            sourceQueue: 'test.queue'
+        // Create typed consumer message (simulates what MessageNameSerializer would create)
+        $consumerMessage = new OrderPlacedMessage(
+            messageId: $messageId,
+            orderId: $orderId,
+            customerId: $customerId,
+            amount: 99.99,
+            placedAt: \Carbon\CarbonImmutable::now(),
         );
 
         // Dispatch same message twice
         for ($i = 0; $i < 2; $i++) {
-            $this->messageBus->dispatch($inboxMessage, [
+            $this->messageBus->dispatch($consumerMessage, [
                 new TransportNamesStamp(['inbox']),
                 new MessageIdStamp((string) $messageId),
                 new MessageNameStamp('order.placed'),
-                new SourceQueueStamp('test.queue'),
             ]);
         }
 

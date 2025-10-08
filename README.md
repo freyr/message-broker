@@ -306,9 +306,10 @@ framework:
             failed:
                 dsn: 'doctrine://default?queue_name=failed'
         routing:
-            'Freyr\MessageBroker\Inbox\Message\InboxEventMessage': inbox
             # Add your domain events here:
             # 'App\Domain\Event\OrderPlaced': outbox
+            # Add your typed consumer messages here:
+            # 'App\Message\OrderPlaced': inbox
 ```
 
 **.env:**
@@ -404,7 +405,7 @@ Domain Event → Message Bus → Outbox Transport (database)
 
 **Inbox (Consuming):**
 ```
-AMQP → inbox:ingest → InboxEventMessage → Inbox Transport (database)
+AMQP Transport → MessageNameSerializer → Typed Message → DeduplicationMiddleware → Handler
 → INSERT IGNORE (deduplication) → messenger:consume inbox
 → InboxSerializer → Typed Message → Your Handler
 ```
@@ -495,21 +496,21 @@ framework:
             # Outbox - stores events in database with binary UUID v7
             outbox:
                 dsn: 'outbox://default?table_name=messenger_outbox&queue_name=outbox'
-                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
+                serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
                 options:
                     auto_setup: false
 
             # Inbox - custom transport with deduplication
             inbox:
                 dsn: 'inbox://default?table_name=messenger_inbox&queue_name=inbox'
-                serializer: 'Freyr\MessageBroker\Inbox\Serializer\InboxSerializer'
+                serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
                 options:
                     auto_setup: false
 
             # AMQP - external message broker
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
-                serializer: 'Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer'
+                serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
                 options:
                     auto_setup: false
                 retry_strategy:
@@ -530,11 +531,11 @@ framework:
                     auto_setup: false
 
         routing:
-            # Route InboxEventMessage to inbox transport
-            'Freyr\MessageBroker\Inbox\Message\InboxEventMessage': inbox
-
             # Add your domain events routing here:
             # 'App\Domain\Event\OrderPlaced': outbox
+
+            # Add your typed consumer messages routing here:
+            # 'App\Message\OrderPlaced': inbox
 ```
 
 **config/packages/doctrine.yaml:**

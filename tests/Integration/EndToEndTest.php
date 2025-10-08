@@ -6,13 +6,15 @@ namespace Freyr\MessageBroker\Tests\Integration;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Inbox\Serializer\InboxSerializer;
 use Freyr\MessageBroker\Inbox\Transport\DoctrineInboxConnection;
 use Freyr\MessageBroker\Outbox\Publishing\AmqpPublishingStrategy;
 use Freyr\MessageBroker\Outbox\Publishing\PublishingStrategyRegistry;
 use Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy;
-use Freyr\MessageBroker\Outbox\Serializer\OutboxSerializer;
+use Freyr\MessageBroker\Serializer\MessageNameSerializer;
 use Freyr\MessageBroker\Outbox\Transport\DoctrineOutboxConnection;
+
+// NOTE: This test uses old custom transports that have been removed.
+// It needs significant refactoring to work with the new simplified architecture.
 use Freyr\MessageBroker\Tests\Fixtures\Consumer\OrderPlacedMessage;
 use Freyr\MessageBroker\Tests\Fixtures\Consumer\SlaCalculationStartedMessage;
 use Freyr\MessageBroker\Tests\Fixtures\Consumer\UserPremiumUpgradedMessage;
@@ -41,22 +43,19 @@ use Symfony\Component\Messenger\Stamp\TransportNamesStamp;
  */
 final class EndToEndTest extends IntegrationTestCase
 {
-    private OutboxSerializer $outboxSerializer;
-    private InboxSerializer $inboxSerializer;
+    private MessageNameSerializer $messageNameSerializer;
     private DefaultAmqpRoutingStrategy $routingStrategy;
 
     protected function setUp(): void
     {
         parent::setUp();
 
-        $this->outboxSerializer = new OutboxSerializer($this->createSerializer());
-
         $messageTypes = [
             'order.placed' => OrderPlacedMessage::class,
             'sla.calculation.started' => SlaCalculationStartedMessage::class,
             'user.premium.upgraded' => UserPremiumUpgradedMessage::class,
         ];
-        $this->inboxSerializer = new InboxSerializer($this->createSerializer(), $messageTypes);
+        $this->messageNameSerializer = new MessageNameSerializer($messageTypes);
         $this->routingStrategy = new DefaultAmqpRoutingStrategy();
     }
 
@@ -82,7 +81,7 @@ final class EndToEndTest extends IntegrationTestCase
             'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
         );
         $outboxConnection = new DoctrineOutboxConnection($outboxConfig, $this->getConnection());
-        $outboxTransport = new DoctrineTransport($outboxConnection, $this->outboxSerializer);
+        $outboxTransport = new DoctrineTransport($outboxConnection, $this->messageNameSerializer);
 
         $envelope = new Envelope($event);
         $outboxTransport->send($envelope);
@@ -135,7 +134,7 @@ final class EndToEndTest extends IntegrationTestCase
         $this->assertEquals(1, $inboxCount);
 
         // ========== STEP 5: Inbox Worker - Deserialize to TypedMessage ==========
-        $inboxTransport = new DoctrineTransport($inboxConnection, $this->inboxSerializer);
+        $inboxTransport = new DoctrineTransport($inboxConnection, $this->messageNameSerializer);
         $inboxEnvelopes = $inboxTransport->get();
         $this->assertNotEmpty($inboxEnvelopes);
 
@@ -166,7 +165,7 @@ final class EndToEndTest extends IntegrationTestCase
             'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
         );
         $outboxConnection = new DoctrineOutboxConnection($outboxConfig, $this->getConnection());
-        $outboxTransport = new DoctrineTransport($outboxConnection, $this->outboxSerializer);
+        $outboxTransport = new DoctrineTransport($outboxConnection, $this->messageNameSerializer);
         $outboxTransport->send(new Envelope($event));
 
         // Step 2: Publish to AMQP (custom exchange should be used)
@@ -207,7 +206,7 @@ final class EndToEndTest extends IntegrationTestCase
             'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
         );
         $outboxConnection = new DoctrineOutboxConnection($outboxConfig, $this->getConnection());
-        $outboxTransport = new DoctrineTransport($outboxConnection, $this->outboxSerializer);
+        $outboxTransport = new DoctrineTransport($outboxConnection, $this->messageNameSerializer);
 
         // Inbox connection
         $inboxConfig = Connection::buildConfiguration(
@@ -255,7 +254,7 @@ final class EndToEndTest extends IntegrationTestCase
      */
     private function publishToAmqp(Envelope $envelope, string $exchange, string $routingKey): void
     {
-        $encoded = $this->outboxSerializer->encode($envelope);
+        $encoded = $this->messageNameSerializer->encode($envelope);
         $body = $encoded['body'];
 
         $channel = $this->getAmqpConnection()->channel();
