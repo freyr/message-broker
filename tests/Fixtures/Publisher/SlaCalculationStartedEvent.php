@@ -15,7 +15,7 @@ use Freyr\MessageBroker\Outbox\Routing\AmqpExchange;
  * Demonstrates attribute-based routing override.
  */
 #[MessageName('sla.calculation.started')]
-#[AmqpExchange('sla.events')]  // Override: use custom exchange
+#[AmqpExchange('sla.events')] // Override: use custom exchange
 final readonly class SlaCalculationStartedEvent
 {
     public function __construct(

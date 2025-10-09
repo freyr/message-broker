@@ -24,7 +24,7 @@ use Attribute;
  * final readonly class OrderPlaced { ... }
  * ```
  */
-#[Attribute(Attribute::TARGET_CLASS)]
+#[\Attribute(\Attribute::TARGET_CLASS)]
 final readonly class AmqpExchange
 {
     public function __construct(

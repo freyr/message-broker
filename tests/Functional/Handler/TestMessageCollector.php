@@ -9,11 +9,13 @@ use Freyr\MessageBroker\Tests\Fixtures\Consumer\UserPremiumUpgradedMessage;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
 /**
- * Test handler that collects received messages for verification
+ * Test handler that collects received messages for verification.
  */
 final class TestMessageCollector
 {
-    /** @var array<object> */
+    /**
+     * @var array<object>
+     */
     private array $receivedMessages = [];
 
     #[AsMessageHandler]
@@ -48,6 +50,7 @@ final class TestMessageCollector
                 return true;
             }
         }
+
         return false;
     }
 
@@ -56,9 +59,10 @@ final class TestMessageCollector
         $count = 0;
         foreach ($this->receivedMessages as $message) {
             if ($message instanceof $messageClass) {
-                $count++;
+                ++$count;
             }
         }
+
         return $count;
     }
 }

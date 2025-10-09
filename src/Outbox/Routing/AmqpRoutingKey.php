@@ -24,7 +24,7 @@ use Attribute;
  * final readonly class UserPremiumUpgraded { ... }
  * ```
  */
-#[Attribute(Attribute::TARGET_CLASS)]
+#[\Attribute(\Attribute::TARGET_CLASS)]
 final readonly class AmqpRoutingKey
 {
     public function __construct(

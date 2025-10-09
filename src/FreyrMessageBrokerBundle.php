@@ -15,7 +15,7 @@ final class FreyrMessageBrokerBundle extends AbstractBundle
         return \dirname(__DIR__);
     }
 
-    public function getContainerExtension(): ?ExtensionInterface
+    public function getContainerExtension(): ExtensionInterface
     {
         return new FreyrMessageBrokerExtension();
     }

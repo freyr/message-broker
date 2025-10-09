@@ -14,7 +14,7 @@ use Symfony\Component\Serializer\Normalizer\NormalizerInterface;
 final readonly class IdNormalizer implements NormalizerInterface, DenormalizerInterface
 {
     /**
-     * @param Id $object
+     * @param Id                   $object
      * @param array<string, mixed> $context
      */
     public function normalize(mixed $object, ?string $format = null, array $context = []): string
@@ -35,7 +35,7 @@ final readonly class IdNormalizer implements NormalizerInterface, DenormalizerIn
      */
     public function denormalize(mixed $data, string $type, ?string $format = null, array $context = []): Id
     {
-        if (!is_string($data)) {
+        if (! is_string($data)) {
             throw new \InvalidArgumentException('Id value must be a string');
         }
 
@@ -45,8 +45,12 @@ final readonly class IdNormalizer implements NormalizerInterface, DenormalizerIn
     /**
      * @param array<string, mixed> $context
      */
-    public function supportsDenormalization(mixed $data, string $type, ?string $format = null, array $context = []): bool
-    {
+    public function supportsDenormalization(
+        mixed $data,
+        string $type,
+        ?string $format = null,
+        array $context = [],
+    ): bool {
         return $type === Id::class && is_string($data);
     }
 

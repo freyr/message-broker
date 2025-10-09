@@ -5,10 +5,19 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Serializer;
 
 use Freyr\MessageBroker\Outbox\MessageName;
-use ReflectionClass;
+use Freyr\MessageBroker\Serializer\Normalizer\CarbonImmutableNormalizer;
+use Freyr\MessageBroker\Serializer\Normalizer\IdNormalizer;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\MessageDecodingFailedException;
 use Symfony\Component\Messenger\Transport\Serialization\Serializer;
+use Symfony\Component\PropertyInfo\Extractor\ReflectionExtractor;
+use Symfony\Component\PropertyInfo\PropertyInfoExtractor;
+use Symfony\Component\Serializer\Encoder\JsonEncoder;
+use Symfony\Component\Serializer\Normalizer\ArrayDenormalizer;
+use Symfony\Component\Serializer\Normalizer\DateTimeNormalizer;
+use Symfony\Component\Serializer\Normalizer\ObjectNormalizer;
+use Symfony\Component\Serializer\Serializer as SymfonySerializer;
+use Symfony\Component\Serializer\SerializerInterface as SymfonySerializerInterface;
 
 /**
  * Message Name Serializer.
@@ -26,8 +35,26 @@ final class MessageNameSerializer extends Serializer
      */
     public function __construct(
         private readonly array $messageTypes = [],
+        ?SymfonySerializerInterface $serializer = null,
     ) {
-        parent::__construct();
+        parent::__construct($serializer ?? self::createDefaultSerializer());
+    }
+
+    private static function createDefaultSerializer(): SymfonySerializerInterface
+    {
+        $extractor = new PropertyInfoExtractor(typeExtractors: [new ReflectionExtractor()]);
+
+        $normalizers = [
+            new IdNormalizer(),
+            new CarbonImmutableNormalizer(),
+            new DateTimeNormalizer(),
+            new ArrayDenormalizer(),
+            new ObjectNormalizer(propertyTypeExtractor: $extractor),
+        ];
+
+        $encoders = [new JsonEncoder()];
+
+        return new SymfonySerializer($normalizers, $encoders);
     }
 
     /**
@@ -46,8 +73,12 @@ final class MessageNameSerializer extends Serializer
         $encoded = parent::encode($envelope);
 
         // Override 'type' header with semantic name instead of FQN
-        $encoded['headers']['type'] = $messageName;
+        $headers = $encoded['headers'] ?? [];
+        assert(is_array($headers));
+        $headers['type'] = $messageName;
+        $encoded['headers'] = $headers;
 
+        /** @var array<string, mixed> $encoded */
         // Stamps are automatically serialized to X-Message-Stamp-* headers by parent!
         return $encoded;
     }
@@ -59,23 +90,29 @@ final class MessageNameSerializer extends Serializer
      */
     public function decode(array $encodedEnvelope): Envelope
     {
-        if (empty($encodedEnvelope['headers']['type'])) {
+        $headers = $encodedEnvelope['headers'] ?? [];
+        assert(is_array($headers));
+
+        if (empty($headers['type'])) {
             throw new MessageDecodingFailedException('Encoded envelope does not have a "type" header.');
         }
 
-        $messageName = $encodedEnvelope['headers']['type'];
+        $messageName = $headers['type'];
+        assert(is_string($messageName));
 
         // Translate semantic name to FQN
         $fqn = $this->messageTypes[$messageName] ?? null;
 
         if ($fqn === null) {
-            throw new MessageDecodingFailedException(
-                sprintf('Unknown message type "%s". Configure it in message_broker.inbox.message_types', $messageName)
-            );
+            throw new MessageDecodingFailedException(sprintf(
+                'Unknown message type "%s". Configure it in message_broker.inbox.message_types',
+                $messageName
+            ));
         }
 
         // Replace type header with FQN
-        $encodedEnvelope['headers']['type'] = $fqn;
+        $headers['type'] = $fqn;
+        $encodedEnvelope['headers'] = $headers;
 
         // Let native Symfony Serializer handle everything else:
         // - Stamp deserialization (MessageIdStamp, etc. from X-Message-Stamp-* headers)
@@ -86,13 +123,11 @@ final class MessageNameSerializer extends Serializer
 
     private function extractMessageName(object $message): string
     {
-        $reflection = new ReflectionClass($message);
+        $reflection = new \ReflectionClass($message);
         $attributes = $reflection->getAttributes(MessageName::class);
 
         if (empty($attributes)) {
-            throw new \RuntimeException(
-                sprintf('Message %s must have #[MessageName] attribute', $message::class)
-            );
+            throw new \RuntimeException(sprintf('Message %s must have #[MessageName] attribute', $message::class));
         }
 
         /** @var MessageName $messageNameAttr */

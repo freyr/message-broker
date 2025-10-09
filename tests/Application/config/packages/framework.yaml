@@ -5,6 +5,13 @@ framework:
     messenger:
         failure_transport: failed
 
+        buses:
+            messenger.bus.default:
+                default_middleware: true
+                middleware:
+                    - doctrine_transaction
+                    - Freyr\MessageBroker\Inbox\DeduplicationMiddleware
+
         transports:
             # Outbox - stores events in database with binary UUID v7
             outbox:

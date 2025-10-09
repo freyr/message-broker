@@ -242,7 +242,7 @@ services:
             $messageTypes: '%message_broker.inbox.message_types%'
 
     # Deduplication Middleware (REQUIRED - inbox pattern) ✨
-    Freyr\MessageBroker\DeduplicationMiddleware:
+    Freyr\MessageBroker\Inbox\DeduplicationMiddleware:
         arguments:
             $connection: '@doctrine.dbal.default_connection'
             $logger: '@logger'

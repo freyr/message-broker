@@ -13,5 +13,8 @@ use Symfony\Component\Messenger\Stamp\StampInterface;
  */
 final readonly class MessageNameStamp implements StampInterface
 {
-    public function __construct(public string $messageName) {}
+    public function __construct(
+        public string $messageName,
+    ) {
+    }
 }

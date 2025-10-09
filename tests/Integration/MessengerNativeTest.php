@@ -6,12 +6,7 @@ namespace Freyr\MessageBroker\Tests\Integration;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Inbox\Transport\DoctrineInboxConnection;
 use Freyr\MessageBroker\Serializer\MessageNameSerializer;
-use Freyr\MessageBroker\Outbox\Transport\DoctrineOutboxConnection;
-
-// NOTE: This test uses old custom transports that have been removed.
-// It needs significant refactoring to work with the new simplified architecture.
 use Freyr\MessageBroker\Tests\Fixtures\Consumer\OrderPlacedMessage;
 use Freyr\MessageBroker\Tests\Fixtures\Publisher\OrderPlacedEvent;
 use Symfony\Component\Messenger\Bridge\Doctrine\Transport\Connection;
@@ -24,9 +19,10 @@ use Symfony\Component\Messenger\Middleware\HandleMessageMiddleware;
 /**
  * Native Messenger Integration Test.
  *
- * Tests using Symfony Messenger's native contract:
+ * Tests using Symfony Messenger's native components with MessageNameSerializer:
+ * - Standard DoctrineTransport with auto-increment PK
  * - MessageBus for dispatching
- * - Worker for consuming
+ * - Worker pattern for consuming
  * - Handlers for processing
  */
 final class MessengerNativeTest extends IntegrationTestCase
@@ -34,6 +30,8 @@ final class MessengerNativeTest extends IntegrationTestCase
     private DoctrineTransport $outboxTransport;
     private DoctrineTransport $inboxTransport;
     private MessageBus $bus;
+
+    /** @var array<object> */
     private array $handledMessages = [];
 
     protected function setUp(): void
@@ -42,18 +40,24 @@ final class MessengerNativeTest extends IntegrationTestCase
 
         $this->handledMessages = [];
 
-        // Setup outbox transport
+        // Setup outbox transport with native Connection (auto-increment PK)
+        // Outbox needs message type mapping for decode (consuming from outbox returns events)
         $outboxConfig = Connection::buildConfiguration(
             'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
         );
-        $outboxConnection = new DoctrineOutboxConnection($outboxConfig, $this->getConnection());
-        $this->outboxTransport = new DoctrineTransport($outboxConnection, new MessageNameSerializer([]));
+        $outboxConnection = new Connection($outboxConfig, $this->getConnection());
+        $outboxMessageTypes = [
+            'order.placed' => OrderPlacedEvent::class,
+        ];
+        $this->outboxTransport = new DoctrineTransport($outboxConnection, new MessageNameSerializer(
+            $outboxMessageTypes
+        ));
 
-        // Setup inbox transport
+        // Setup inbox transport with native Connection (auto-increment PK)
         $inboxConfig = Connection::buildConfiguration(
-            'inbox://default?table_name=messenger_inbox&queue_name=inbox'
+            'doctrine://default?table_name=messenger_inbox&queue_name=inbox'
         );
-        $inboxConnection = new DoctrineInboxConnection($inboxConfig, $this->getConnection());
+        $inboxConnection = new Connection($inboxConfig, $this->getConnection());
         $messageTypes = [
             'order.placed' => OrderPlacedMessage::class,
         ];
@@ -63,7 +67,7 @@ final class MessengerNativeTest extends IntegrationTestCase
         $this->bus = $this->createMessageBus();
     }
 
-    public function test_outbox_message_dispatched_via_bus_is_stored(): void
+    public function testOutboxMessageDispatchedViaBusIsStored(): void
     {
         // Given
         $event = new OrderPlacedEvent(
@@ -79,11 +83,12 @@ final class MessengerNativeTest extends IntegrationTestCase
         $this->outboxTransport->send($envelope);
 
         // Then - Message stored in outbox
-        $count = $this->getConnection()->fetchOne('SELECT COUNT(*) FROM messenger_outbox');
+        $count = $this->getConnection()
+            ->fetchOne('SELECT COUNT(*) FROM messenger_outbox');
         $this->assertEquals(1, $count);
     }
 
-    public function test_outbox_worker_consumes_and_handles_message(): void
+    public function testOutboxWorkerConsumesAndHandlesMessage(): void
     {
         // Given - Message in outbox
         $event = new OrderPlacedEvent(
@@ -106,61 +111,55 @@ final class MessengerNativeTest extends IntegrationTestCase
         $this->assertEquals($event->orderId->__toString(), $this->handledMessages[0]->orderId->__toString());
 
         // And - Message marked as delivered
-        $deliveredCount = $this->getConnection()->fetchOne(
-            'SELECT COUNT(*) FROM messenger_outbox WHERE delivered_at IS NOT NULL'
-        );
+        $deliveredCount = $this->getConnection()
+            ->fetchOne('SELECT COUNT(*) FROM messenger_outbox WHERE delivered_at IS NOT NULL');
         $this->assertEquals(1, $deliveredCount);
     }
 
-    public function test_inbox_worker_consumes_and_handles_typed_message(): void
+    public function testSerializerEncodesAndDecodesConsumerMessages(): void
     {
-        // Given - Message in inbox
+        // Given - Consumer message is typically never encoded (only decoded from AMQP)
+        // But we can test the serializer's encode/decode cycle for inbox messages
         $messageId = Id::new();
         $orderId = Id::new();
         $customerId = Id::new();
         $placedAt = CarbonImmutable::now();
 
-        $inboxMessage = [
-            'message_name' => 'order.placed',
-            'message_id' => $messageId->__toString(),
-            'payload' => [
-                'messageId' => $messageId->__toString(),
-                'orderId' => $orderId->__toString(),
-                'customerId' => $customerId->__toString(),
-                'amount' => 100.50,
-                'placedAt' => $placedAt->toIso8601String(),
-            ],
-        ];
-
-        $body = json_encode($inboxMessage);
-        $headers = [
-            'message_name' => 'order.placed',
-            'message_id' => $messageId->__toString(),
-        ];
-
-        // Directly send to inbox (bypassing transport abstraction)
-        $inboxConfig = Connection::buildConfiguration(
-            'inbox://default?table_name=messenger_inbox&queue_name=inbox'
+        // Create a test event (with MessageName) instead of consumer message
+        $event = new OrderPlacedEvent(
+            messageId: $messageId,
+            orderId: $orderId,
+            customerId: $customerId,
+            amount: 100.50,
+            placedAt: $placedAt,
         );
-        $inboxConnection = new DoctrineInboxConnection($inboxConfig, $this->getConnection());
-        $inboxConnection->send($body, $headers);
 
-        // When - Consume message via transport and dispatch via bus
+        // When - Send to inbox transport
+        $envelope = new Envelope($event);
+        $this->inboxTransport->send($envelope);
+
+        // Verify message is stored
+        $count = $this->getConnection()
+            ->fetchOne('SELECT COUNT(*) FROM messenger_inbox');
+        $this->assertEquals(1, $count, 'Message should be stored in inbox');
+
+        // Consume and verify it can be deserialized back
         $this->consumeOneMessageFromTransport($this->inboxTransport);
 
-        // Then - Typed message was handled
+        // Then - Message was handled
         $this->assertCount(1, $this->handledMessages);
-        $this->assertInstanceOf(OrderPlacedMessage::class, $this->handledMessages[0]);
-        $this->assertEquals($orderId->__toString(), $this->handledMessages[0]->orderId->__toString());
-        $this->assertEquals($customerId->__toString(), $this->handledMessages[0]->customerId->__toString());
-        $this->assertEquals(100.50, $this->handledMessages[0]->amount);
+        // Note: When consumed from inbox with 'order.placed' type, it deserializes to OrderPlacedMessage
+        $firstMessage = $this->handledMessages[0];
+        $this->assertInstanceOf(OrderPlacedMessage::class, $firstMessage);
+        $this->assertEquals($orderId->__toString(), $firstMessage->orderId->__toString());
+        $this->assertEquals(100.50, $firstMessage->amount);
     }
 
-    public function test_multiple_messages_can_be_consumed_sequentially(): void
+    public function testMultipleMessagesCanBeConsumedSequentially(): void
     {
         // Given - Multiple messages in outbox
         $events = [];
-        for ($i = 0; $i < 3; $i++) {
+        for ($i = 0; $i < 3; ++$i) {
             $event = new OrderPlacedEvent(
                 messageId: Id::new(),
                 orderId: Id::new(),
@@ -173,7 +172,7 @@ final class MessengerNativeTest extends IntegrationTestCase
         }
 
         // When - Consume all messages via transport and dispatch via bus
-        for ($i = 0; $i < 3; $i++) {
+        for ($i = 0; $i < 3; ++$i) {
             $this->consumeOneMessageFromTransport($this->outboxTransport);
         }
 
@@ -219,14 +218,15 @@ final class MessengerNativeTest extends IntegrationTestCase
         // Get one message from transport (native Messenger API)
         $envelopes = $transport->get();
 
-        if (!empty($envelopes)) {
-            $envelope = $envelopes[0];
-
+        foreach ($envelopes as $envelope) {
             // Dispatch through MessageBus (native Messenger API)
             $this->bus->dispatch($envelope);
 
             // Acknowledge the message (native Messenger API)
             $transport->ack($envelope);
+
+            // Process only one message
+            break;
         }
     }
 }

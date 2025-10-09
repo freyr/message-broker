@@ -18,11 +18,14 @@ framework:
                     # Runs after transaction starts, before handlers
 
         transports:
-            # Outbox transport - stores events in database with transactional guarantees
-            # Uses native Doctrine transport with auto-increment ID
             outbox:
                 dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
                 serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
+                retry_strategy:
+                  max_retries: 3
+                  delay: 1000
+                  multiplier: 2
+
 
             # AMQP transport - external message broker
             # For publishing (outbox) and consuming (inbox)
@@ -32,9 +35,9 @@ framework:
                 options:
                     auto_setup: false
                 retry_strategy:
-                    max_retries: 3
-                    delay: 1000
-                    multiplier: 2
+                  max_retries: 3
+                  delay: 1000
+                  multiplier: 2
 
             # Failed transport - for all failed messages
             failed:

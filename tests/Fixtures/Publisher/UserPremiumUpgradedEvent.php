@@ -15,7 +15,7 @@ use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingKey;
  * Demonstrates wildcard routing key override.
  */
 #[MessageName('user.premium.upgraded')]
-#[AmqpRoutingKey('user.*.upgraded')]  // Wildcard routing
+#[AmqpRoutingKey('user.*.upgraded')] // Wildcard routing
 final readonly class UserPremiumUpgradedEvent
 {
     public function __construct(

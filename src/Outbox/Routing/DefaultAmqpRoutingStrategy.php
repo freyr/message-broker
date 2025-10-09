@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Outbox\Routing;
 
-use ReflectionClass;
-
 /**
  * Default AMQP Routing Strategy.
  *
@@ -25,12 +23,13 @@ final readonly class DefaultAmqpRoutingStrategy implements AmqpRoutingStrategyIn
     public function getExchange(object $event, string $messageName): string
     {
         // Check for #[AmqpExchange] attribute override
-        $reflection = new ReflectionClass($event);
+        $reflection = new \ReflectionClass($event);
         $attributes = $reflection->getAttributes(AmqpExchange::class);
 
-        if (!empty($attributes)) {
+        if (! empty($attributes)) {
             /** @var AmqpExchange $exchangeAttr */
             $exchangeAttr = $attributes[0]->newInstance();
+
             return $exchangeAttr->name;
         }
 
@@ -50,12 +49,13 @@ final readonly class DefaultAmqpRoutingStrategy implements AmqpRoutingStrategyIn
     public function getRoutingKey(object $event, string $messageName): string
     {
         // Check for #[AmqpRoutingKey] attribute override
-        $reflection = new ReflectionClass($event);
+        $reflection = new \ReflectionClass($event);
         $attributes = $reflection->getAttributes(AmqpRoutingKey::class);
 
-        if (!empty($attributes)) {
+        if (! empty($attributes)) {
             /** @var AmqpRoutingKey $routingKeyAttr */
             $routingKeyAttr = $attributes[0]->newInstance();
+
             return $routingKeyAttr->key;
         }
 
@@ -72,7 +72,7 @@ final readonly class DefaultAmqpRoutingStrategy implements AmqpRoutingStrategyIn
 
         return [
             'x-message-name' => $messageName,
-            'x-message-domain' => $parts[0] ?? 'unknown',
+            'x-message-domain' => $parts[0],
             'x-message-subdomain' => $parts[1] ?? 'unknown',
             'x-message-action' => $parts[2] ?? 'unknown',
         ];

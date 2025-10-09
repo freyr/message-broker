@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Outbox\Command;
 
 use Carbon\CarbonImmutable;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\ParameterType;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -40,13 +41,7 @@ final class CleanupOutboxCommand extends Command
     protected function configure(): void
     {
         $this
-            ->addOption(
-                'days',
-                'd',
-                InputOption::VALUE_REQUIRED,
-                'Retention period in days (default: 7)',
-                '7'
-            )
+            ->addOption('days', 'd', InputOption::VALUE_REQUIRED, 'Retention period in days (default: 7)', '7')
             ->addOption(
                 'batch-size',
                 'b',
@@ -89,7 +84,7 @@ final class CleanupOutboxCommand extends Command
                     'limit' => $batchSize,
                 ],
                 [
-                    'limit' => \PDO::PARAM_INT,
+                    'limit' => ParameterType::INTEGER,
                 ]
             );
 

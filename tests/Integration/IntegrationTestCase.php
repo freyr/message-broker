@@ -43,7 +43,7 @@ abstract class IntegrationTestCase extends TestCase
         ]);
 
         // Register custom Doctrine types
-        if (!IdType::hasType('id_binary')) {
+        if (! IdType::hasType('id_binary')) {
             IdType::addType('id_binary', IdType::class);
         }
 
@@ -85,6 +85,7 @@ abstract class IntegrationTestCase extends TestCase
         // Clean tables before each test
         self::$connection->executeStatement('TRUNCATE TABLE messenger_outbox');
         self::$connection->executeStatement('TRUNCATE TABLE messenger_inbox');
+        self::$connection->executeStatement('TRUNCATE TABLE message_broker_deduplication');
         self::$connection->executeStatement('TRUNCATE TABLE messenger_messages');
 
         // Purge AMQP queue
@@ -95,37 +96,48 @@ abstract class IntegrationTestCase extends TestCase
 
     private static function createDatabaseSchema(): void
     {
-        // Create outbox table
+        // Create outbox table (auto-increment PK - standard Symfony Messenger)
         self::$connection->executeStatement('
             CREATE TABLE IF NOT EXISTS messenger_outbox (
-                id BINARY(16) NOT NULL PRIMARY KEY,
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
                 body LONGTEXT NOT NULL,
                 headers LONGTEXT NOT NULL,
                 queue_name VARCHAR(190) NOT NULL DEFAULT "outbox",
                 created_at DATETIME NOT NULL,
                 available_at DATETIME NOT NULL,
                 delivered_at DATETIME DEFAULT NULL,
-                INDEX idx_available_at (available_at),
+                INDEX idx_queue_available (queue_name, available_at),
                 INDEX idx_delivered_at (delivered_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ');
 
-        // Create inbox table
+        // Create inbox table (auto-increment PK - standard Symfony Messenger)
         self::$connection->executeStatement('
             CREATE TABLE IF NOT EXISTS messenger_inbox (
-                id BINARY(16) NOT NULL PRIMARY KEY,
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
                 body LONGTEXT NOT NULL,
                 headers LONGTEXT NOT NULL,
                 queue_name VARCHAR(190) NOT NULL DEFAULT "inbox",
                 created_at DATETIME NOT NULL,
                 available_at DATETIME NOT NULL,
                 delivered_at DATETIME DEFAULT NULL,
-                INDEX idx_available_at (available_at),
+                INDEX idx_queue_available (queue_name, available_at),
                 INDEX idx_delivered_at (delivered_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ');
 
-        // Create standard messenger_messages table
+        // Create deduplication table (binary UUID v7 PK for message_id)
+        self::$connection->executeStatement('
+            CREATE TABLE IF NOT EXISTS message_broker_deduplication (
+                message_id BINARY(16) NOT NULL PRIMARY KEY COMMENT "(DC2Type:id_binary)",
+                message_name VARCHAR(255) NOT NULL,
+                processed_at DATETIME NOT NULL,
+                INDEX idx_message_name (message_name),
+                INDEX idx_processed_at (processed_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ');
+
+        // Create standard messenger_messages table (for failed messages)
         self::$connection->executeStatement('
             CREATE TABLE IF NOT EXISTS messenger_messages (
                 id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -146,6 +158,7 @@ abstract class IntegrationTestCase extends TestCase
     {
         self::$connection->executeStatement('DROP TABLE IF EXISTS messenger_outbox');
         self::$connection->executeStatement('DROP TABLE IF EXISTS messenger_inbox');
+        self::$connection->executeStatement('DROP TABLE IF EXISTS message_broker_deduplication');
         self::$connection->executeStatement('DROP TABLE IF EXISTS messenger_messages');
     }
 
@@ -165,9 +178,7 @@ abstract class IntegrationTestCase extends TestCase
     protected function createSerializer(): Serializer
     {
         $reflectionExtractor = new ReflectionExtractor();
-        $propertyTypeExtractor = new PropertyInfoExtractor(
-            typeExtractors: [$reflectionExtractor]
-        );
+        $propertyTypeExtractor = new PropertyInfoExtractor(typeExtractors: [$reflectionExtractor]);
 
         $normalizers = [
             new IdNormalizer(),
@@ -176,7 +187,9 @@ abstract class IntegrationTestCase extends TestCase
             new ObjectNormalizer(
                 propertyTypeExtractor: $propertyTypeExtractor,
                 // Disable type enforcement to allow int->float coercion
-                defaultContext: [ObjectNormalizer::DISABLE_TYPE_ENFORCEMENT => true]
+                defaultContext: [
+                    ObjectNormalizer::DISABLE_TYPE_ENFORCEMENT => true,
+                ]
             ),
         ];
 

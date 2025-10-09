@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Application;
 
+use Doctrine\Bundle\DoctrineBundle\DoctrineBundle;
+use Freyr\MessageBroker\FreyrMessageBrokerBundle;
+use Symfony\Bundle\FrameworkBundle\FrameworkBundle;
 use Symfony\Bundle\FrameworkBundle\Kernel\MicroKernelTrait;
 use Symfony\Component\Config\Loader\LoaderInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
@@ -16,11 +19,7 @@ class Kernel extends BaseKernel
 
     public function registerBundles(): iterable
     {
-        return [
-            new \Symfony\Bundle\FrameworkBundle\FrameworkBundle(),
-            new \Doctrine\Bundle\DoctrineBundle\DoctrineBundle(),
-            new \Freyr\MessageBroker\FreyrMessageBrokerBundle(),
-        ];
+        return [new FrameworkBundle(), new DoctrineBundle(), new FreyrMessageBrokerBundle()];
     }
 
     public function getProjectDir(): string
