@@ -1,0 +1,4 @@
+doctrine:
+  dbal:
+    types:
+      id_binary: Freyr\MessageBroker\Doctrine\Type\IdType

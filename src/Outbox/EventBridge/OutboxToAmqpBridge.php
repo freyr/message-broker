@@ -31,7 +31,7 @@ final readonly class OutboxToAmqpBridge
     }
 
     #[AsMessageHandler(fromTransport: 'outbox')]
-    public function __invoke(object $event): void
+    public function __invoke(OutboxMessage $event): void
     {
         // Extract message name and ID
         $messageName = $this->extractMessageName($event);
@@ -60,7 +60,7 @@ final readonly class OutboxToAmqpBridge
         $this->eventBus->dispatch($envelope);
     }
 
-    private function extractMessageName(object $event): string
+    private function extractMessageName(OutboxMessage $event): string
     {
         $reflection = new \ReflectionClass($event);
         $attributes = $reflection->getAttributes(MessageName::class);
@@ -75,7 +75,7 @@ final readonly class OutboxToAmqpBridge
         return $messageNameAttr->name;
     }
 
-    private function extractMessageId(object $event): Id
+    private function extractMessageId(OutboxMessage $event): Id
     {
         $reflection = new \ReflectionClass($event);
 

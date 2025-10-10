@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Tests\Fixtures\Publisher;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
+use Freyr\MessageBroker\Outbox\EventBridge\OutboxMessage;
 use Freyr\MessageBroker\Outbox\MessageName;
 use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingKey;
 
@@ -16,7 +17,7 @@ use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingKey;
  */
 #[MessageName('user.premium.upgraded')]
 #[AmqpRoutingKey('user.*.upgraded')] // Wildcard routing
-final readonly class UserPremiumUpgradedEvent
+final readonly class UserPremiumUpgradedEvent implements OutboxMessage
 {
     public function __construct(
         public Id $messageId,

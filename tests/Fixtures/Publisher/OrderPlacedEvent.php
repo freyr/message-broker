@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Tests\Fixtures\Publisher;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
+use Freyr\MessageBroker\Outbox\EventBridge\OutboxMessage;
 use Freyr\MessageBroker\Outbox\MessageName;
 
 /**
@@ -14,7 +15,7 @@ use Freyr\MessageBroker\Outbox\MessageName;
  * This event is dispatched in the publisher application and sent via outbox pattern.
  */
 #[MessageName('order.placed')]
-final readonly class OrderPlacedEvent
+final readonly class OrderPlacedEvent implements OutboxMessage
 {
     public function __construct(
         public Id $messageId,

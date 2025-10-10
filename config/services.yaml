@@ -38,15 +38,15 @@ services:
     # Note: Handler is auto-configured via #[AsMessageHandler(fromTransport: 'outbox')] attribute
     # Adds MessageIdStamp to envelope - stamps automatically serialized to X-Message-Stamp-* headers
     Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
+        autoconfigure: true
         arguments:
             $eventBus: '@messenger.default_bus'
             $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
             $logger: '@logger'
 
-    # Outbox Cleanup Command (optional maintenance)
-    # Uses default table name 'messenger_outbox' and queue name 'outbox'
-    # Customize in your services.yaml if you use different names
-    Freyr\MessageBroker\Outbox\Command\CleanupOutboxCommand:
+    # Deduplication Store Cleanup Command (optional maintenance)
+    # Removes old idempotency records from the deduplication store
+    Freyr\MessageBroker\Command\DeduplicationStoreCleanup:
         arguments:
             $connection: '@doctrine.dbal.default_connection'
         tags: ['console.command']

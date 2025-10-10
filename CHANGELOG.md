@@ -2,36 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-## [0.1.0] - 2025-10-03
+## [0.1.0] - 2025-10-10
 
 ### Added
-- Initial release of Freyr Message Broker bundle
-- Outbox pattern implementation with transactional guarantees
-- Inbox pattern implementation with automatic deduplication using binary UUID v7
-- Custom Doctrine transport for inbox with INSERT IGNORE support
-- Strategy-based publishing architecture for outbox events
-- AMQP publishing strategy with convention-based routing
-- Generic outbox bridge handler with automatic DLQ routing
-- Typed inbox serializer for type-safe message handling
-- Commands for AMQP ingestion, setup, and outbox cleanup
-- Support for Symfony 6.4+ and 7.x
-- Comprehensive documentation and examples
-- FreyrMessageBrokerBundle with DependencyInjection support
-- Semantic configuration (`message_broker`) for inbox message types and outbox settings
 
-### Features
-- **3-table architecture**: Separate tables for inbox, outbox, and failed messages
-- **Binary UUID v7**: Database-level deduplication with binary(16) primary keys
-- **Strategy pattern**: Extensible publishing system supporting AMQP, HTTP, SQS, etc.
-- **Convention-based routing**: Automatic AMQP exchange/routing key determination
-- **Attribute overrides**: `#[MessageName]`, `#[AmqpExchange]`, `#[AmqpRoutingKey]`
-- **Horizontal scaling**: SKIP LOCKED support for concurrent workers
-- **At-least-once delivery**: Guaranteed event delivery with idempotent consumers
+- **Transactional Outbox Pattern** - Publish events reliably within database transactions
+- **Inbox Pattern with Deduplication** - Middleware-based exactly-once processing using binary UUID v7
+- **Semantic Message Naming** - Language-agnostic message names via `#[MessageName]` attribute
+- **AMQP Routing Strategy** - Convention-based routing with attribute overrides
+- **OutboxMessage Interface** - Marker interface for type-safe outbox events
+- **MessageNameSerializer** - Unified serializer supporting both inbox and outbox patterns
+- **DeduplicationMiddleware** - Transactional deduplication for consumed messages
+- **Binary UUID v7 Support** - Custom Doctrine type for message identifiers (used in deduplication)
+- **Custom Normalizers** - IdNormalizer and CarbonImmutableNormalizer for value objects
+- **Deduplication Cleanup Command** - Remove old idempotency records
+- **3-Table Architecture** - Dedicated tables for outbox, deduplication, and failed messages
 
-[Unreleased]: https://github.com/freyr/message-broker/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/freyr/message-broker/releases/tag/v0.1.0
+### Documentation
+
+- Outbox Pattern - Transactional consistency principles
+- Inbox Deduplication - Exactly-once processing guarantees
+- Message Serialization - Semantic naming and cross-language compatibility
+- AMQP Routing - Convention-based routing with customization options
+
+[0.1.0]: https://github.com/freyr/message-broker/releases/tag/0.1.0

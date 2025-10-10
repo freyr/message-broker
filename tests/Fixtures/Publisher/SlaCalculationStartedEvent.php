@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Tests\Fixtures\Publisher;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
+use Freyr\MessageBroker\Outbox\EventBridge\OutboxMessage;
 use Freyr\MessageBroker\Outbox\MessageName;
 use Freyr\MessageBroker\Outbox\Routing\AmqpExchange;
 
@@ -16,7 +17,7 @@ use Freyr\MessageBroker\Outbox\Routing\AmqpExchange;
  */
 #[MessageName('sla.calculation.started')]
 #[AmqpExchange('sla.events')] // Override: use custom exchange
-final readonly class SlaCalculationStartedEvent
+final readonly class SlaCalculationStartedEvent implements OutboxMessage
 {
     public function __construct(
         public Id $messageId,
