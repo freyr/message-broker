@@ -7,11 +7,11 @@ Messages are serialized using semantic, language-agnostic names (`order.placed`)
 ## How It Works
 
 **Publishing (Outbox → AMQP):**
-1. Event has `#[MessageName('order.placed')]` attribute
-2. `MessageNameSerializer` extracts semantic name during encoding
-3. Sets AMQP `type` header to `order.placed` (not PHP FQN)
-4. Body contains JSON-serialized event payload
-5. Stamps automatically serialized to `X-Message-Stamp-*` headers
+1. Event has `#[MessageName('order.placed')]` attribute (no messageId property needed)
+2. `OutboxToAmqpBridge` generates messageId (UUID v7) and adds MessageIdStamp
+3. `MessageNameSerializer` extracts semantic name and sets `type` header to `order.placed`
+4. Body contains JSON-serialized event payload (only business data)
+5. MessageId transported via MessageIdStamp in `X-Message-Stamp-*` header
 
 **Consuming (AMQP → Inbox):**
 1. Message arrives with `type: order.placed` header
@@ -60,12 +60,11 @@ message_types['order.placed'] → App\Message\OrderPlaced
 
 **AMQP Headers:**
 - `type: order.placed` - Semantic message name
-- `X-Message-Stamp-MessageIdStamp: [{"messageId":"..."}]` - Extracted from Message
+- `X-Message-Stamp-MessageIdStamp: [{"messageId":"..."}]` - For deduplication
 
 **AMQP Body:**
 ```json
 {
-  "messageId": "01234567-89ab-cdef...",
   "orderId": "550e8400-e29b...",
   "amount": 99.99,
   "placedAt": "2025-10-10T10:30:00+00:00"
@@ -94,5 +93,6 @@ message_broker:
             'user.registered': 'App\Message\UserRegistered'
 ```
 
-- **Publisher events** must have `#[MessageName]` attribute - no mapping needed.
-- **Publisher events** must have `Freyr\Identity\Id $messageId` public property for message_id extraction
+**Publisher events** requirements:
+- `#[MessageName]` attribute - semantic name for routing (REQUIRED)
+- `implements OutboxMessage` - marker interface (REQUIRED)

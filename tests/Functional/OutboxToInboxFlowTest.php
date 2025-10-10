@@ -129,12 +129,10 @@ class OutboxToInboxFlowTest extends KernelTestCase
     public function testOutboxToInboxCompleteFlow(): void
     {
         // Step 1: Dispatch event to outbox
-        $messageId = Id::new();
         $orderId = Id::new();
         $customerId = Id::new();
 
         $event = new OrderPlacedEvent(
-            messageId: $messageId,
             orderId: $orderId,
             customerId: $customerId,
             amount: 99.99,
@@ -163,8 +161,10 @@ class OutboxToInboxFlowTest extends KernelTestCase
 
         // Step 3: Simulate AMQP→Handler flow with DeduplicationMiddleware
         // In production: AMQP transport → MessageNameSerializer adds stamps → DeduplicationMiddleware → Handler
+        // Generate messageId for deduplication (simulates what OutboxToAmqpBridge does)
+        $messageId = Id::new();
+
         $consumerMessage = new OrderPlacedMessage(
-            messageId: $messageId,
             orderId: $orderId,
             customerId: $customerId,
             amount: 99.99,
@@ -203,7 +203,6 @@ class OutboxToInboxFlowTest extends KernelTestCase
         $receivedMessage = $messages[0];
 
         $this->assertInstanceOf(OrderPlacedMessage::class, $receivedMessage);
-        $this->assertEquals($messageId, $receivedMessage->messageId);
         $this->assertEquals($orderId, $receivedMessage->orderId);
         $this->assertEquals(99.99, $receivedMessage->amount);
     }
@@ -218,7 +217,6 @@ class OutboxToInboxFlowTest extends KernelTestCase
 
         // Create typed consumer message (simulates what MessageNameSerializer would create)
         $consumerMessage = new OrderPlacedMessage(
-            messageId: $messageId,
             orderId: $orderId,
             customerId: $customerId,
             amount: 99.99,

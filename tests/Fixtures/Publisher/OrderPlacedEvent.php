@@ -18,7 +18,6 @@ use Freyr\MessageBroker\Outbox\MessageName;
 final readonly class OrderPlacedEvent implements OutboxMessage
 {
     public function __construct(
-        public Id $messageId,
         public Id $orderId,
         public Id $customerId,
         public float $amount,

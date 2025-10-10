@@ -33,9 +33,11 @@ final readonly class OutboxToAmqpBridge
     #[AsMessageHandler(fromTransport: 'outbox')]
     public function __invoke(OutboxMessage $event): void
     {
-        // Extract message name and ID
+        // Extract message name
         $messageName = $this->extractMessageName($event);
-        $messageId = $this->extractMessageId($event);
+
+        // Generate messageId for this publishing (UUID v7 for ordering)
+        $messageId = Id::new();
 
         // Get AMQP routing
         $exchange = $this->routingStrategy->getExchange($event, $messageName);
@@ -52,6 +54,7 @@ final readonly class OutboxToAmqpBridge
 
         $this->logger->info('Publishing event to AMQP', [
             'message_name' => $messageName,
+            'message_id' => $messageId->__toString(),
             'event_class' => $event::class,
             'exchange' => $exchange,
             'routing_key' => $routingKey,
@@ -75,34 +78,4 @@ final readonly class OutboxToAmqpBridge
         return $messageNameAttr->name;
     }
 
-    private function extractMessageId(OutboxMessage $event): Id
-    {
-        $reflection = new \ReflectionClass($event);
-
-        if (! $reflection->hasProperty('messageId')) {
-            throw new \RuntimeException(sprintf(
-                'Event %s must have a public messageId property of type Id',
-                $event::class
-            ));
-        }
-
-        $property = $reflection->getProperty('messageId');
-
-        if (! $property->isPublic()) {
-            throw new \RuntimeException(sprintf('Property messageId in event %s must be public', $event::class));
-        }
-
-        $messageId = $property->getValue($event);
-
-        if (!$messageId instanceof Id) {
-            throw new \RuntimeException(sprintf(
-                'Property messageId in event %s must be of type %s, got %s',
-                $event::class,
-                Id::class,
-                get_debug_type($messageId)
-            ));
-        }
-
-        return $messageId;
-    }
 }

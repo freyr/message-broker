@@ -20,7 +20,6 @@ use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingKey;
 final readonly class UserPremiumUpgradedEvent implements OutboxMessage
 {
     public function __construct(
-        public Id $messageId,
         public Id $userId,
         public string $plan,
         public CarbonImmutable $upgradedAt,

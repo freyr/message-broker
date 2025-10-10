@@ -71,7 +71,6 @@ final class MessengerNativeTest extends IntegrationTestCase
     {
         // Given
         $event = new OrderPlacedEvent(
-            messageId: Id::new(),
             orderId: Id::new(),
             customerId: Id::new(),
             amount: 100.50,
@@ -92,7 +91,6 @@ final class MessengerNativeTest extends IntegrationTestCase
     {
         // Given - Message in outbox
         $event = new OrderPlacedEvent(
-            messageId: Id::new(),
             orderId: Id::new(),
             customerId: Id::new(),
             amount: 100.50,
@@ -120,14 +118,12 @@ final class MessengerNativeTest extends IntegrationTestCase
     {
         // Given - Consumer message is typically never encoded (only decoded from AMQP)
         // But we can test the serializer's encode/decode cycle for inbox messages
-        $messageId = Id::new();
         $orderId = Id::new();
         $customerId = Id::new();
         $placedAt = CarbonImmutable::now();
 
         // Create a test event (with MessageName) instead of consumer message
         $event = new OrderPlacedEvent(
-            messageId: $messageId,
             orderId: $orderId,
             customerId: $customerId,
             amount: 100.50,
@@ -161,7 +157,6 @@ final class MessengerNativeTest extends IntegrationTestCase
         $events = [];
         for ($i = 0; $i < 3; ++$i) {
             $event = new OrderPlacedEvent(
-                messageId: Id::new(),
                 orderId: Id::new(),
                 customerId: Id::new(),
                 amount: 100.00 + $i,

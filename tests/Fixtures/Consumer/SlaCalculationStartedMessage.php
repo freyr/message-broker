@@ -16,7 +16,6 @@ use Freyr\Identity\Id;
 final readonly class SlaCalculationStartedMessage
 {
     public function __construct(
-        public Id $messageId,
         public Id $slaId,
         public Id $ticketId,
         public CarbonImmutable $startedAt,

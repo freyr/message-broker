@@ -20,7 +20,6 @@ use Freyr\MessageBroker\Outbox\Routing\AmqpExchange;
 final readonly class SlaCalculationStartedEvent implements OutboxMessage
 {
     public function __construct(
-        public Id $messageId,
         public Id $slaId,
         public Id $ticketId,
         public CarbonImmutable $startedAt,
