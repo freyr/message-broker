@@ -19,6 +19,7 @@ services:
     # This overrides Symfony's default ObjectNormalizer with propertyTypeExtractor
     # Lower priority (-1000) ensures it runs as fallback after specialized normalizers
     Freyr\MessageBroker\Serializer\Normalizer\PropertyPromotionObjectNormalizer:
+        autowire: true
         class: Symfony\Component\Serializer\Normalizer\ObjectNormalizer
         arguments:
             $propertyTypeExtractor: '@property_info'
@@ -39,11 +40,18 @@ services:
         arguments:
             $serializer: '@serializer'
 
-    # Deduplication Middleware (inbox pattern)
-    Freyr\MessageBroker\Inbox\DeduplicationMiddleware:
+    # Deduplication Store (DBAL implementation)
+    Freyr\MessageBroker\Inbox\DeduplicationStore:
+        class: Freyr\MessageBroker\Inbox\DeduplicationDbalStore
         arguments:
             $connection: '@doctrine.dbal.default_connection'
             $logger: '@logger'
+
+    # Deduplication Middleware (inbox pattern)
+    # Runs AFTER doctrine_transaction middleware (priority -10)
+    Freyr\MessageBroker\Inbox\DeduplicationMiddleware:
+        arguments:
+            $store: '@Freyr\MessageBroker\Inbox\DeduplicationStore'
         tags:
             - { name: 'messenger.middleware', priority: -10 }
 
