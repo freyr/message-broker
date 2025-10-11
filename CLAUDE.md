@@ -289,14 +289,15 @@ services:
 ## Development Guidelines
 
 ### Domain Events Must Use #[MessageName] Attribute ✨
+
 ```php
 use Freyr\MessageBroker\Outbox\MessageName;
 use Freyr\MessageBroker\Outbox\EventBridge\OutboxMessage;
-use Freyr\MessageBroker\Outbox\Routing\{AmqpExchange, AmqpRoutingKey};
+use Freyr\MessageBroker\Outbox\Routing\{MessengerTransport, AmqpRoutingKey};
 use Freyr\Identity\Id;
 
 #[MessageName('order.placed')]  // REQUIRED: Message name for routing
-#[AmqpExchange('commerce')]     // OPTIONAL: Override default exchange
+#[MessengerTransport('commerce')]     // OPTIONAL: Override default exchange
 #[AmqpRoutingKey('order.test')] // OPTIONAL: Override default routing key
 final readonly class OrderPlaced implements OutboxMessage
 {
@@ -532,7 +533,7 @@ final readonly class OutboxToAmqpBridge
         $messageId = Id::new();
 
         // Get AMQP routing
-        $exchange = $this->routingStrategy->getExchange($event, $messageName);
+        $exchange = $this->routingStrategy->getTransport($event, $messageName);
         $routingKey = $this->routingStrategy->getRoutingKey($event, $messageName);
         $headers = $this->routingStrategy->getHeaders($messageName);
 

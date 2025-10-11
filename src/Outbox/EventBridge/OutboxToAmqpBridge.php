@@ -40,7 +40,7 @@ final readonly class OutboxToAmqpBridge
         $messageId = Id::new();
 
         // Get AMQP routing
-        $exchange = $this->routingStrategy->getExchange($event, $messageName);
+        $transport = $this->routingStrategy->getTransport($event);
         $routingKey = $this->routingStrategy->getRoutingKey($event, $messageName);
         $headers = $this->routingStrategy->getHeaders($messageName);
 
@@ -49,14 +49,14 @@ final readonly class OutboxToAmqpBridge
         $envelope = new Envelope($event, [
             new MessageIdStamp($messageId->__toString()),
             new AmqpStamp($routingKey, AMQP_NOPARAM, $headers),
-            new TransportNamesStamp(['amqp']),
+            new TransportNamesStamp([$transport]),
         ]);
 
         $this->logger->info('Publishing event to AMQP', [
             'message_name' => $messageName,
             'message_id' => $messageId->__toString(),
             'event_class' => $event::class,
-            'exchange' => $exchange,
+            'exchange' => $transport,
             'routing_key' => $routingKey,
         ]);
 

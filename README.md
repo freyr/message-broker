@@ -125,11 +125,11 @@ By default, events are published using convention-based routing:
 You can override this with attributes:
 
 ```php
-use Freyr\MessageBroker\Outbox\Routing\AmqpExchange;
+use Freyr\MessageBroker\Outbox\Routing\MessengerTransport;
 use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingKey;
 
 #[MessageName('order.placed')]
-#[AmqpExchange('commerce')]           // Custom exchange
+#[MessengerTransport('commerce')]           // Custom exchange
 #[AmqpRoutingKey('commerce.order.placed')]   // Custom routing key
 final readonly class OrderPlaced
 {

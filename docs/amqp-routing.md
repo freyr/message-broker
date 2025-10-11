@@ -2,67 +2,71 @@
 
 ## Principle
 
-AMQP routing determines which exchange and routing key are used when publishing events to RabbitMQ. The package uses convention-based defaults with attribute-based overrides.
+AMQP routing determines which Symfony Messenger transport and routing key are used when publishing events to RabbitMQ. Since Symfony Messenger requires exchanges to be configured statically in transport DSN, this package uses transport-based routing instead of dynamic exchange selection.
 
 ## Default Convention-Based Routing
 
 **Strategy:**
-- **Exchange**: First 2 parts of message name (e.g., `order.placed` → `order.placed`)
+- **Transport**: Default `amqp` transport (configured in messenger.yaml)
 - **Routing Key**: Full message name (e.g., `order.placed`)
-- **Headers**: `message_name` header set to semantic name
+- **Headers**: `x-message-name` and domain-specific headers
 
 **Examples:**
-- `order.placed` → exchange: `order.placed`, key: `order.placed`
-- `inventory.stock.received` → exchange: `inventory.stock`, key: `inventory.stock.received`
-- `user.premium.upgraded` → exchange: `user.premium`, key: `user.premium.upgraded`
+- `order.placed` → transport: `amqp`, key: `order.placed`
+- `inventory.stock.received` → transport: `amqp`, key: `inventory.stock.received`
+- `user.premium.upgraded` → transport: `amqp`, key: `user.premium.upgraded`
 
 ## Attribute-Based Overrides
 
-**Custom Exchange:**
+**Custom Transport:**
 ```php
 #[MessageName('order.placed')]
-#[AmqpExchange('commerce')]  // Override exchange
+#[MessengerTransport('commerce')]  // Override transport
 final class OrderPlaced implements OutboxMessage { }
 ```
-Result: exchange: `commerce`, key: `order.placed`
+Result: transport: `commerce`, key: `order.placed`
 
 **Custom Routing Key:**
 ```php
 #[MessageName('order.placed')]
-#[AmqpRoutingKey('inventory.orders.placed')] 
+#[AmqpRoutingKey('inventory.orders.placed')]
 final class OrderPlaced implements OutboxMessage { }
 ```
-Result: exchange: `order.placed`, key: `inventory.orders.placed`
+Result: transport: `amqp`, key: `inventory.orders.placed`
 
 **Both Overrides:**
 ```php
 #[MessageName('order.placed')]
-#[AmqpExchange('commerce')]
+#[MessengerTransport('commerce')]
 #[AmqpRoutingKey('commerce.order.created')]
 final class OrderPlaced implements OutboxMessage { }
 ```
-Result: exchange: `commerce`, key: `commerce.order.created`
+Result: transport: `commerce`, key: `commerce.order.created`
 
 ## Benefits
 
 **Convention over configuration:** Zero routing config for standard cases
 
-**Namespace isolation:** First 2 parts create logical domain boundaries
+**Transport-based isolation:** Use different transports for different domains (e.g., `commerce`, `inventory`, `billing`)
 
 **Flexibility:** Attributes override defaults when needed
+
+**Symfony-native:** Works with Symfony Messenger's transport configuration system
 
 ## Architecture
 
 ```
 [Event] → #[MessageName('order.placed')]
-            #[AmqpExchange('commerce')] (optional)
+            #[MessengerTransport('commerce')] (optional)
             #[AmqpRoutingKey('inventory.orders.placed')] (optional)
               ↓
     [AmqpRoutingStrategyInterface]
               ↓
     [DefaultAmqpRoutingStrategy]
               ↓
-    exchange: 'commerce', routing_key: 'inventory.orders.placed', headers: {...}
+    transport: 'commerce', routing_key: 'inventory.orders.placed', headers: {...}
+              ↓
+    [TransportNamesStamp] → routes to specified Messenger transport
               ↓
         [AMQP Publish]
 ```
@@ -71,7 +75,7 @@ Result: exchange: `commerce`, key: `commerce.order.created`
 
 - **AmqpRoutingStrategyInterface** - Contract for routing logic
 - **DefaultAmqpRoutingStrategy** - Convention-based implementation
-- **AmqpExchange attribute** - Override exchange name
+- **MessengerTransport attribute** - Override Symfony Messenger transport name
 - **AmqpRoutingKey attribute** - Override routing key
 - **OutboxToAmqpBridge** - Applies routing during publishing
 
@@ -82,17 +86,36 @@ Every AMQP message includes:
 - `content_type` - application/json
 - Auto-generated stamps in `X-Message-Stamp-*` headers
 
-## Consumer Binding Strategy
+## Transport Configuration
+
+Each transport must be configured in `messenger.yaml` with its AMQP exchange:
+
+```yaml
+framework:
+  messenger:
+    transports:
+      # Default transport
+      amqp:
+        dsn: '%env(MESSENGER_AMQP_DSN)%'  # amqp://user:pass@host:5672/vhost?exchange[name]=default.events
+        serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
+
+      # Domain-specific transport
+      commerce:
+        dsn: '%env(MESSENGER_AMQP_DSN)%?exchange[name]=commerce.events'
+        serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
+```
 
 **Publisher side:**
-- Publishes to exchange with routing key
+- Uses `TransportNamesStamp` to route to specified transport
+- Transport DSN defines the AMQP exchange
+- Routing key set dynamically via `AmqpStamp`
 
 **Consumer side (RabbitMQ):**
 - Create queue: `inventory_events`
-- Bind to exchange: `inventory.stock`
-- Binding pattern: `inventory.stock.*`
+- Bind to exchange: `commerce.events` (from transport DSN)
+- Binding pattern: `inventory.*` or specific keys
 
-This receives all events matching the pattern regardless of specific routing key.
+This receives all events matching the pattern.
 
 ## Custom Strategy
 
@@ -103,6 +126,6 @@ Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface:
 ```
 
 Implement interface:
-- `getExchange(object $event, string $messageName): string`
+- `getTransport(object $event): string`
 - `getRoutingKey(object $event, string $messageName): string`
 - `getHeaders(string $messageName): array`
