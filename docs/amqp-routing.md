@@ -2,7 +2,7 @@
 
 ## Principle
 
-AMQP routing determines which Symfony Messenger transport and routing key are used when publishing events to RabbitMQ. Since Symfony Messenger requires exchanges to be configured statically in transport DSN, this package uses transport-based routing instead of dynamic exchange selection.
+AMQP routing determines which Symfony Messenger transport and routing keys are used when publishing events to RabbitMQ. Since Symfony Messenger requires exchanges to be configured statically in transport DSN, this package uses transport-based routing.
 
 ## Default Convention-Based Routing
 

@@ -9,8 +9,7 @@ services:
         tags:
             - { name: 'doctrine.dbal.types', type: 'id_binary' }
 
-    # Auto-register all Normalizers using Symfony's native tag
-    # These will be automatically added to the @serializer service
+    # Auto-register all Normalizers
     Freyr\MessageBroker\Serializer\Normalizer\:
         resource: '../src/Serializer/Normalizer/'
         tags: ['serializer.normalizer']
@@ -69,8 +68,8 @@ services:
             $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
             $logger: '@logger'
 
-    # Deduplication Store Cleanup Command (optional maintenance)
-    # Removes old idempotency records from the deduplication store
+    # Deduplication Store Cleanup Command
+    # Removes old deduplication records
     Freyr\MessageBroker\Command\DeduplicationStoreCleanup:
         arguments:
             $connection: '@doctrine.dbal.default_connection'

@@ -7,9 +7,9 @@ Messages are serialized using semantic, language-agnostic names (`order.placed`)
 ## How It Works
 
 **Publishing (Outbox → AMQP):**
-1. Event has `#[MessageName('order.placed')]` attribute (no messageId property needed)
-2. `OutboxToAmqpBridge` generates messageId (UUID v7) and adds MessageIdStamp
-3. `MessageNameSerializer` extracts semantic name and sets `type` header to `order.placed`
+1. Event has `#[MessageName('order.placed')]` attribute
+2. `MessageNameSerializer` extracts semantic name and sets `type` header to `order.placed`
+3. `OutboxToAmqpBridge` generates messageId (UUID v7) and adds MessageIdStamp
 4. Body contains JSON-serialized event payload (only business data)
 5. MessageId transported via MessageIdStamp in `X-Message-Stamp-*` header
 
@@ -51,7 +51,7 @@ message_types['order.placed'] → App\Message\OrderPlaced
 ## Key Components
 
 - **MessageName attribute** - Declares semantic name on event classes
-- **MessageNameSerializer** - Unified serializer for both inbox and outbox
+- **InboxSerializer|OutboxSerializer** - Serializers for inbox and outbox
 - **message_types configuration** - Maps semantic names to PHP classes
 - **Symfony Serializer** - Native JSON serialization with normalizers
 - **Stamp headers** - X-Message-Stamp-* for metadata transport
@@ -80,7 +80,7 @@ message_types['order.placed'] → App\Message\OrderPlaced
 **Adding Custom Types:**
 Create normalizer/denormalizer and tag with `serializer.normalizer`:
 
-All normalizers tagged in service container are automatically used by MessageNameSerializer since it extends Symfony's native serializer service.
+All normalizers tagged in a service container are automatically used by Serializers since it extends Symfony's native serializer service.
 
 ## Configuration
 
