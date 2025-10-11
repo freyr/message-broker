@@ -1,6 +1,0 @@
-message_broker:
-    inbox:
-        message_types:
-            'order.placed': 'Freyr\MessageBroker\Tests\Fixtures\Consumer\OrderPlacedMessage'
-            'user.premium.upgraded': 'Freyr\MessageBroker\Tests\Fixtures\Consumer\UserPremiumUpgradedMessage'
-            'sla.calculation.started': 'Freyr\MessageBroker\Tests\Fixtures\Consumer\SlaCalculationStartedMessage'
