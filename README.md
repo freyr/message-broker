@@ -407,7 +407,7 @@ return [
 message_broker:
   inbox:
     # Message type mapping: message_name => PHP class
-    # Used by MessageNameSerializer to translate semantic names to FQN during deserialization
+    # Used by InboxSerializer to translate semantic names to FQN during deserialization
     message_types:
     # Examples:
     # 'order.placed': 'App\Message\OrderPlaced'
@@ -440,7 +440,7 @@ framework:
     transports:
       outbox:
         dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
-        serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
+        serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
         retry_strategy:
           max_retries: 3
           delay: 1000
@@ -448,12 +448,26 @@ framework:
 
 
       # AMQP transport - external message broker
-      # For publishing (outbox) and consuming (inbox)
+      # For publishing from outbox: uses OutboxSerializer
+      # For consuming to inbox: uses InboxSerializer
       amqp:
         dsn: '%env(MESSENGER_AMQP_DSN)%'
-        serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
+        serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
         options:
           auto_setup: false
+        retry_strategy:
+          max_retries: 3
+          delay: 1000
+          multiplier: 2
+
+      # AMQP consumption transport (example) - uses InboxSerializer
+      amqp_orders:
+        dsn: '%env(MESSENGER_AMQP_DSN)%'
+        serializer: 'Freyr\MessageBroker\Serializer\InboxSerializer'
+        options:
+          auto_setup: false
+          queue:
+            name: 'orders_queue'
         retry_strategy:
           max_retries: 3
           delay: 1000
@@ -472,7 +486,7 @@ framework:
     # 'App\Domain\Event\UserRegistered': outbox
 
     # Inbox messages (consumed from AMQP transports)
-    # Messages are deserialized by MessageNameSerializer into typed objects
+    # Messages are deserialized by InboxSerializer into typed objects
     # DeduplicationMiddleware automatically prevents duplicate processing
     # Handlers execute synchronously (no routing needed - AMQP transport handles delivery)
     # Example handlers:
@@ -489,7 +503,72 @@ doctrine:
             id_binary: Freyr\MessageBroker\Doctrine\Type\IdType
 ```
 
-### 4. Create Database Migration
+**config/services.yaml:**
+
+```yaml
+services:
+  # Doctrine Integration
+  Freyr\MessageBroker\Doctrine\Type\IdType:
+    tags:
+      - { name: 'doctrine.dbal.types', type: 'id_binary' }
+
+  # Auto-register all Normalizers using Symfony's native tag
+  # These will be automatically added to the @serializer service
+  Freyr\MessageBroker\Serializer\Normalizer\:
+    resource: '../vendor/freyr/message-broker/src/Serializer/Normalizer/'
+    tags: ['serializer.normalizer']
+
+  # Custom ObjectNormalizer with property promotion support
+  # This overrides Symfony's default ObjectNormalizer with propertyTypeExtractor
+  # Lower priority (-1000) ensures it runs as fallback after specialized normalizers
+  Freyr\MessageBroker\Serializer\Normalizer\PropertyPromotionObjectNormalizer:
+    class: Symfony\Component\Serializer\Normalizer\ObjectNormalizer
+    arguments:
+      $propertyTypeExtractor: '@property_info'
+    tags:
+      - { name: 'serializer.normalizer', priority: -1000 }
+
+  # Inbox Serializer - for AMQP consumption
+  # Injects native @serializer service with all registered normalizers
+  Freyr\MessageBroker\Serializer\InboxSerializer:
+    arguments:
+      $messageTypes: '%message_broker.inbox.message_types%'
+      $serializer: '@serializer'
+
+  # Outbox Serializer - for AMQP publishing
+  # Injects native @serializer service with all registered normalizers
+  Freyr\MessageBroker\Serializer\OutboxSerializer:
+    arguments:
+      $serializer: '@serializer'
+
+  # Deduplication Middleware (inbox pattern)
+  Freyr\MessageBroker\Inbox\DeduplicationMiddleware:
+    arguments:
+      $connection: '@doctrine.dbal.default_connection'
+      $logger: '@logger'
+    tags:
+      - { name: 'messenger.middleware', priority: -10 }
+
+  # AMQP Routing Strategy (default convention-based routing)
+  Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface:
+    class: Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy
+
+  # Outbox Bridge (publishes outbox events to AMQP)
+  Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
+    autoconfigure: true
+    arguments:
+      $eventBus: '@messenger.default_bus'
+      $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
+      $logger: '@logger'
+
+  # Deduplication Store Cleanup Command (optional maintenance)
+  Freyr\MessageBroker\Command\DeduplicationStoreCleanup:
+    arguments:
+      $connection: '@doctrine.dbal.default_connection'
+    tags: ['console.command']
+```
+
+### 5. Create Database Migration
 
 Create `migrations/VersionYYYYMMDDHHIISS.php`:
 
@@ -536,7 +615,7 @@ final class Version20250103000001 extends AbstractMigration
 }
 ```
 
-### 5. Add Environment Variables
+### 6. Add Environment Variables
 
 Edit `.env`:
 
@@ -546,13 +625,13 @@ MESSENGER_AMQP_DSN=amqp://guest:guest@localhost:5672/%2f
 ###< freyr/message-broker ###
 ```
 
-### 6. Run Migrations
+### 7. Run Migrations
 
 ```bash
 php bin/console doctrine:migrations:migrate
 ```
 
-### 7. Verify Installation
+### 8. Verify Installation
 
 ```bash
 # Check bundle is registered

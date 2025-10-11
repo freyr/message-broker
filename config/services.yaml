@@ -15,12 +15,29 @@ services:
         resource: '../src/Serializer/Normalizer/'
         tags: ['serializer.normalizer']
 
-    # Message Name Serializer (unified for inbox & outbox)
-    # - encode(): Sets semantic name in 'type' header (outbox)
-    # - decode(): Translates semantic name to FQN (inbox)
-    Freyr\MessageBroker\Serializer\MessageNameSerializer:
+    # Custom ObjectNormalizer with property promotion support
+    # This overrides Symfony's default ObjectNormalizer with propertyTypeExtractor
+    # Lower priority (-1000) ensures it runs as fallback after specialized normalizers
+    Freyr\MessageBroker\Serializer\Normalizer\PropertyPromotionObjectNormalizer:
+        class: Symfony\Component\Serializer\Normalizer\ObjectNormalizer
+        arguments:
+            $propertyTypeExtractor: '@property_info'
+        tags:
+            - { name: 'serializer.normalizer', priority: -1000 }
+
+    # Inbox Serializer (for AMQP consumption transports)
+    # Translates semantic message names to consumer class FQN
+    # Uses default encode behavior (important for retry scenarios)
+    Freyr\MessageBroker\Serializer\InboxSerializer:
         arguments:
             $messageTypes: '%message_broker.inbox.message_types%'
+            $serializer: '@serializer'
+
+    # Outbox Serializer (for AMQP publishing transports)
+    # Extracts #[MessageName] from producer classes and sets semantic name
+    Freyr\MessageBroker\Serializer\OutboxSerializer:
+        arguments:
+            $serializer: '@serializer'
 
     # Deduplication Middleware (inbox pattern)
     Freyr\MessageBroker\Inbox\DeduplicationMiddleware:

@@ -36,7 +36,7 @@ Events are consumed from AMQP natively with deduplication using middleware-based
 
 ```
 AMQP Transport (native Symfony Messenger)
-→ MessageNameSerializer translates 'type' header (semantic name → FQN)
+→ InboxSerializer translates 'type' header (semantic name → FQN)
 → Native Symfony Serializer deserializes body + stamps from X-Message-Stamp-* headers
 → Routes to handler (based on PHP class)
 → DeduplicationMiddleware (checks message_broker_deduplication table)
@@ -46,7 +46,10 @@ AMQP Transport (native Symfony Messenger)
 
 ### Key Innovation: "Fake FQN" Pattern + Native Stamp Handling
 - **Native Transport**: Uses Symfony Messenger's built-in AMQP transport (no custom commands)
-- **MessageNameSerializer**: Translates semantic message names (e.g., `order.placed`) in `type` header to PHP FQN, then delegates to native Symfony Serializer
+- **Split Serializers**: Separate serializers for inbox and outbox flows to handle different requirements:
+  - **OutboxSerializer**: Extracts semantic name from `#[MessageName]` attribute during encoding (publishing)
+  - **InboxSerializer**: Translates semantic name to FQN during decoding (consuming), uses default encoding for failed message retries
+- **Why Split?**: Inbox messages don't have `#[MessageName]` attribute, so they need default encoding when being retried/stored in failed transport
 - **Native Stamp Handling**: Stamps (MessageIdStamp, MessageNameStamp) automatically serialized/deserialized via `X-Message-Stamp-*` headers by Symfony
 - **DeduplicationMiddleware**: Runs AFTER `doctrine_transaction` middleware (priority -10), ensuring deduplication checks happen within the transaction
 - **Atomic Guarantees**: If handler succeeds, both deduplication entry and business logic changes are committed atomically
@@ -67,7 +70,8 @@ messenger/
 │   │   ├── Routing/                # AmqpRoutingStrategyInterface, DefaultAmqpRoutingStrategy
 │   │   └── MessageName.php         # Attribute for marking messages with semantic names
 │   ├── Serializer/                 # Serialization Infrastructure ✨
-│   │   ├── MessageNameSerializer.php  # Unified serializer for inbox & outbox (translates semantic names)
+│   │   ├── InboxSerializer.php     # Inbox serializer (decode: semantic name → FQN, encode: default for retries)
+│   │   ├── OutboxSerializer.php    # Outbox serializer (encode: #[MessageName] → semantic name)
 │   │   └── Normalizer/             # Built-in normalizers (IdNormalizer, CarbonImmutableNormalizer)
 │   └── DeduplicationMiddleware.php # Middleware for inbox deduplication ✨
 ├── docs/                           # Comprehensive architecture documentation
@@ -170,7 +174,7 @@ framework:
     transports:
       outbox:
         dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
-        serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
+        serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
         retry_strategy:
           max_retries: 3
           delay: 1000
@@ -178,12 +182,26 @@ framework:
 
 
       # AMQP transport - external message broker
-      # For publishing (outbox) and consuming (inbox)
+      # For publishing from outbox: uses OutboxSerializer
+      # For consuming to inbox: uses InboxSerializer
       amqp:
         dsn: '%env(MESSENGER_AMQP_DSN)%'
-        serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
+        serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
         options:
           auto_setup: false
+        retry_strategy:
+          max_retries: 3
+          delay: 1000
+          multiplier: 2
+
+      # AMQP consumption transport (example) - uses InboxSerializer
+      amqp_orders:
+        dsn: '%env(MESSENGER_AMQP_DSN)%'
+        serializer: 'Freyr\MessageBroker\Serializer\InboxSerializer'
+        options:
+          auto_setup: false
+          queue:
+            name: 'orders_queue'
         retry_strategy:
           max_retries: 3
           delay: 1000
@@ -202,7 +220,7 @@ framework:
     # 'App\Domain\Event\UserRegistered': outbox
 
     # Inbox messages (consumed from AMQP transports)
-    # Messages are deserialized by MessageNameSerializer into typed objects
+    # Messages are deserialized by InboxSerializer into typed objects
     # DeduplicationMiddleware automatically prevents duplicate processing
     # Handlers execute synchronously (no routing needed - AMQP transport handles delivery)
     # Example handlers:
@@ -224,7 +242,7 @@ doctrine:
 message_broker:
   inbox:
     # Message type mapping: message_name => PHP class
-    # Used by MessageNameSerializer to translate semantic names to FQN during deserialization
+    # Used by InboxSerializer to translate semantic names to FQN during deserialization
     message_types:
     # Examples:
     # 'order.placed': 'App\Message\OrderPlaced'
@@ -249,12 +267,32 @@ services:
     resource: '../src/Serializer/Normalizer/'
     tags: ['serializer.normalizer']
 
-  # Message Name Serializer (unified for inbox & outbox)
-  # - encode(): Sets semantic name in 'type' header (outbox)
-  # - decode(): Translates semantic name to FQN (inbox)
-  Freyr\MessageBroker\Serializer\MessageNameSerializer:
+  # Custom ObjectNormalizer with property promotion support
+  # This overrides Symfony's default ObjectNormalizer with propertyTypeExtractor
+  # Lower priority (-1000) ensures it runs as fallback after specialized normalizers
+  Freyr\MessageBroker\Serializer\Normalizer\PropertyPromotionObjectNormalizer:
+    class: Symfony\Component\Serializer\Normalizer\ObjectNormalizer
+    arguments:
+      $propertyTypeExtractor: '@property_info'
+    tags:
+      - { name: 'serializer.normalizer', priority: -1000 }
+
+  # Inbox Serializer - for AMQP consumption
+  # - decode(): Translates semantic name to FQN
+  # - encode(): Uses default behavior (for failed message retries)
+  # Injects native @serializer service with all registered normalizers
+  Freyr\MessageBroker\Serializer\InboxSerializer:
     arguments:
       $messageTypes: '%message_broker.inbox.message_types%'
+      $serializer: '@serializer'
+
+  # Outbox Serializer - for AMQP publishing
+  # - encode(): Extracts #[MessageName] and sets semantic name in 'type' header
+  # - decode(): Uses default behavior (not used in practice)
+  # Injects native @serializer service with all registered normalizers
+  Freyr\MessageBroker\Serializer\OutboxSerializer:
+    arguments:
+      $serializer: '@serializer'
 
   # Deduplication Middleware (inbox pattern)
   Freyr\MessageBroker\Inbox\DeduplicationMiddleware:
@@ -340,7 +378,7 @@ See `docs/amqp-routing-guide.md` for complete routing documentation.
 
 ### Inbox Message Handling (Typed Objects)
 
-The inbox uses `MessageNameSerializer` to translate semantic message names to PHP classes, then Symfony's native serializer deserializes into typed PHP objects:
+The inbox uses `InboxSerializer` to translate semantic message names to PHP classes, then Symfony's native serializer deserializes into typed PHP objects:
 
 **1. Define Message Class**
 ```php
@@ -393,7 +431,8 @@ final readonly class OrderPlacedHandler
 - ✅ Supports value objects (Id, CarbonImmutable, enums) via custom normalizers
 - ✅ Semantic message names (language-agnostic)
 - ✅ Stamps automatically handled via X-Message-Stamp-* headers
-- ✅ Minimal custom code (~50 lines in MessageNameSerializer)
+- ✅ Minimal custom code (~50 lines per serializer)
+- ✅ Failed message retry safety (InboxSerializer uses default encoding without #[MessageName] requirement)
 
 See `docs/inbox-typed-messages.md` for complete guide.
 
@@ -470,20 +509,36 @@ services:
 ```
 
 **How It Works:**
-- Both serializers (`InboxSerializer` and `OutboxSerializer`) use Symfony's native `@serializer` service
+- Both serializers (`InboxSerializer` and `OutboxSerializer`) inject Symfony's native `@serializer` service
 - Symfony automatically collects all normalizers tagged with `serializer.normalizer`
 - Normalizers are ordered by priority (higher priority = earlier in chain, default = 0)
-- Symfony's built-in `ObjectNormalizer` has low priority (always last as a fallback)
+- Custom `PropertyPromotionObjectNormalizer` (configured with `propertyTypeExtractor`) replaces Symfony's default `ObjectNormalizer`
+- This custom ObjectNormalizer has priority -1000, ensuring it runs last as a fallback
 - The serializer uses the appropriate normalizer based on type detection
+
+**Property Promotion Support:**
+The custom `ObjectNormalizer` is configured with `propertyTypeExtractor` to support PHP 8 constructor property promotion:
+```php
+final readonly class OrderPlaced
+{
+    public function __construct(
+        public Id $orderId,           // ✅ Property promotion works!
+        public float $totalAmount,
+        public CarbonImmutable $placedAt,
+    ) {}
+}
+```
 
 **Benefits:**
 - ✅ Uses Symfony's native serializer service - standard and well-tested
-- ✅ Applications can add serialization for their own types
+- ✅ Applications can add serialization for their own types by tagging normalizers
 - ✅ No manual enumeration needed - normalizers are auto-discovered via tagged iterator
+- ✅ Property promotion support via `propertyTypeExtractor` configuration
 - ✅ Priority system allows fine-grained control over normalization order
 - ✅ Extensible architecture - add normalizers by simply tagging them with `serializer.normalizer`
 - ✅ Follows Symfony best practices
 - ✅ Supports complex nested objects
+- ✅ Single source of truth - one @serializer service for entire application
 - ✅ Normalizers work with any Symfony component that uses the serializer service
 
 ### Outbox Bridge Pattern ✨ **SIMPLIFIED**
@@ -594,11 +649,12 @@ final readonly class OutboxToAmqpBridge
    - `message_broker_deduplication` (deduplication tracking for consumed messages)
    - `messenger_messages` (standard for failed messages)
 
-2. **"Fake FQN" Pattern**: The package uses a clever approach to combine semantic naming with native Symfony behavior:
-   - **Publishing**: OutboxSerializer sets `type` header to semantic name (e.g., `order.placed`) instead of PHP FQN
-   - **Consuming**: MessageNameSerializer translates semantic name → FQN, then delegates to native Symfony Serializer
+2. **"Fake FQN" Pattern with Split Serializers**: The package uses separate serializers for different flows:
+   - **Publishing (OutboxSerializer)**: Extracts semantic name from `#[MessageName]` attribute and sets `type` header (e.g., `order.placed`)
+   - **Consuming (InboxSerializer)**: Translates semantic name → FQN during decode, uses default encode for failed retries
+   - **Why Split?**: Inbox consumer messages don't have `#[MessageName]` attribute, so they need vanilla encoding when being retried/stored in failed transport
    - **Stamps**: Automatically serialized/deserialized via `X-Message-Stamp-*` headers by Symfony
-   - **Result**: External systems see semantic names, internal code uses native Symfony patterns
+   - **Result**: External systems see semantic names, internal code uses native Symfony patterns, failed messages can be retried safely
 
 3. **DeduplicationMiddleware**: The middleware runs AFTER `doctrine_transaction` middleware (priority -10):
    - Checks `MessageIdStamp` and `MessageNameStamp` on incoming messages (restored automatically from headers)
@@ -637,7 +693,7 @@ final readonly class OutboxToAmqpBridge
    - **Body**: Native Symfony serialization of the message object (business data only, no messageId)
    - **messageId**: NOT in payload - it's transport metadata in MessageIdStamp header
 
-   The MessageNameSerializer translates the `type` header from semantic name to PHP FQN internally.
+   The InboxSerializer translates the `type` header from semantic name to PHP FQN during consumption.
 
 9. **Transactional Guarantees**:
    - **Outbox**: Events are only published if the business transaction commits successfully (atomicity)
