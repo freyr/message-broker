@@ -174,9 +174,14 @@ final class OutboxSerializationTest extends TestCase
         $this->assertInstanceOf(AmqpTestMessage::class, $amqpEnvelope->getMessage());
 
         // Verify serialization format for AMQP message
+        // AMQP transport uses standard serializer (FQN in type header, NOT semantic name)
         $amqpSerialized = $context->amqpTransport->getLastSerialized();
         $this->assertNotNull($amqpSerialized);
-        $this->assertEquals('test.amqp.sent', $amqpSerialized['headers']['type'], 'AMQP message should have correct semantic type');
+        $this->assertEquals(
+            AmqpTestMessage::class,
+            $amqpSerialized['headers']['type'],
+            'AMQP message should have FQN (standard serializer, not MessageNameSerializer)'
+        );
 
         $amqpBody = json_decode($amqpSerialized['body'], true);
         $this->assertArrayHasKey('eventId', $amqpBody);
