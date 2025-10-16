@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Serializer;
 
+use Freyr\MessageBroker\Inbox\MessageNameStamp;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\MessageDecodingFailedException;
 use Symfony\Component\Messenger\Transport\Serialization\Serializer;
@@ -12,18 +13,18 @@ use Symfony\Component\Serializer\SerializerInterface as SymfonySerializerInterfa
 /**
  * Inbox Serializer (for AMQP Consumption).
  *
- * Only customizes decode() to translate semantic message names to PHP FQN.
- * encode() uses default behavior - important for retry/failed scenarios where
- * the message is already a consumer class without #[MessageName].
+ * Handles semantic-to-FQN translation for consumed messages:
+ * - decode(): Semantic name (e.g., 'order.placed') → FQN (e.g., 'App\Message\OrderPlaced')
+ * - encode(): FQN → Semantic name (for retry/failed scenarios)
  *
  * Uses Symfony's native @serializer service with all registered normalizers.
  *
- * Usage: Configure on AMQP consumption transports (fsm.test, fsm.custom, etc.)
+ * Usage: Configure on AMQP consumption transports.
  */
 final class InboxSerializer extends Serializer
 {
     /**
-     * @param array<string, class-string> $messageTypes Mapping: message_name => PHP class (for decode)
+     * @param array<string, class-string> $messageTypes Mapping: semantic_name => FQN
      * @param SymfonySerializerInterface $serializer Symfony's native @serializer service
      */
     public function __construct(
@@ -34,11 +35,13 @@ final class InboxSerializer extends Serializer
     }
 
     /**
-     * Decode: Translate semantic name to consumer class FQN.
+     * Decode: Translate semantic name to FQN.
      *
-     * Reads 'type' header (semantic name like 'fsm.test.message'),
-     * looks up consumer class FQN in message_types mapping,
-     * then delegates to native Symfony serializer.
+     * Flow:
+     * 1. Read semantic name from 'type' header (e.g., 'order.placed')
+     * 2. Look up FQN in messageTypes mapping
+     * 3. Replace 'type' header with FQN for parent decoder
+     * 4. Store semantic name in MessageNameStamp for encode()
      *
      * @param array<string, mixed> $encodedEnvelope
      */
@@ -47,31 +50,60 @@ final class InboxSerializer extends Serializer
         $headers = $encodedEnvelope['headers'] ?? [];
         assert(is_array($headers));
 
-        if (empty($headers['type'])) {
+        $semanticName = $headers['type'] ?? null;
+
+        if (empty($semanticName)) {
             throw new MessageDecodingFailedException('Encoded envelope does not have a "type" header.');
         }
 
-        $messageName = $headers['type'];
-        assert(is_string($messageName));
+        assert(is_string($semanticName));
 
-        // Translate semantic name to consumer class FQN
-        $fqn = $this->messageTypes[$messageName] ?? null;
+        // Look up FQN from semantic name
+        $fqn = $this->messageTypes[$semanticName] ?? null;
 
         if ($fqn === null) {
             throw new MessageDecodingFailedException(sprintf(
                 'Unknown message type "%s". Configure it in message_broker.inbox.message_types',
-                $messageName
+                $semanticName
             ));
         }
 
-        // Replace type header with consumer class FQN
-        $headers['type'] = $fqn;
-        $encodedEnvelope['headers'] = $headers;
+        // Replace 'type' header with FQN for parent decode
+        $encodedEnvelope['headers']['type'] = $fqn;
 
-        // Let native Symfony Serializer handle everything else:
-        // - Stamp deserialization (MessageIdStamp, etc. from X-Message-Stamp-* headers)
-        // - Body deserialization into consumer class
-        // - Envelope creation
-        return parent::decode($encodedEnvelope);
+        // Decode with FQN and attach semantic name stamp
+        $envelope = parent::decode($encodedEnvelope);
+
+        return $envelope->with(new MessageNameStamp($semanticName));
+    }
+
+    /**
+     * Encode: Restore semantic name from MessageNameStamp.
+     *
+     * Flow:
+     * 1. Let parent encode (produces FQN in 'type' header)
+     * 2. Check for MessageNameStamp (added during decode)
+     * 3. Replace 'type' header with semantic name
+     *
+     * @return array<string, mixed>
+     */
+    public function encode(Envelope $envelope): array
+    {
+        // Parent encode produces FQN in 'type' header
+        $encoded = parent::encode($envelope);
+
+        // Retrieve semantic name from stamp
+        $messageNameStamp = $envelope->last(MessageNameStamp::class);
+
+        if ($messageNameStamp instanceof MessageNameStamp) {
+            // Replace FQN with semantic name in 'type' header
+            $headers = $encoded['headers'] ?? [];
+            assert(is_array($headers));
+            $headers['type'] = $messageNameStamp->messageName;
+            $encoded['headers'] = $headers;
+        }
+
+        /** @var array<string, mixed> $encoded */
+        return $encoded;
     }
 }

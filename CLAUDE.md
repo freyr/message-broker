@@ -172,18 +172,18 @@ framework:
           # Runs after transaction starts, before handlers
 
     transports:
+      # Outbox transport - stores domain events with #[MessageName]
+      # Consumed by OutboxToAmqpBridge, uses default serializer
       outbox:
         dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
-        serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
+        # No custom serializer needed - messages have #[MessageName] attribute
         retry_strategy:
           max_retries: 3
           delay: 1000
           multiplier: 2
 
-
-      # AMQP transport - external message broker
-      # For publishing from outbox: uses OutboxSerializer
-      # For consuming to inbox: uses InboxSerializer
+      # AMQP publish transport - OutboxToAmqpBridge publishes here
+      # Uses OutboxSerializer to translate FQN → semantic name
       amqp:
         dsn: '%env(MESSENGER_AMQP_DSN)%'
         serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
@@ -279,8 +279,8 @@ services:
       - { name: 'serializer.normalizer', priority: -1000 }
 
   # Inbox Serializer - for AMQP consumption
-  # - decode(): Translates semantic name to FQN
-  # - encode(): Uses default behavior (for failed message retries)
+  # - decode(): Translates semantic name to FQN (e.g., 'order.placed' → 'App\Message\OrderPlaced')
+  # - encode(): Preserves semantic name via MessageNameStamp (for retry/failed scenarios)
   # Injects native @serializer service with all registered normalizers
   Freyr\MessageBroker\Serializer\InboxSerializer:
     arguments:
@@ -288,8 +288,8 @@ services:
       $serializer: '@serializer'
 
   # Outbox Serializer - for AMQP publishing
-  # - encode(): Extracts #[MessageName] and sets semantic name in 'type' header
-  # - decode(): Uses default behavior (not used in practice)
+  # - encode(): Extracts semantic name from #[MessageName] (e.g., 'App\Event\OrderPlaced' → 'order.placed')
+  # - decode(): Restores FQN from X-Message-Class header (for retry/failed scenarios)
   # Injects native @serializer service with all registered normalizers
   Freyr\MessageBroker\Serializer\OutboxSerializer:
     arguments:

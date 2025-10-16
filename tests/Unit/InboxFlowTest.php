@@ -74,7 +74,7 @@ final class InboxFlowTest extends TestCase
 
         // Then: Message should be in outbox transport
         $this->assertEquals(1, $context->outboxTransport->count());
-        $this->assertEquals(0, $context->amqpTransport->count());
+        $this->assertEquals(0, $context->amqpPublishTransport->count());
         $this->assertEquals(0, $handlerInvocationCount, 'Handler should not be invoked yet');
 
         // Step 2: OutboxToAmqpBridge consumes from outbox and republishes to AMQP
@@ -84,34 +84,31 @@ final class InboxFlowTest extends TestCase
             $bridge->__invoke($originalMessage);
         }
 
-        // Then: Message should be in AMQP transport
-        $this->assertEquals(1, $context->amqpTransport->count(), 'Bridge should republish to AMQP');
+        // Then: Message should be in AMQP publish transport
+        $this->assertEquals(1, $context->amqpPublishTransport->count(), 'Bridge should republish to AMQP');
         $this->assertEquals(0, $handlerInvocationCount, 'Handler should not be invoked yet');
 
         // Verify AMQP message has MessageIdStamp
-        $amqpEnvelope = $context->amqpTransport->getLastEnvelope();
+        $amqpEnvelope = $context->amqpPublishTransport->getLastEnvelope();
         $this->assertNotNull($amqpEnvelope);
         $messageIdStamps = $amqpEnvelope->all(MessageIdStamp::class);
         $this->assertNotEmpty($messageIdStamps, 'AMQP message should have MessageIdStamp from bridge');
 
-        // Step 3: Consume from AMQP (MessageNameSerializer deserializes)
-        // Simulate the serialize/deserialize cycle that happens during transport consumption
-        $amqpEnvelopes = $context->amqpTransport->get();
-        foreach ($amqpEnvelopes as $envelope) {
-            // Serialize the envelope (TestMessage with stamps including MessageIdStamp)
-            $serialized = $context->serializer->encode($envelope);
+        // Step 3: Consume from AMQP (InboxSerializer deserializes)
+        // Get the serialized message from AMQP publish transport (already has semantic name from OutboxSerializer)
+        $serialized = $context->amqpPublishTransport->getLastSerialized();
+        $this->assertNotNull($serialized, 'AMQP should have serialized message');
 
-            // Deserialize back (MessageNameSerializer translates semantic name → OrderPlacedMessage)
-            // Stamps (MessageIdStamp) are automatically restored from X-Message-Stamp-* headers
-            $deserializedEnvelope = $context->serializer->decode($serialized);
+        // Deserialize with InboxSerializer (translates semantic name → OrderPlacedMessage)
+        // Stamps (MessageIdStamp) are automatically restored from X-Message-Stamp-* headers
+        $deserializedEnvelope = $context->inboxSerializer->decode($serialized);
 
-            // Add ReceivedStamp (simulates transport consumption)
-            $deserializedEnvelope = $deserializedEnvelope->with(new ReceivedStamp('amqp'));
+        // Add ReceivedStamp (simulates transport consumption)
+        $deserializedEnvelope = $deserializedEnvelope->with(new ReceivedStamp('amqp'));
 
-            // Dispatch through bus (DeduplicationMiddleware → Handler)
-            // DeduplicationMiddleware uses MessageIdStamp + getMessage()::class
-            $context->bus->dispatch($deserializedEnvelope);
-        }
+        // Dispatch through bus (DeduplicationMiddleware → Handler)
+        // DeduplicationMiddleware uses MessageIdStamp + getMessage()::class
+        $context->bus->dispatch($deserializedEnvelope);
 
         // Then: Handler should have been invoked
         $this->assertEquals(1, $handlerInvocationCount, 'Handler should be invoked once');
@@ -171,14 +168,15 @@ final class InboxFlowTest extends TestCase
         }
 
         // Get the AMQP envelope with MessageIdStamp
-        $amqpEnvelope = $context->amqpTransport->getLastEnvelope();
+        $amqpEnvelope = $context->amqpPublishTransport->getLastEnvelope();
         $this->assertNotNull($amqpEnvelope);
         $messageIdStamp = $amqpEnvelope->last(MessageIdStamp::class);
         $this->assertNotNull($messageIdStamp);
 
-        // Step 3: Consume from AMQP (first time) - serialize/deserialize to get OrderPlacedMessage
-        $serialized = $context->serializer->encode($amqpEnvelope);
-        $deserializedEnvelope = $context->serializer->decode($serialized);
+        // Step 3: Consume from AMQP (first time) - deserialize to get OrderPlacedMessage
+        $serialized = $context->amqpPublishTransport->getLastSerialized();
+        $this->assertNotNull($serialized);
+        $deserializedEnvelope = $context->inboxSerializer->decode($serialized);
         $deserializedEnvelope = $deserializedEnvelope->with(new ReceivedStamp('amqp'));
 
         $context->bus->dispatch($deserializedEnvelope);
@@ -240,26 +238,23 @@ final class InboxFlowTest extends TestCase
         }
 
         // Then: AMQP message should have semantic name in type header
-        $amqpSerialized = $context->amqpTransport->getLastSerialized();
+        $amqpSerialized = $context->amqpPublishTransport->getLastSerialized();
         $this->assertNotNull($amqpSerialized);
         $this->assertEquals(
             'test.message.sent',
             $amqpSerialized['headers']['type'],
-            'AMQP transport should have semantic name (from MessageNameSerializer)'
+            'AMQP transport should have semantic name (from OutboxSerializer)'
         );
 
         // When: Message consumed from AMQP and deserialized
-        $amqpEnvelopes = $context->amqpTransport->get();
-        foreach ($amqpEnvelopes as $envelope) {
-            // Serialize/deserialize to convert TestMessage → OrderPlacedMessage
-            $serialized = $context->serializer->encode($envelope);
-            $deserializedEnvelope = $context->serializer->decode($serialized);
+        $serialized = $context->amqpPublishTransport->getLastSerialized();
+        $this->assertNotNull($serialized);
 
-            // MessageNameSerializer translates 'test.message.sent' → OrderPlacedMessage::class
-            $deserializedEnvelope = $deserializedEnvelope->with(new ReceivedStamp('amqp'));
+        // InboxSerializer translates 'test.message.sent' → OrderPlacedMessage::class
+        $deserializedEnvelope = $context->inboxSerializer->decode($serialized);
+        $deserializedEnvelope = $deserializedEnvelope->with(new ReceivedStamp('amqp'));
 
-            $context->bus->dispatch($deserializedEnvelope);
-        }
+        $context->bus->dispatch($deserializedEnvelope);
 
         // Then: Handler should receive typed OrderPlacedMessage
         $this->assertCount(1, $handledMessages);

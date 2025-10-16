@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Serializer;
 
+use Freyr\MessageBroker\Inbox\MessageNameStamp;
 use Freyr\MessageBroker\Outbox\MessageName;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Transport\Serialization\Serializer;
@@ -12,18 +13,13 @@ use Symfony\Component\Serializer\SerializerInterface as SymfonySerializerInterfa
 /**
  * Outbox Serializer (for AMQP Publishing).
  *
- * Only customizes encode() to replace producer class FQN with semantic message name.
- * decode() uses default behavior (should never be called - messages are published, not consumed).
+ * Handles FQN-to-semantic translation for published messages:
+ * - encode(): FQN (e.g., 'App\Event\OrderPlaced') → Semantic name (e.g., 'order.placed')
+ * - decode(): Semantic name → FQN (for retry/failed scenarios)
  *
  * Uses Symfony's native @serializer service with all registered normalizers.
  *
- * Usage: Configure on AMQP publishing transports that receive from OutboxToAmqpBridge.
- *
- * Flow:
- * 1. OutboxToAmqpBridge dispatches producer class (with #[MessageName])
- * 2. OutboxSerializer.encode() extracts semantic name from #[MessageName]
- * 3. Sets 'type' header to semantic name (e.g., 'fsm.test.message')
- * 4. Published to AMQP with language-agnostic semantic name
+ * Usage: Configure on AMQP publishing transports.
  */
 final class OutboxSerializer extends Serializer
 {
@@ -36,32 +32,78 @@ final class OutboxSerializer extends Serializer
     }
 
     /**
-     * Encode: Extract semantic name from #[MessageName] and set as 'type' header.
+     * Encode: Extract semantic name from #[MessageName] attribute.
      *
-     * Producer classes MUST have #[MessageName] attribute.
-     * Semantic name replaces PHP FQN for language-agnostic messaging.
+     * Flow:
+     * 1. Extract semantic name from message #[MessageName] attribute
+     * 2. Add MessageNameStamp to envelope
+     * 3. Let parent encode (produces FQN in 'type' header)
+     * 4. Store FQN in 'X-Message-Class' header for decode()
+     * 5. Replace 'type' header with semantic name
      *
      * @return array<string, mixed>
      */
     public function encode(Envelope $envelope): array
     {
         $message = $envelope->getMessage();
+        $fqn = $message::class;
 
-        // Extract semantic message name from #[MessageName] attribute
-        $messageName = $this->extractMessageName($message);
+        // Extract semantic name from #[MessageName] attribute
+        $semanticName = $this->extractMessageName($message);
 
-        // Let parent serialize (body + stamps)
+        // Add MessageNameStamp if not present
+        if (!$envelope->last(MessageNameStamp::class)) {
+            $envelope = $envelope->with(new MessageNameStamp($semanticName));
+        }
+
+        // Parent encode produces FQN in 'type' header
         $encoded = parent::encode($envelope);
 
-        // Override 'type' header with semantic name instead of PHP FQN
+        // Preserve FQN and replace 'type' with semantic name
         $headers = $encoded['headers'] ?? [];
         assert(is_array($headers));
-        $headers['type'] = $messageName;
+        $headers['X-Message-Class'] = $fqn;         // Preserve FQN for decode()
+        $headers['type'] = $semanticName;           // Replace with semantic name
         $encoded['headers'] = $headers;
 
         /** @var array<string, mixed> $encoded */
-        // Stamps are automatically serialized to X-Message-Stamp-* headers by parent!
         return $encoded;
+    }
+
+    /**
+     * Decode: Restore FQN from X-Message-Class header.
+     *
+     * Flow:
+     * 1. Read semantic name from 'type' header
+     * 2. Read FQN from 'X-Message-Class' header
+     * 3. Replace 'type' header with FQN for parent decoder
+     * 4. Store semantic name in MessageNameStamp for encode()
+     *
+     * @param array<string, mixed> $encodedEnvelope
+     */
+    public function decode(array $encodedEnvelope): Envelope
+    {
+        $headers = $encodedEnvelope['headers'] ?? [];
+        assert(is_array($headers));
+
+        $semanticName = $headers['type'] ?? null;
+        $fqn = $headers['X-Message-Class'] ?? null;
+
+        // Restore FQN if we have semantic name (identified by lack of backslash)
+        if (is_string($semanticName) && is_string($fqn) && !str_contains($semanticName, '\\')) {
+            // Replace 'type' header with FQN for parent decode
+            $encodedEnvelope['headers']['type'] = $fqn;
+        }
+
+        // Decode with FQN
+        $envelope = parent::decode($encodedEnvelope);
+
+        // Attach semantic name stamp for future encode()
+        if (is_string($semanticName) && !str_contains($semanticName, '\\')) {
+            $envelope = $envelope->with(new MessageNameStamp($semanticName));
+        }
+
+        return $envelope;
     }
 
     private function extractMessageName(object $message): string

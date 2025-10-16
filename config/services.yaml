@@ -26,15 +26,18 @@ services:
             - { name: 'serializer.normalizer', priority: -1000 }
 
     # Inbox Serializer (for AMQP consumption transports)
-    # Translates semantic message names to consumer class FQN
-    # Uses default encode behavior (important for retry scenarios)
+    # - decode(): Translates semantic name to FQN (e.g., 'order.placed' → 'App\Message\OrderPlaced')
+    # - encode(): Preserves semantic name via MessageNameStamp (for retry/failed scenarios)
+    # Used on AMQP consumption transports (e.g., amqp_orders)
     Freyr\MessageBroker\Serializer\InboxSerializer:
         arguments:
             $messageTypes: '%message_broker.inbox.message_types%'
             $serializer: '@serializer'
 
     # Outbox Serializer (for AMQP publishing transports)
-    # Extracts #[MessageName] from producer classes and sets semantic name
+    # - encode(): Extracts semantic name from #[MessageName] attribute (e.g., 'App\Event\OrderPlaced' → 'order.placed')
+    # - decode(): Restores FQN from X-Message-Class header (for retry/failed scenarios)
+    # Used on AMQP publishing transport (where OutboxToAmqpBridge publishes)
     Freyr\MessageBroker\Serializer\OutboxSerializer:
         arguments:
             $serializer: '@serializer'

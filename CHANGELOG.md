@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2025-10-16
+
+### Fixed
+
+- **Critical: Serializer retry bug** - Both `InboxSerializer` and `OutboxSerializer` now properly preserve semantic message names during retry/failed message scenarios
+  - `InboxSerializer`: Stores semantic name in `MessageNameStamp` during decode(), restores it during encode() for retries
+  - `OutboxSerializer`: Stores FQN in `X-Message-Class` header during encode(), restores it during decode() for retries
+  - Previously, retried messages would fail with "Unknown message type" error due to lost semantic name mapping
+- **Transport configuration clarity** - Fixed documentation to clarify that outbox transport should use default serializer, not `OutboxSerializer`
+
+### Changed
+
+- **Improved code consistency** - Refactored both serializers to have mirror-image structure with consistent naming and documentation
+- **Enhanced test coverage** - Added proper transport separation in tests (outbox storage, AMQP publish, AMQP consume)
+- **Test factory improvements** - Tests now use `PropertyInfoExtractor` with `ObjectNormalizer` to match production configuration
+
+### Documentation
+
+- Updated messenger.yaml example to show correct serializer configuration per transport
+- Clarified 3-transport architecture: outbox storage, AMQP publish (OutboxSerializer), AMQP consume (InboxSerializer)
+- Updated service configuration comments to reflect bidirectional serialization behavior
+- Added comprehensive flow documentation for retry scenarios
+
 ## [0.2.1] - 2025-10-14
 
 ### Changed
@@ -63,6 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Message Serialization - Semantic naming and cross-language compatibility
 - AMQP Routing - Convention-based routing with customization options
 
+[0.2.2]: https://github.com/freyr/message-broker/releases/tag/0.2.2
 [0.2.1]: https://github.com/freyr/message-broker/releases/tag/0.2.1
 [0.2.0]: https://github.com/freyr/message-broker/releases/tag/0.2.0
 [0.1.0]: https://github.com/freyr/message-broker/releases/tag/0.1.0
