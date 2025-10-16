@@ -51,8 +51,9 @@ final class OutboxSerializer extends Serializer
         // Extract semantic name from #[MessageName] attribute
         $semanticName = $this->extractMessageName($message);
 
-        // Add MessageNameStamp if not present
-        if (!$envelope->last(MessageNameStamp::class)) {
+        // Add MessageNameStamp if not present (avoid duplicates on retry)
+        $existingStamp = $envelope->last(MessageNameStamp::class);
+        if (!$existingStamp instanceof MessageNameStamp) {
             $envelope = $envelope->with(new MessageNameStamp($semanticName));
         }
 
@@ -98,9 +99,12 @@ final class OutboxSerializer extends Serializer
         // Decode with FQN
         $envelope = parent::decode($encodedEnvelope);
 
-        // Attach semantic name stamp for future encode()
+        // Attach semantic name stamp for future encode() (avoid duplicates on retry)
         if (is_string($semanticName) && !str_contains($semanticName, '\\')) {
-            $envelope = $envelope->with(new MessageNameStamp($semanticName));
+            $existingStamp = $envelope->last(MessageNameStamp::class);
+            if (!$existingStamp instanceof MessageNameStamp) {
+                $envelope = $envelope->with(new MessageNameStamp($semanticName));
+            }
         }
 
         return $envelope;

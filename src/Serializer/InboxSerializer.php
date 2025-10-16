@@ -71,10 +71,16 @@ final class InboxSerializer extends Serializer
         // Replace 'type' header with FQN for parent decode
         $encodedEnvelope['headers']['type'] = $fqn;
 
-        // Decode with FQN and attach semantic name stamp
+        // Decode with FQN
         $envelope = parent::decode($encodedEnvelope);
 
-        return $envelope->with(new MessageNameStamp($semanticName));
+        // Attach semantic name stamp (avoid duplicates on retry)
+        $existingStamp = $envelope->last(MessageNameStamp::class);
+        if (!$existingStamp instanceof MessageNameStamp) {
+            $envelope = $envelope->with(new MessageNameStamp($semanticName));
+        }
+
+        return $envelope;
     }
 
     /**
