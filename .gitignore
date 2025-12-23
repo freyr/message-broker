@@ -1,9 +1,10 @@
 .env.local
 .env.local.php
 .env.*.local
-/public/bundles/
-/var/
-/vendor/
+public/bundles/
+var/
+cache/
+vendor/
 phpunit.xml
 .phpunit.result.cache
 /.env.local
