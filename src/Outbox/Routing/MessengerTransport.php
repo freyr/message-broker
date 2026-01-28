@@ -7,10 +7,10 @@ namespace Freyr\MessageBroker\Outbox\Routing;
 use Attribute;
 
 /**
- * Custom Symfony Messenger transport
+ * Custom Symfony Messenger transport.
  *
  * As a message is originally dispatched to an outbox doctrine transport,
- * we need to specify the transport to which it should be routed.
+ * there is a need to specify the transport to which it should be routed.
  *
  * By default, all outbox messages are routed to the 'amqp' transport.
  * It can be overridden with this attribute.
@@ -27,6 +27,5 @@ final readonly class MessengerTransport
 {
     public function __construct(
         public string $name,
-    ) {
-    }
+    ) {}
 }

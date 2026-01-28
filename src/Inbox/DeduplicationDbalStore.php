@@ -20,8 +20,7 @@ final readonly class DeduplicationDbalStore implements DeduplicationStore
     public function __construct(
         private Connection $connection,
         private ?LoggerInterface $logger = null,
-    ) {
-    }
+    ) {}
 
     public function isDuplicate(string $messageId, string $messageName): bool
     {

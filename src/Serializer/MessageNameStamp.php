@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\MessageBroker\Inbox;
+namespace Freyr\MessageBroker\Serializer;
 
 use Symfony\Component\Messenger\Stamp\StampInterface;
 
@@ -15,6 +15,5 @@ final readonly class MessageNameStamp implements StampInterface
 {
     public function __construct(
         public string $messageName,
-    ) {
-    }
+    ) {}
 }

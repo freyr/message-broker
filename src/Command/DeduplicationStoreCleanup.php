@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Command;
@@ -10,26 +11,18 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
-#[AsCommand(
-    name: 'message-broker:deduplication-cleanup',
-    description: 'Remove old idempotency records'
-)]
+#[AsCommand(name: 'message-broker:deduplication-cleanup', description: 'Remove old idempotency records')]
 class DeduplicationStoreCleanup extends Command
 {
-    public function __construct(private Connection $connection)
-    {
+    public function __construct(
+        private Connection $connection,
+    ) {
         parent::__construct();
     }
 
     protected function configure(): void
     {
-        $this->addOption(
-            'days',
-            'd',
-            InputOption::VALUE_REQUIRED,
-            'Remove records older than this many days',
-            30
-        );
+        $this->addOption('days', 'd', InputOption::VALUE_REQUIRED, 'Remove records older than this many days', 30);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int

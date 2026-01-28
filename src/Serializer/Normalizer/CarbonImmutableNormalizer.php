@@ -14,12 +14,12 @@ use Symfony\Component\Serializer\Normalizer\NormalizerInterface;
 final readonly class CarbonImmutableNormalizer implements NormalizerInterface, DenormalizerInterface
 {
     /**
-     * @param CarbonImmutable      $object
+     * @param CarbonImmutable $data
      * @param array<string, mixed> $context
      */
-    public function normalize(mixed $object, ?string $format = null, array $context = []): string
+    public function normalize(mixed $data, ?string $format = null, array $context = []): string
     {
-        return $object->toIso8601String();
+        return $data->toIso8601String();
     }
 
     /**
@@ -35,7 +35,7 @@ final readonly class CarbonImmutableNormalizer implements NormalizerInterface, D
      */
     public function denormalize(mixed $data, string $type, ?string $format = null, array $context = []): CarbonImmutable
     {
-        if (! is_string($data)) {
+        if (!is_string($data)) {
             throw new \InvalidArgumentException('CarbonImmutable value must be a string');
         }
 

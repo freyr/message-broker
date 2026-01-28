@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Serializer;
 
-use Freyr\MessageBroker\Inbox\MessageNameStamp;
 use Freyr\MessageBroker\Outbox\MessageName;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Transport\Serialization\Serializer;

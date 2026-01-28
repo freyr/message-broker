@@ -13,20 +13,21 @@ readonly class DeduplicationMiddleware implements MiddlewareInterface
 {
     public function __construct(
         private DeduplicationStore $store,
-    ) {
-    }
+    ) {}
 
     public function handle(Envelope $envelope, StackInterface $stack): Envelope
     {
         // Only check idempotency for messages received from transport
         if ($envelope->last(ReceivedStamp::class) === null) {
-            return $stack->next()->handle($envelope, $stack);
+            return $stack->next()
+                ->handle($envelope, $stack);
         }
 
         $messageIdStamp = $envelope->last(MessageIdStamp::class);
         if ($messageIdStamp === null) {
             // Skipping deduplication for messages without MessageIdStamp
-            return $stack->next()->handle($envelope, $stack);
+            return $stack->next()
+                ->handle($envelope, $stack);
         }
 
         $messageId = $messageIdStamp->messageId;
@@ -39,6 +40,7 @@ readonly class DeduplicationMiddleware implements MiddlewareInterface
         }
 
         // Message is new - process it
-        return $stack->next()->handle($envelope, $stack);
+        return $stack->next()
+            ->handle($envelope, $stack);
     }
 }

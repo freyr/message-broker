@@ -27,8 +27,7 @@ final class InMemoryTransport implements TransportInterface
 
     public function __construct(
         private readonly SerializerInterface $serializer,
-    ) {
-    }
+    ) {}
 
     public function send(Envelope $envelope): Envelope
     {
@@ -46,7 +45,7 @@ final class InMemoryTransport implements TransportInterface
         // Return all unacknowledged messages
         $unacknowledged = array_filter(
             $this->sent,
-            fn(Envelope $e) => !in_array($e, $this->acknowledged, true) && !in_array($e, $this->rejected, true)
+            fn (Envelope $e) => !in_array($e, $this->acknowledged, true) && !in_array($e, $this->rejected, true)
         );
 
         return array_values($unacknowledged);

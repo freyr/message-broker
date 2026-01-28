@@ -23,14 +23,13 @@ final class DeduplicationInMemoryStore implements DeduplicationStore
 
     public function __construct(
         private readonly LoggerInterface $logger = new NullLogger(),
-    ) {
-    }
+    ) {}
 
     public function isDuplicate(string $messageId, string $messageName): bool
     {
         // Check if already processed
         if (isset($this->processedMessageIds[$messageId])) {
-            $this->duplicateCount++;
+            ++$this->duplicateCount;
             $this->logger->info('Duplicate message detected by deduplication store', [
                 'message_id' => $messageId,
                 'message_name' => $messageName,
@@ -41,7 +40,7 @@ final class DeduplicationInMemoryStore implements DeduplicationStore
 
         // Mark as processed
         $this->processedMessageIds[$messageId] = true;
-        $this->processedCount++;
+        ++$this->processedCount;
 
         return false;
     }

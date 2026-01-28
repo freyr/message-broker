@@ -15,20 +15,18 @@ use Attribute;
  * - order.placed → order.placed
  * - sla.calculation.started → sla.calculation.started
  *
- * Use this attribute to specify a custom routing key for wildcard routing or special patterns.
+ * Use this attribute to specify a custom routing key.
  *
  * Example:
  * ```php
- * #[MessageName('user.premium.upgraded')]
- * #[AmqpRoutingKey('user.*.upgraded')]  // Wildcard for all user upgrades
+ * #[MessageName('user.premium.custom')]
  * final readonly class UserPremiumUpgraded { ... }
  * ```
  */
-#[\Attribute(\Attribute::TARGET_CLASS)]
+#[Attribute(Attribute::TARGET_CLASS)]
 final readonly class AmqpRoutingKey
 {
     public function __construct(
         public string $key,
-    ) {
-    }
+    ) {}
 }

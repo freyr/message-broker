@@ -4,11 +4,10 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Serializer;
 
-use Freyr\MessageBroker\Inbox\MessageNameStamp;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\MessageDecodingFailedException;
 use Symfony\Component\Messenger\Transport\Serialization\Serializer;
-use Symfony\Component\Serializer\SerializerInterface as SymfonySerializerInterface;
+use Symfony\Component\Serializer\SerializerInterface;
 
 /**
  * Inbox Serializer (for AMQP Consumption).
@@ -25,11 +24,11 @@ final class InboxSerializer extends Serializer
 {
     /**
      * @param array<string, class-string> $messageTypes Mapping: semantic_name => FQN
-     * @param SymfonySerializerInterface $serializer Symfony's native @serializer service
+     * @param SerializerInterface $serializer Symfony's native @serializer service
      */
     public function __construct(
         private readonly array $messageTypes = [],
-        SymfonySerializerInterface $serializer,
+        SerializerInterface $serializer,
     ) {
         parent::__construct($serializer);
     }

@@ -19,6 +19,7 @@ interface DeduplicationStore
      *
      * @param string $messageId Unique message identifier
      * @param string $messageName Message class name (for logging/queries)
+     *
      * @return bool True if message is a duplicate (already processed), false if new
      */
     public function isDuplicate(string $messageId, string $messageName): bool;

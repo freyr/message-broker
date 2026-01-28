@@ -34,8 +34,11 @@ final class OutboxToAmqpBridgeTest extends TestCase
         $processedMessages = [];
 
         // Create a wrapper to track bridge invocations
-        $bridgeHandler = function (TestMessage|AmqpTestMessage $message) use (&$bridgeInvocationCount, &$processedMessages): void {
-            $bridgeInvocationCount++;
+        $bridgeHandler = function (TestMessage|AmqpTestMessage $message) use (
+            &$bridgeInvocationCount,
+            &$processedMessages
+        ): void {
+            ++$bridgeInvocationCount;
             $processedMessages[] = $message;
         };
 
@@ -125,11 +128,7 @@ final class OutboxToAmqpBridgeTest extends TestCase
             logger: $logger,
         );
 
-        $message = new TestMessage(
-            id: Id::new(),
-            name: 'Test Bridge',
-            timestamp: CarbonImmutable::now(),
-        );
+        $message = new TestMessage(id: Id::new(), name: 'Test Bridge', timestamp: CarbonImmutable::now());
 
         // When: Message dispatched to outbox
         $context->bus->dispatch($message);

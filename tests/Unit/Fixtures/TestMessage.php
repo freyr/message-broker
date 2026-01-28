@@ -22,6 +22,5 @@ final readonly class TestMessage implements OutboxMessage
         public Id $id,
         public string $name,
         public CarbonImmutable $timestamp,
-    ) {
-    }
+    ) {}
 }

@@ -12,11 +12,10 @@ use Attribute;
  * Marks domain events/commands with semantic names for messaging.
  * Format: {domain}.{subdomain}.{action}
  */
-#[\Attribute(\Attribute::TARGET_CLASS)]
+#[Attribute(Attribute::TARGET_CLASS)]
 final readonly class MessageName
 {
     public function __construct(
         public string $name,
-    ) {
-    }
+    ) {}
 }

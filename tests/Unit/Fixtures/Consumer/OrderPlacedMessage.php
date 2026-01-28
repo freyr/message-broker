@@ -19,6 +19,5 @@ final readonly class OrderPlacedMessage
         public Id $id,
         public string $name,
         public CarbonImmutable $timestamp,
-    ) {
-    }
+    ) {}
 }

@@ -23,7 +23,7 @@ final class IdType extends Type
             return $value;
         }
 
-        if (! is_string($value)) {
+        if (!is_string($value)) {
             throw new \InvalidArgumentException('Expected string value from database');
         }
 
@@ -36,7 +36,7 @@ final class IdType extends Type
             return null;
         }
 
-        if (! $value instanceof Id) {
+        if (!$value instanceof Id) {
             throw new \InvalidArgumentException('Expected Id instance');
         }
 

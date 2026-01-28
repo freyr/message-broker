@@ -47,8 +47,11 @@ final class EventBusFactory
      * @param array<class-string, array<string>> $routing FQN to transport names mapping (e.g., [TestMessage::class => ['outbox']])
      * @param array<class-string, array<callable>> $handlers Message class to handler mapping (e.g., [TestMessage::class => [callable]])
      */
-    public static function createForOutboxTesting(array $messageTypes = [], array $routing = [], array $handlers = []): EventBusTestContext
-    {
+    public static function createForOutboxTesting(
+        array $messageTypes = [],
+        array $routing = [],
+        array $handlers = [],
+    ): EventBusTestContext {
         // Create PropertyInfoExtractor for property promotion support (matches production config)
         // Using ReflectionExtractor only - sufficient for constructor property promotion
         $reflectionExtractor = new ReflectionExtractor();
@@ -99,10 +102,7 @@ final class EventBusFactory
         $handlersLocator = new HandlersLocator($handlers);
 
         // Create middleware chain
-        $middleware = [
-            new SendMessageMiddleware($senderLocator),
-            new HandleMessageMiddleware($handlersLocator),
-        ];
+        $middleware = [new SendMessageMiddleware($senderLocator), new HandleMessageMiddleware($handlersLocator)];
 
         // Create message bus
         $bus = new MessageBus($middleware);
@@ -140,8 +140,11 @@ final class EventBusFactory
      * @param array<class-string, array<callable>> $handlers Message class to handler mapping
      * @param array<class-string, array<string>> $routing FQN to transport names mapping
      */
-    public static function createForInboxFlowTesting(array $messageTypes = [], array $handlers = [], array $routing = []): InboxFlowTestContext
-    {
+    public static function createForInboxFlowTesting(
+        array $messageTypes = [],
+        array $handlers = [],
+        array $routing = [],
+    ): InboxFlowTestContext {
         // Create PropertyInfoExtractor for property promotion support (matches production config)
         // Using ReflectionExtractor only - sufficient for constructor property promotion
         $reflectionExtractor = new ReflectionExtractor();
@@ -238,8 +241,7 @@ final readonly class EventBusTestContext
         public InMemoryTransport $amqpTransport,
         public OutboxSerializer $outboxSerializer,
         public InboxSerializer $inboxSerializer,
-    ) {
-    }
+    ) {}
 }
 
 /**
@@ -255,6 +257,5 @@ final readonly class InboxFlowTestContext
         public OutboxSerializer $outboxSerializer,
         public InboxSerializer $inboxSerializer,
         public DeduplicationInMemoryStore $deduplicationStore,
-    ) {
-    }
+    ) {}
 }

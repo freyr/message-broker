@@ -33,11 +33,7 @@ final class TransportSerializerTest extends TestCase
             ]
         );
 
-        $message = new TestMessage(
-            id: Id::new(),
-            name: 'Outbox Test',
-            timestamp: CarbonImmutable::now(),
-        );
+        $message = new TestMessage(id: Id::new(), name: 'Outbox Test', timestamp: CarbonImmutable::now());
 
         // When: Message is dispatched
         $context->bus->dispatch($message);
@@ -173,17 +169,9 @@ final class TransportSerializerTest extends TestCase
         // But only TestMessage (routed to outbox) should use semantic name
         // AmqpTestMessage (routed to AMQP) should ignore the attribute
 
-        $outboxMessage = new TestMessage(
-            id: Id::new(),
-            name: 'Test',
-            timestamp: CarbonImmutable::now(),
-        );
+        $outboxMessage = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
 
-        $amqpMessage = new AmqpTestMessage(
-            eventId: Id::new(),
-            payload: 'Test',
-            sentAt: CarbonImmutable::now(),
-        );
+        $amqpMessage = new AmqpTestMessage(eventId: Id::new(), payload: 'Test', sentAt: CarbonImmutable::now());
 
         // When: Messages are dispatched
         $context->bus->dispatch($outboxMessage);

@@ -37,7 +37,7 @@ final class InboxFlowTest extends TestCase
 
         $handler = function (OrderPlacedMessage $message) use (&$handledMessages, &$handlerInvocationCount): void {
             $handledMessages[] = $message;
-            $handlerInvocationCount++;
+            ++$handlerInvocationCount;
         };
 
         $context = EventBusFactory::createForInboxFlowTesting(
@@ -63,11 +63,7 @@ final class InboxFlowTest extends TestCase
         $testName = 'Test Order';
         $testTimestamp = CarbonImmutable::now();
 
-        $message = new TestMessage(
-            id: $testId,
-            name: $testName,
-            timestamp: $testTimestamp,
-        );
+        $message = new TestMessage(id: $testId, name: $testName, timestamp: $testTimestamp);
 
         // Step 1: Publish message to outbox
         $context->bus->dispatch($message);
@@ -131,7 +127,7 @@ final class InboxFlowTest extends TestCase
         $handlerInvocationCount = 0;
 
         $handler = function (OrderPlacedMessage $message) use (&$handlerInvocationCount): void {
-            $handlerInvocationCount++;
+            ++$handlerInvocationCount;
         };
 
         $context = EventBusFactory::createForInboxFlowTesting(
@@ -152,11 +148,7 @@ final class InboxFlowTest extends TestCase
             logger: new NullLogger(),
         );
 
-        $message = new TestMessage(
-            id: Id::new(),
-            name: 'Test',
-            timestamp: CarbonImmutable::now(),
-        );
+        $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
 
         // Step 1: Publish to outbox
         $context->bus->dispatch($message);
@@ -191,7 +183,11 @@ final class InboxFlowTest extends TestCase
 
         // Then: Handler NOT invoked again (deduplicated)
         $this->assertEquals(1, $handlerInvocationCount, 'Handler should not be invoked for duplicate');
-        $this->assertEquals(1, $context->deduplicationStore->getProcessedCount(), 'Processed count should not increase');
+        $this->assertEquals(
+            1,
+            $context->deduplicationStore->getProcessedCount(),
+            'Processed count should not increase'
+        );
         $this->assertEquals(1, $context->deduplicationStore->getDuplicateCount(), 'Duplicate should be detected');
     }
 
@@ -222,11 +218,7 @@ final class InboxFlowTest extends TestCase
             logger: new NullLogger(),
         );
 
-        $message = new TestMessage(
-            id: Id::new(),
-            name: 'Serialization Test',
-            timestamp: CarbonImmutable::now(),
-        );
+        $message = new TestMessage(id: Id::new(), name: 'Serialization Test', timestamp: CarbonImmutable::now());
 
         // When: Message published to outbox
         $context->bus->dispatch($message);
@@ -267,7 +259,7 @@ final class InboxFlowTest extends TestCase
         $handlerInvocationCount = 0;
 
         $handler = function (OrderPlacedMessage $message) use (&$handlerInvocationCount): void {
-            $handlerInvocationCount++;
+            ++$handlerInvocationCount;
         };
 
         $context = EventBusFactory::createForInboxFlowTesting(
@@ -283,28 +275,30 @@ final class InboxFlowTest extends TestCase
         );
 
         // Create a message WITHOUT MessageIdStamp
-        $message = new OrderPlacedMessage(
-            id: Id::new(),
-            name: 'No MessageId',
-            timestamp: CarbonImmutable::now(),
-        );
+        $message = new OrderPlacedMessage(id: Id::new(), name: 'No MessageId', timestamp: CarbonImmutable::now());
 
         // When: Message dispatched with ReceivedStamp but NO MessageIdStamp
-        $envelope = new \Symfony\Component\Messenger\Envelope($message, [
-            new ReceivedStamp('amqp'),
-        ]);
+        $envelope = new \Symfony\Component\Messenger\Envelope($message, [new ReceivedStamp('amqp')]);
 
         $context->bus->dispatch($envelope);
 
         // Then: Handler should be invoked (no deduplication)
         $this->assertEquals(1, $handlerInvocationCount, 'Handler should be invoked for message without MessageIdStamp');
-        $this->assertEquals(0, $context->deduplicationStore->getProcessedCount(), 'Deduplication should not track messages without MessageIdStamp');
+        $this->assertEquals(
+            0,
+            $context->deduplicationStore->getProcessedCount(),
+            'Deduplication should not track messages without MessageIdStamp'
+        );
 
         // When: Same message dispatched again (without MessageIdStamp)
         $context->bus->dispatch($envelope);
 
         // Then: Handler invoked again (no deduplication check)
-        $this->assertEquals(2, $handlerInvocationCount, 'Handler should be invoked again - no deduplication without MessageIdStamp');
+        $this->assertEquals(
+            2,
+            $handlerInvocationCount,
+            'Handler should be invoked again - no deduplication without MessageIdStamp'
+        );
         $this->assertEquals(0, $context->deduplicationStore->getProcessedCount(), 'Still no deduplication tracking');
         $this->assertEquals(0, $context->deduplicationStore->getDuplicateCount(), 'No duplicates detected');
     }

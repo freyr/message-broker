@@ -23,7 +23,7 @@ final class FreyrMessageBrokerExtension extends Extension
         /** @var array{inbox: array{message_types: array<string, string>}} $config */
         $container->setParameter('message_broker.inbox.message_types', $config['inbox']['message_types']);
 
-        $loader = new YamlFileLoader($container, new FileLocator(__DIR__ . '/../../config'));
+        $loader = new YamlFileLoader($container, new FileLocator(__DIR__.'/../../config'));
 
         $loader->load('services.yaml');
     }

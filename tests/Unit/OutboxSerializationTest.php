@@ -38,11 +38,7 @@ final class OutboxSerializationTest extends TestCase
         $testName = 'Test Event';
         $testTimestamp = CarbonImmutable::now();
 
-        $message = new TestMessage(
-            id: $testId,
-            name: $testName,
-            timestamp: $testTimestamp,
-        );
+        $message = new TestMessage(id: $testId, name: $testName, timestamp: $testTimestamp);
 
         // When: Message is dispatched to EventBus
         $context->bus->dispatch($message);
@@ -83,7 +79,11 @@ final class OutboxSerializationTest extends TestCase
         $this->assertArrayHasKey('timestamp', $decodedBody, 'Body should contain timestamp property');
 
         // Body should NOT contain messageId (it's transport metadata, not business data)
-        $this->assertArrayNotHasKey('messageId', $decodedBody, 'Body should NOT contain messageId - it is transport metadata');
+        $this->assertArrayNotHasKey(
+            'messageId',
+            $decodedBody,
+            'Body should NOT contain messageId - it is transport metadata'
+        );
 
         // Verify property values
         $this->assertEquals($testId->__toString(), $decodedBody['id']);
@@ -104,17 +104,9 @@ final class OutboxSerializationTest extends TestCase
         );
 
         // When: Multiple messages are dispatched
-        $message1 = new TestMessage(
-            id: Id::new(),
-            name: 'First Message',
-            timestamp: CarbonImmutable::now(),
-        );
+        $message1 = new TestMessage(id: Id::new(), name: 'First Message', timestamp: CarbonImmutable::now());
 
-        $message2 = new TestMessage(
-            id: Id::new(),
-            name: 'Second Message',
-            timestamp: CarbonImmutable::now(),
-        );
+        $message2 = new TestMessage(id: Id::new(), name: 'Second Message', timestamp: CarbonImmutable::now());
 
         $context->bus->dispatch($message1);
         $context->bus->dispatch($message2);

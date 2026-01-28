@@ -15,6 +15,5 @@ final readonly class MessageIdStamp implements StampInterface
 {
     public function __construct(
         public string $messageId,
-    ) {
-    }
+    ) {}
 }

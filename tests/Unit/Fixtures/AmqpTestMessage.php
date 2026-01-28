@@ -21,6 +21,5 @@ final readonly class AmqpTestMessage implements OutboxMessage
         public Id $eventId,
         public string $payload,
         public CarbonImmutable $sentAt,
-    ) {
-    }
+    ) {}
 }

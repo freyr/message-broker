@@ -19,14 +19,12 @@ final class SimpleContainer implements ContainerInterface
      */
     public function __construct(
         private readonly array $services,
-    ) {
-    }
+    ) {}
 
     public function get(string $id): object
     {
         if (!$this->has($id)) {
-            throw new class("Service {$id} not found") extends \Exception implements NotFoundExceptionInterface {
-            };
+            throw new class("Service {$id} not found") extends \Exception implements NotFoundExceptionInterface {};
         }
 
         return $this->services[$id];
