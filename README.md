@@ -52,8 +52,14 @@ php bin/console doctrine:migrations:migrate
    - Binds to exchange: `inventory.stock`
    - Binding key: `inventory.stock.*`
 
-5. `php bin/console messenger:consume --queue=inventory_stock` fetches events from AMQP and saves to inbox database
-    - Consume the messages with deduplication middleware providing **at-most-once delivery** (events may be sent multiple times)
+5. `php bin/console messenger:consume --queue=inventory_stock` fetches events from AMQP, andd passes them to messenger worker 
+   - transactional middleware starts transaction
+   - dedicated middleware checks for duplicated event_id
+     - skips event when id exists
+     - insert event_id if not
+   - Command handler executes business logic, performs database operation
+   - Transaction is committed, ack is sent to amqp, id ack fails, 
+   - Failed event can be redelivered, but deduplication middleware will skip it
 
 ### Start Workers
 
