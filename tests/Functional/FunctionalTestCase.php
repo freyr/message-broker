@@ -227,6 +227,7 @@ abstract class FunctionalTestCase extends KernelTestCase
         );
 
         // Stop after processing N messages (handled by StopWorkerOnMessageLimitListener)
+        // Handler cleanup is done in tearDown()
         $worker->run();
     }
 
@@ -247,6 +248,7 @@ abstract class FunctionalTestCase extends KernelTestCase
         );
 
         // Stop after processing N messages (handled by StopWorkerOnMessageLimitListener)
+        // Handler cleanup is done in tearDown()
         $worker->run();
     }
 }

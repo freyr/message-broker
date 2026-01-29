@@ -79,6 +79,11 @@ services:
         autoconfigure: false
         public: false
 
+    # Use NullLogger to suppress logging output during tests
+    logger:
+        class: Psr\Log\NullLogger
+        public: true
+
     # Doctrine Integration
     Freyr\MessageBroker\Doctrine\Type\IdType:
         tags:
