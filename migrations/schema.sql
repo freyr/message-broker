@@ -8,8 +8,9 @@ DROP TABLE IF EXISTS messenger_messages;
 
 -- 1. messenger_outbox
 -- Purpose: Stores domain events for transactional outbox pattern
+-- Note: Uses BIGINT AUTO_INCREMENT (Symfony Messenger Doctrine transport requirement)
 CREATE TABLE messenger_outbox (
-    id BINARY(16) NOT NULL PRIMARY KEY COMMENT '(DC2Type:id_binary)',
+    id BIGINT AUTO_INCREMENT NOT NULL PRIMARY KEY,
     body LONGTEXT NOT NULL,
     headers LONGTEXT NOT NULL,
     queue_name VARCHAR(190) NOT NULL,
