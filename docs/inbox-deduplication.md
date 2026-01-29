@@ -31,7 +31,7 @@ The Inbox pattern with deduplication ensures that each message is processed exac
 ## Architecture
 
 ```
-[AMQP Message] → [MessageNameSerializer] → [MessageIdStamp + MessageNameStamp]
+[AMQP Message] → [InboxSerializer] → [MessageIdStamp + MessageNameStamp]
                         ↓
             [doctrine_transaction middleware]
                         ↓
@@ -48,9 +48,10 @@ The Inbox pattern with deduplication ensures that each message is processed exac
 
 - **DeduplicationMiddleware** - Checks duplicates before handler execution
 - **MessageIdStamp** - Contains UUID v7 message identifier
-- **MessageNameStamp** - Contains semantic message name
 - **message_broker_deduplication table** - Binary UUID v7 primary key prevents duplicates
 - **ReceivedStamp** - Triggers deduplication check (only for consumed messages)
+
+**Note:** Deduplication uses MessageIdStamp + PHP class FQN. The PHP FQN is obtained from `$envelope->getMessage()::class`.
 
 ## Delivery Guarantees
 
@@ -63,7 +64,7 @@ The Inbox pattern with deduplication ensures that each message is processed exac
 
 **Structure:**
 - `message_id` (binary(16), primary key) - UUID v7 from MessageIdStamp
-- `message_name` (varchar) - Semantic name for monitoring
+- `message_name` (varchar) - PHP FQN for monitoring (e.g., 'App\Message\OrderPlaced')
 - `processed_at` (datetime) - Timestamp for cleanup
 
 **Cleanup:**

@@ -97,12 +97,12 @@ framework:
       # Default transport
       amqp:
         dsn: '%env(MESSENGER_AMQP_DSN)%'  # amqp://user:pass@host:5672/vhost?exchange[name]=default.events
-        serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
+        serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
 
       # Domain-specific transport
       commerce:
         dsn: '%env(MESSENGER_AMQP_DSN)%?exchange[name]=commerce.events'
-        serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
+        serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
 ```
 
 **Publisher side:**

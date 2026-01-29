@@ -151,7 +151,7 @@ After testing installation, verify:
 
 - [ ] Migration file in `migrations/` directory
 - [ ] Migration runs successfully: `php bin/console doctrine:migrations:migrate`
-- [ ] Tables created: `messenger_outbox`, `messenger_inbox`, `messenger_messages`
+- [ ] Tables created: `messenger_outbox`, `message_broker_deduplication`, `messenger_messages`
 
 ### ✅ Services
 
@@ -162,7 +162,7 @@ After testing installation, verify:
 ### ✅ Messenger
 
 - [ ] Transports configured: `php bin/console debug:messenger`
-- [ ] Can list transports: `outbox`, `inbox`, `amqp`, `dlq`, `failed`
+- [ ] Can list transports: `outbox`, `amqp`, `failed`
 
 ### ✅ Environment
 

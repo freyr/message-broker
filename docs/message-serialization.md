@@ -8,15 +8,15 @@ Messages are serialized using semantic, language-agnostic names (`order.placed`)
 
 **Publishing (Outbox → AMQP):**
 1. Event has `#[MessageName('order.placed')]` attribute
-2. `MessageNameSerializer` extracts semantic name and sets `type` header to `order.placed`
+2. `OutboxSerializer` extracts semantic name and sets `type` header to `order.placed`
 3. `OutboxToAmqpBridge` generates messageId (UUID v7) and adds MessageIdStamp
-4. Body contains JSON-serialized event payload (only business data)
+4. Body contains JSON-serialised event payload (only business data)
 5. MessageId transported via MessageIdStamp in `X-Message-Stamp-*` header
 
 **Consuming (AMQP → Inbox):**
 1. Message arrives with `type: order.placed` header
-2. `MessageNameSerializer` looks up mapping: `order.placed` → `App\Message\OrderPlaced`
-3. Delegates to Symfony's native serializer for deserialization
+2. `InboxSerializer` looks up mapping: `order.placed` → `App\Message\OrderPlaced`
+3. Delegates to Symfony's native serialiser for deserialisation
 4. Stamps restored from `X-Message-Stamp-*` headers
 5. Result: Typed PHP object for handler
 
@@ -28,22 +28,22 @@ Messages are serialized using semantic, language-agnostic names (`order.placed`)
 
 **Versioning:** Same semantic name can map to different classes per application
 
-**Type safety:** Native Symfony serialization with full type support
+**Type safety:** Native Symfony serialisation with full type support
 
 ## Architecture
 
 ```
 [Publisher Event] → #[MessageName('order.placed')]
          ↓
-[MessageNameSerializer::encode()]
+[OutboxSerializer::encode()]
          ↓
 AMQP: { type: "order.placed", body: {...}, stamps: X-Message-Stamp-* }
          ↓
-[MessageNameSerializer::decode()]
+[InboxSerializer::decode()]
          ↓
 message_types['order.placed'] → App\Message\OrderPlaced
          ↓
-[Symfony Serializer] → Typed PHP Object
+[Symfony Serialiser] → Typed PHP Object
          ↓
 [Handler(OrderPlaced $message)]
 ```
@@ -51,9 +51,10 @@ message_types['order.placed'] → App\Message\OrderPlaced
 ## Key Components
 
 - **MessageName attribute** - Declares semantic name on event classes
-- **InboxSerializer|OutboxSerializer** - Serializers for inbox and outbox
+- **InboxSerializer** - Consumes from AMQP (semantic name → FQN)
+- **OutboxSerializer** - Publishes to AMQP (FQN → semantic name)
 - **message_types configuration** - Maps semantic names to PHP classes
-- **Symfony Serializer** - Native JSON serialization with normalizers
+- **Symfony Serialiser** - Native JSON serialisation with normalizers
 - **Stamp headers** - X-Message-Stamp-* for metadata transport
 
 ## Message Format

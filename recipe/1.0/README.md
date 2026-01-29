@@ -95,12 +95,12 @@ To test this recipe without publishing:
 ### Configuration Files
 
 **config/packages/message_broker.yaml:**
-- Message type mappings for inbox (needs user customization)
-- Used by MessageNameSerializer to translate semantic names to PHP classes
+- Message type mappings for inbox (needs user customisation)
+- Used by InboxSerializer to translate semantic names to PHP classes
 - This is the ONLY required configuration for the bundle
 
 **config/packages/messenger.yaml:**
-- 3 transports: `outbox`, `amqp`, `failed`
+- Multiple transports: `outbox`, `amqp` (publish), `amqp_orders` (consume example), `failed`
 - Middleware configuration (DeduplicationMiddleware)
 - Comments showing where to add domain event routing
 - Example handler documentation
@@ -108,7 +108,7 @@ To test this recipe without publishing:
 ### Database Migration
 
 **migrations/Version20250103000000.php:**
-- Creates `messenger_outbox` table (standard auto-increment ID)
+- Creates `messenger_outbox` table (binary UUID v7)
 - Creates `message_broker_deduplication` table (binary UUID v7 for deduplication)
 - Creates `messenger_messages` table (standard for failed messages)
 
@@ -124,12 +124,14 @@ After running `composer require freyr/message-broker`, users need to:
 1. Configure inbox message types in `config/packages/message_broker.yaml`
 2. Route domain events to outbox in `config/packages/messenger.yaml`
 3. Run migrations: `php bin/console doctrine:migrations:migrate`
-4. Start workers: `php bin/console messenger:consume outbox amqp -vv`
+4. Start workers:
+   - `php bin/console messenger:consume outbox -vv` (publish to AMQP)
+   - `php bin/console messenger:consume amqp_orders -vv` (consume from AMQP)
 
-## Customization
+## Customisation
 
-Users can customize:
-- Message type mappings in `message_broker.yaml` (inbox deserialization)
+Users can customise:
+- Message type mappings in `message_broker.yaml` (inbox deserialisation)
 - Transport DSNs in `messenger.yaml` (including table names)
 - AMQP connection string in `.env`
 - Middleware priority (DeduplicationMiddleware)

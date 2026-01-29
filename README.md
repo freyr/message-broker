@@ -1,6 +1,8 @@
 # Freyr Message Broker
 
-** Inbox & Outbox Patterns for Symfony Messenger**
+## Inbox & Outbox Patterns for Symfony Messenger
+
+**IMPORTANT** This library is in a very early stage of development! Not production ready!
 
 A Symfony bundle providing reliable event publishing and consumption with transactional guarantees, automatic deduplication, and seamless AMQP integration.
 
@@ -9,7 +11,6 @@ A Symfony bundle providing reliable event publishing and consumption with transa
 - ✅ **Transactional Outbox** - Publish events reliably within your business transactions
 - ✅ **Automatic Deduplication at the Inbox** - Binary UUID v7 primary key prevents duplicate processing
 - ✅ **Typed Message Handlers** - Type-safe event consumption with IDE autocomplete
-- ✅ **Automatic DLQ Routing** - Unmatched events routed to dead-letter queue
 - ✅ **Horizontal Scaling** - Multiple workers with database-level SKIP LOCKED
 
 ## Restrictions
@@ -52,14 +53,14 @@ php bin/console doctrine:migrations:migrate
    - Binds to exchange: `inventory.stock`
    - Binding key: `inventory.stock.*`
 
-5. `php bin/console messenger:consume --queue=inventory_stock` fetches events from AMQP, andd passes them to messenger worker 
-   - transactional middleware starts transaction
-   - dedicated middleware checks for duplicated event_id
-     - skips event when id exists
-     - insert event_id if not
+5. `php bin/console messenger:consume amqp_orders -vv` fetches events from AMQP and passes them to messenger worker
+   - Transactional middleware starts transaction
+   - Deduplication middleware checks for duplicated event_id
+     - Skips event when id exists
+     - Inserts event_id if not
    - Command handler executes business logic, performs database operation
-   - Transaction is committed, ack is sent to amqp, id ack fails, 
-   - Failed event can be redelivered, but deduplication middleware will skip it
+   - Transaction is committed, ack is sent to AMQP
+   - If ack fails, event can be redelivered, but deduplication middleware will skip it
 
 ### Start Workers
 
@@ -67,8 +68,8 @@ php bin/console doctrine:migrations:migrate
 # Process outbox (publish events to AMQP)
 php bin/console messenger:consume outbox -vv
 
-# Consumes messages from AMQP
-php bin/console messenger:consume --queue=inventory_stock
+# Consume messages from AMQP (example: orders queue)
+php bin/console messenger:consume amqp_orders -vv
 ```
 
 ## Usage
@@ -252,12 +253,14 @@ final readonly class OrderPlacedHandler
 **Prerequisites:** RabbitMQ queue must already exist with proper bindings.
 
 ```bash
-# Ingest from AMQP → Inbox transport
-php bin/console inbox:ingest --queue=your.queue
-
-# Process inbox messages → Handlers
-php bin/console messenger:consume inbox -vv
+# Consume directly from AMQP transport
+php bin/console messenger:consume amqp_orders -vv
 ```
+
+Messages are automatically:
+1. Deserialised by InboxSerialiser into typed PHP objects
+2. Deduplicated by DeduplicationMiddleware
+3. Routed to handlers based on PHP class
 
 ### Message Format
 
@@ -289,48 +292,55 @@ Symfony Flex creates these configuration files:
 ```yaml
 message_broker:
     inbox:
-        table_name: messenger_inbox
         message_types: {}  # Add your mappings here
-        failed_transport: failed
-    outbox:
-        table_name: messenger_outbox
-        dlq_transport: dlq
 ```
 
 **config/packages/messenger.yaml:**
 ```yaml
 framework:
     messenger:
+        failure_transport: failed
+
         transports:
             outbox:
-                dsn: 'outbox://default?table_name=messenger_outbox&queue_name=outbox'
-            inbox:
-                dsn: 'inbox://default?table_name=messenger_inbox&queue_name=inbox'
+                dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
+                serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
+
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
-            dlq:
-                dsn: 'doctrine://default?queue_name=dlq'
+                serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
+                options:
+                    auto_setup: false
+
+            amqp_orders:
+                dsn: '%env(MESSENGER_AMQP_DSN)%'
+                serializer: 'Freyr\MessageBroker\Serializer\InboxSerializer'
+                options:
+                    auto_setup: false
+                    queue:
+                        name: 'orders_queue'
+
             failed:
                 dsn: 'doctrine://default?queue_name=failed'
+
         routing:
             # Add your domain events here:
             # 'App\Domain\Event\OrderPlaced': outbox
-            # Add your typed consumer messages here:
-            # 'App\Message\OrderPlaced': inbox
 ```
+
+See CLAUDE.md for complete configuration documentation.
 
 **.env:**
 ```env
 MESSENGER_AMQP_DSN=amqp://guest:guest@localhost:5672/%2f
 ```
 
-### Customization
+### Customisation
 
-You can customize:
-- Table names in `message_broker.yaml`
+You can customise:
 - Transport DSNs in `messenger.yaml`
 - AMQP connection in `.env`
-- Failed/DLQ transport names
+- Failed transport name
 
 ## Production Deployment
 
@@ -338,14 +348,6 @@ You can customize:
 
 ```yaml
 services:
-  # Consume from AMQP and save to inbox database
-  worker-inbox-ingest:
-    image: your-app:latest
-    command: php bin/console inbox:ingest --queue=your.queue
-    restart: always
-    deploy:
-      replicas: 2
-
   # Process outbox database and publish to AMQP
   worker-outbox:
     image: your-app:latest
@@ -354,10 +356,10 @@ services:
     deploy:
       replicas: 2
 
-  # Process inbox database and dispatch to handlers
-  worker-inbox:
+  # Consume from AMQP and process with handlers
+  worker-amqp-orders:
     image: your-app:latest
-    command: php bin/console messenger:consume inbox --time-limit=3600
+    command: php bin/console messenger:consume amqp_orders --time-limit=3600
     restart: always
     deploy:
       replicas: 3
@@ -378,11 +380,15 @@ php bin/console messenger:failed:retry
 
 ## Documentation
 
-**Core Principles:**
-- [Outbox Pattern - Transactional Consistency](docs/outbox-pattern.md) - How events are published reliably within database transactions
-- [Inbox Deduplication](docs/inbox-deduplication.md) - How duplicate messages are prevented at consumption
-- [Message Serialization](docs/message-serialization.md) - Semantic naming and cross-language compatibility
+**Core Architecture:**
+- [Database Schema](docs/database-schema.md) - Complete 3-table architecture, migrations, and cleanup strategies
+- [Outbox Pattern](docs/outbox-pattern.md) - Transactional consistency for event publishing
+- [Inbox Deduplication](docs/inbox-deduplication.md) - Preventing duplicate message processing
+- [Message Serialisation](docs/message-serialization.md) - Semantic naming and cross-language compatibility
 - [AMQP Routing](docs/amqp-routing.md) - Convention-based routing with attribute overrides
+
+**Developer Guide:**
+- See `CLAUDE.md` for complete configuration examples and implementation details
 
 ## Manual Installation (Without Symfony Flex)
 
@@ -655,6 +661,6 @@ php bin/console debug:container | grep MessageBroker
 php bin/console debug:messenger
 
 # Start workers
-php bin/console inbox:ingest --queue=your.queue    # AMQP → inbox database
-php bin/console messenger:consume outbox -vv       # Outbox database → AMQP
+php bin/console messenger:consume outbox -vv        # Outbox database → AMQP
+php bin/console messenger:consume amqp_orders -vv  # AMQP → handlers
 ```
