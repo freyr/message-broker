@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Doctrine\DBAL\Connection;
+use Freyr\MessageBroker\Tests\Functional\Fixtures;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
@@ -40,6 +41,7 @@ abstract class FunctionalTestCase extends KernelTestCase
 
         $this->cleanDatabase();
         $this->setupAmqp();
+        $this->resetHandlers();
     }
 
     public static function tearDownAfterClass(): void
@@ -250,5 +252,47 @@ abstract class FunctionalTestCase extends KernelTestCase
         // Stop after processing N messages (handled by StopWorkerOnMessageLimitListener)
         // Handler cleanup is done in tearDown()
         $worker->run();
+    }
+
+    // Inbox Test Helpers
+
+    protected function resetHandlers(): void
+    {
+        Fixtures\TestEventHandler::reset();
+        Fixtures\OrderPlacedHandler::reset();
+    }
+
+    protected function assertHandlerInvoked(string $handlerClass, int $expectedCount = 1): void
+    {
+        $actualCount = $handlerClass::getInvocationCount();
+        $this->assertEquals(
+            $expectedCount,
+            $actualCount,
+            "Expected handler {$handlerClass} to be invoked {$expectedCount} time(s), but was invoked {$actualCount} time(s)"
+        );
+    }
+
+    protected function assertDeduplicationEntryExists(string $messageId): void
+    {
+        /** @var Connection $connection */
+        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+
+        // Convert UUID string to uppercase hex (no dashes) for binary comparison
+        $messageIdHex = strtoupper(str_replace('-', '', $messageId));
+
+        $count = (int) $connection->fetchOne(
+            "SELECT COUNT(*) FROM message_broker_deduplication WHERE HEX(message_id) = ?",
+            [$messageIdHex]
+        );
+
+        $this->assertGreaterThan(0, $count, "Expected deduplication entry for message ID {$messageId} but none found");
+    }
+
+    protected function getDeduplicationEntryCount(): int
+    {
+        /** @var Connection $connection */
+        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+
+        return (int) $connection->fetchOne('SELECT COUNT(*) FROM message_broker_deduplication');
     }
 }

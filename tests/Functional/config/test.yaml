@@ -38,6 +38,8 @@ framework:
                     auto_setup: false
                     exchange:
                         name: 'test_events'
+                    queues:
+                        test_inbox: ~
                 retry_strategy:
                     max_retries: 3
                     delay: 1000
@@ -117,6 +119,7 @@ services:
     # Deduplication Store
     Freyr\MessageBroker\Inbox\DeduplicationStore:
         class: Freyr\MessageBroker\Inbox\DeduplicationDbalStore
+        public: true
         arguments:
             $connection: '@doctrine.dbal.default_connection'
             $logger: '@logger'
@@ -139,3 +142,10 @@ services:
             $eventBus: '@messenger.default_bus'
             $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
             $logger: '@logger'
+
+    # Test Handlers (for inbox flow tests)
+    Freyr\MessageBroker\Tests\Functional\Fixtures\TestEventHandler:
+        autoconfigure: true
+
+    Freyr\MessageBroker\Tests\Functional\Fixtures\OrderPlacedHandler:
+        autoconfigure: true
