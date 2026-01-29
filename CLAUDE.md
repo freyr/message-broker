@@ -361,8 +361,8 @@ services:
   # Injects native @serializer service with all registered normalizers
   Freyr\MessageBroker\Serializer\InboxSerializer:
     arguments:
-      $messageTypes: '%message_broker.inbox.message_types%'
       $serializer: '@serializer'
+      $messageTypes: '%message_broker.inbox.message_types%'
 
   # Outbox Serializer - for AMQP publishing
   # - encode(): Extracts semantic name from #[MessageName] (e.g., 'App\Event\OrderPlaced' → 'order.placed')

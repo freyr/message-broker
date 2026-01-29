@@ -106,8 +106,8 @@ services:
     # Inbox Serializer
     Freyr\MessageBroker\Serializer\InboxSerializer:
         arguments:
-            $messageTypes: '%message_broker.inbox.message_types%'
             $serializer: '@serializer'
+            $messageTypes: '%message_broker.inbox.message_types%'
 
     # Outbox Serializer
     Freyr\MessageBroker\Serializer\OutboxSerializer:

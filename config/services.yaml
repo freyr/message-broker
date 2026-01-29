@@ -31,8 +31,8 @@ services:
     # Used on AMQP consumption transports (e.g., amqp_orders)
     Freyr\MessageBroker\Serializer\InboxSerializer:
         arguments:
-            $messageTypes: '%message_broker.inbox.message_types%'
             $serializer: '@serializer'
+            $messageTypes: '%message_broker.inbox.message_types%'
 
     # Outbox Serializer (for AMQP publishing transports)
     # - encode(): Extracts semantic name from #[MessageName] attribute (e.g., 'App\Event\OrderPlaced' → 'order.placed')

@@ -23,12 +23,12 @@ use Symfony\Component\Serializer\SerializerInterface;
 final class InboxSerializer extends Serializer
 {
     /**
-     * @param array<string, class-string> $messageTypes Mapping: semantic_name => FQN
      * @param SerializerInterface $serializer Symfony's native @serializer service
+     * @param array<string, class-string> $messageTypes Mapping: semantic_name => FQN
      */
     public function __construct(
-        private readonly array $messageTypes = [],
         SerializerInterface $serializer,
+        private readonly array $messageTypes = [],
     ) {
         parent::__construct($serializer);
     }
