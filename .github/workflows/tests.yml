@@ -1,0 +1,110 @@
+name: Tests
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+jobs:
+  tests:
+    name: PHP ${{ matrix.php }} - ${{ matrix.stability }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.4']
+        stability: [prefer-stable]
+
+    services:
+      mysql:
+        image: mysql:9.1
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: messenger_test
+          MYSQL_USER: messenger
+          MYSQL_PASSWORD: messenger
+        ports:
+          - 3308:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+      rabbitmq:
+        image: rabbitmq:4.0-management
+        env:
+          RABBITMQ_DEFAULT_USER: guest
+          RABBITMQ_DEFAULT_PASS: guest
+        ports:
+          - 5673:5672
+          - 15673:15672
+        options: >-
+          --health-cmd="rabbitmq-diagnostics -q ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, pdo_mysql, bcmath, intl, gd, exif, iconv, amqp
+          coverage: none
+          tools: composer:v2
+
+      - name: Get composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache composer dependencies
+        uses: actions/cache@v3
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install dependencies
+        run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction --no-progress
+
+      - name: Wait for MySQL
+        run: |
+          until mysqladmin ping -h 127.0.0.1 -P 3308 -u messenger -pmessenger --silent; do
+            echo 'Waiting for MySQL...'
+            sleep 2
+          done
+          echo 'MySQL is ready!'
+
+      - name: Wait for RabbitMQ
+        run: |
+          until curl -f -u guest:guest http://127.0.0.1:15673/api/overview 2>/dev/null; do
+            echo 'Waiting for RabbitMQ...'
+            sleep 2
+          done
+          echo 'RabbitMQ is ready!'
+
+      - name: Setup database schema
+        run: |
+          mysql -h 127.0.0.1 -P 3308 -u messenger -pmessenger messenger_test < migrations/schema.sql
+        continue-on-error: true
+
+      - name: Run tests
+        env:
+          DATABASE_URL: mysql://messenger:messenger@127.0.0.1:3308/messenger_test
+          MESSENGER_AMQP_DSN: amqp://guest:guest@127.0.0.1:5673/%2f
+          APP_ENV: test
+        run: vendor/bin/phpunit --testdox
+
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- PHP Version: ${{ matrix.php }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Stability: ${{ matrix.stability }}" >> $GITHUB_STEP_SUMMARY
