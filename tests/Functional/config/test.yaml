@@ -1,0 +1,137 @@
+framework:
+    secret: 'test-secret'
+    test: true
+    messenger:
+        failure_transport: failed
+
+        default_middleware:
+            enabled: true
+            allow_no_handlers: false
+
+        transports:
+            # Outbox transport - stores domain events with #[MessageName]
+            outbox:
+                dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
+                retry_strategy:
+                    max_retries: 3
+                    delay: 1000
+                    multiplier: 2
+
+            # AMQP publish transport - OutboxToAmqpBridge publishes here
+            amqp:
+                dsn: '%env(MESSENGER_AMQP_DSN)%'
+                serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
+                options:
+                    auto_setup: false
+                retry_strategy:
+                    max_retries: 3
+                    delay: 1000
+                    multiplier: 2
+
+            # AMQP consumption transport (for inbox tests)
+            amqp_test:
+                dsn: '%env(MESSENGER_AMQP_DSN)%'
+                serializer: 'Freyr\MessageBroker\Serializer\InboxSerializer'
+                options:
+                    auto_setup: false
+                    exchange:
+                        name: 'test_events'
+                retry_strategy:
+                    max_retries: 3
+                    delay: 1000
+                    multiplier: 2
+
+            # Failed transport - for all failed messages
+            failed:
+                dsn: 'doctrine://default?queue_name=failed'
+                options:
+                    auto_setup: false
+
+        routing:
+            # Outbox messages route to outbox transport
+            'Freyr\MessageBroker\Tests\Functional\Fixtures\TestEvent': outbox
+            'Freyr\MessageBroker\Tests\Functional\Fixtures\OrderPlaced': outbox
+
+doctrine:
+    dbal:
+        url: '%env(DATABASE_URL)%'
+        driver: 'pdo_mysql'
+        charset: utf8mb4
+        default_table_options:
+            charset: utf8mb4
+            collate: utf8mb4_unicode_ci
+        types:
+            id_binary: Freyr\MessageBroker\Doctrine\Type\IdType
+
+    orm:
+        auto_generate_proxy_classes: true
+        naming_strategy: doctrine.orm.naming_strategy.underscore_number_aware
+        auto_mapping: true
+
+message_broker:
+    inbox:
+        message_types:
+            'test.event.sent': 'Freyr\MessageBroker\Tests\Functional\Fixtures\TestEvent'
+            'test.order.placed': 'Freyr\MessageBroker\Tests\Functional\Fixtures\OrderPlaced'
+
+services:
+    _defaults:
+        autowire: false
+        autoconfigure: false
+        public: false
+
+    # Doctrine Integration
+    Freyr\MessageBroker\Doctrine\Type\IdType:
+        tags:
+            - { name: 'doctrine.dbal.types', type: 'id_binary' }
+
+    # Auto-register all Normalizers
+    Freyr\MessageBroker\Serializer\Normalizer\:
+        resource: '../../../src/Serializer/Normalizer/'
+        tags: ['serializer.normalizer']
+
+    # Custom ObjectNormalizer with property promotion support
+    Freyr\MessageBroker\Serializer\Normalizer\PropertyPromotionObjectNormalizer:
+        autowire: true
+        class: Symfony\Component\Serializer\Normalizer\ObjectNormalizer
+        arguments:
+            $propertyTypeExtractor: '@property_info'
+        tags:
+            - { name: 'serializer.normalizer', priority: -1000 }
+
+    # Inbox Serializer
+    Freyr\MessageBroker\Serializer\InboxSerializer:
+        arguments:
+            $messageTypes: '%message_broker.inbox.message_types%'
+            $serializer: '@serializer'
+
+    # Outbox Serializer
+    Freyr\MessageBroker\Serializer\OutboxSerializer:
+        arguments:
+            $serializer: '@serializer'
+
+    # Deduplication Store
+    Freyr\MessageBroker\Inbox\DeduplicationStore:
+        class: Freyr\MessageBroker\Inbox\DeduplicationDbalStore
+        arguments:
+            $connection: '@doctrine.dbal.default_connection'
+            $logger: '@logger'
+
+    # Deduplication Middleware
+    Freyr\MessageBroker\Inbox\DeduplicationMiddleware:
+        arguments:
+            $store: '@Freyr\MessageBroker\Inbox\DeduplicationStore'
+        tags:
+            - { name: 'messenger.middleware', priority: -10 }
+
+    # AMQP Routing Strategy
+    Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface:
+        class: Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy
+
+    # Outbox Bridge
+    Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
+        autoconfigure: true
+        arguments:
+            $eventBus: '@messenger.default_bus'
+            $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
+            $logger: '@logger'
