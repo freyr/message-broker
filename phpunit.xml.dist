@@ -13,6 +13,9 @@
         <testsuite name="Integration">
             <directory>tests/Integration</directory>
         </testsuite>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
     </testsuites>
 
     <source>
@@ -22,8 +25,8 @@
     </source>
 
     <php>
-        <env name="DATABASE_URL" value="mysql://messenger:messenger@127.0.0.1:3307/messenger_test"/>
-        <env name="MESSENGER_AMQP_DSN" value="amqp://guest:guest@127.0.0.1:5672/%2f"/>
+        <env name="DATABASE_URL" value="mysql://messenger:messenger@127.0.0.1:3308/messenger_test"/>
+        <env name="MESSENGER_AMQP_DSN" value="amqp://guest:guest@127.0.0.1:5673/%2f"/>
         <env name="APP_ENV" value="test"/>
     </php>
 </phpunit>
