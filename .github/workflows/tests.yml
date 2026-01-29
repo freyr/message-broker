@@ -7,18 +7,11 @@ on:
     branches:
       - main
       - develop
-      - 'feat/**'
-      - 'fix/**'
-      - 'hotfix/**'
 
 jobs:
   tests:
     name: PHP ${{ matrix.php }} - ${{ matrix.stability }}
     runs-on: ubuntu-latest
-    # Skip push events to feature branches if they have a PR (PR workflow will handle it)
-    if: |
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'))
 
     strategy:
       fail-fast: false

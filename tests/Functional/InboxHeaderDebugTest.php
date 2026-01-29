@@ -36,14 +36,8 @@ final class InboxHeaderDebugTest extends FunctionalTestCase
         // When: We manually consume and inspect the message
         $message = $this->assertMessageInQueue('test_inbox');
 
-        // Then: Print the actual headers for debugging
+        // Then: Verify the actual headers
         $headers = $message['headers']->getNativeData();
-
-        echo "\n=== AMQP Headers ===\n";
-        foreach ($headers as $key => $value) {
-            echo sprintf("%s: %s\n", $key, is_string($value) ? $value : json_encode($value));
-        }
-        echo "===================\n";
 
         // Verify the MessageIdStamp header exists
         $this->assertArrayHasKey('X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp', $headers);
