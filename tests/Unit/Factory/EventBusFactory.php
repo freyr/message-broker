@@ -84,7 +84,7 @@ final class EventBusFactory
         $outboxSerializer = new OutboxSerializer($symfonySerializer);
 
         // Create InboxSerializer for AMQP transport (semantic name → FQN)
-        $inboxSerializer = new InboxSerializer($messageTypes, $symfonySerializer);
+        $inboxSerializer = new InboxSerializer($symfonySerializer, $messageTypes);
 
         // Create in-memory transports with different serializers
         $outboxTransport = new InMemoryTransport($outboxSerializer);
@@ -177,7 +177,7 @@ final class EventBusFactory
         $outboxSerializer = new OutboxSerializer($symfonySerializer);
 
         // Create InboxSerializer for AMQP consumption (semantic name → FQN)
-        $inboxSerializer = new InboxSerializer($messageTypes, $symfonySerializer);
+        $inboxSerializer = new InboxSerializer($symfonySerializer, $messageTypes);
 
         // Create 3 separate transports to avoid mixing concerns:
         // 1. Outbox: Stores domain events (uses OutboxSerializer for encode/decode)

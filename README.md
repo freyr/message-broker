@@ -317,8 +317,8 @@ framework:
                 serializer: 'Freyr\MessageBroker\Serializer\InboxSerializer'
                 options:
                     auto_setup: false
-                    queue:
-                        name: 'orders_queue'
+                    queues:
+                        orders_queue: ~
 
             failed:
                 dsn: 'doctrine://default?queue_name=failed'
