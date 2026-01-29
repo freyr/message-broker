@@ -4,6 +4,12 @@ framework:
     messenger:
         failure_transport: failed
 
+        buses:
+            messenger.bus.default:
+                default_middleware: true
+                middleware:
+                    - 'Freyr\MessageBroker\Inbox\DeduplicationMiddleware'
+
         transports:
             # Outbox transport - stores domain events with #[MessageName]
             outbox:
