@@ -9,6 +9,8 @@ use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\EventDispatcher\EventDispatcher;
+use Symfony\Component\Messenger\EventListener\StopWorkerOnMessageLimitListener;
 use Symfony\Component\Messenger\Worker;
 
 /**
@@ -37,7 +39,7 @@ abstract class FunctionalTestCase extends KernelTestCase
         self::bootKernel();
 
         $this->cleanDatabase();
-        $this->cleanAmqp();
+        $this->setupAmqp();
     }
 
     public static function tearDownAfterClass(): void
@@ -77,34 +79,53 @@ abstract class FunctionalTestCase extends KernelTestCase
             $dsn = $_ENV['MESSENGER_AMQP_DSN'] ?? 'amqp://guest:guest@127.0.0.1:5673/%2f';
             $parts = parse_url($dsn);
 
+            // Decode vhost from URL path (%2f -> /)
+            $vhost = isset($parts['path']) ? urldecode(ltrim($parts['path'], '/')) : '/';
+
             self::$amqpConnection = new AMQPStreamConnection(
                 $parts['host'] ?? '127.0.0.1',
                 (int) ($parts['port'] ?? 5672),
                 $parts['user'] ?? 'guest',
                 $parts['pass'] ?? 'guest',
-                trim($parts['path'] ?? '/', '/')
+                $vhost
             );
         }
         return self::$amqpConnection;
     }
 
-    private function cleanAmqp(): void
+    private function setupAmqp(): void
     {
-        $channel = self::getAmqpConnection()->channel();
+        try {
+            $channel = self::getAmqpConnection()->channel();
 
-        // Purge test queues (create if not exists, then purge)
-        $queuesToPurge = ['outbox', 'test_inbox', 'failed'];
+            // Declare exchange
+            $channel->exchange_declare('test_events', 'topic', false, true, false);
 
-        foreach ($queuesToPurge as $queueName) {
-            try {
+            // Define queues with their routing keys
+            $queueBindings = [
+                'test.event.sent' => ['test.event.sent'],      // TestEvent queue
+                'test.order.placed' => ['test.order.placed'],  // OrderPlaced queue
+                'test_inbox' => [],                            // Inbox test queue (no binding needed)
+                'failed' => [],                                // Failed messages queue (no binding needed)
+            ];
+
+            foreach ($queueBindings as $queueName => $routingKeys) {
+                // Declare queue
                 $channel->queue_declare($queueName, false, true, false, false);
-                $channel->queue_purge($queueName);
-            } catch (\Exception $e) {
-                // Queue might not exist yet, that's okay
-            }
-        }
 
-        $channel->close();
+                // Bind to exchange with routing keys
+                foreach ($routingKeys as $routingKey) {
+                    $channel->queue_bind($queueName, 'test_events', $routingKey);
+                }
+
+                // Purge existing messages
+                $channel->queue_purge($queueName);
+            }
+
+            $channel->close();
+        } catch (\Exception $e) {
+            // AMQP setup failure - not critical for outbox-only tests
+        }
     }
 
     // Assertion Helpers
@@ -194,17 +215,19 @@ abstract class FunctionalTestCase extends KernelTestCase
         $receiver = $this->getContainer()->get('messenger.transport.amqp_test');
         $bus = $this->getContainer()->get('messenger.default_bus');
 
+        // Create a custom event dispatcher with StopWorkerOnMessageLimitListener
+        $eventDispatcher = new EventDispatcher();
+        $eventDispatcher->addSubscriber(new StopWorkerOnMessageLimitListener($limit, $this->getContainer()->get('logger')));
+
         $worker = new Worker(
             ['amqp_test' => $receiver],
             $bus,
-            $this->getContainer()->get('event_dispatcher'),
+            $eventDispatcher,
             $this->getContainer()->get('logger')
         );
 
-        $worker->run([
-            'limit' => $limit,
-            'time-limit' => 5,
-        ]);
+        // Stop after processing N messages (handled by StopWorkerOnMessageLimitListener)
+        $worker->run();
     }
 
     protected function processOutbox(int $limit = 1): void
@@ -212,16 +235,18 @@ abstract class FunctionalTestCase extends KernelTestCase
         $receiver = $this->getContainer()->get('messenger.transport.outbox');
         $bus = $this->getContainer()->get('messenger.default_bus');
 
+        // Create a custom event dispatcher with StopWorkerOnMessageLimitListener
+        $eventDispatcher = new EventDispatcher();
+        $eventDispatcher->addSubscriber(new StopWorkerOnMessageLimitListener($limit, $this->getContainer()->get('logger')));
+
         $worker = new Worker(
             ['outbox' => $receiver],
             $bus,
-            $this->getContainer()->get('event_dispatcher'),
+            $eventDispatcher,
             $this->getContainer()->get('logger')
         );
 
-        $worker->run([
-            'limit' => $limit,
-            'time-limit' => 5,
-        ]);
+        // Stop after processing N messages (handled by StopWorkerOnMessageLimitListener)
+        $worker->run();
     }
 }

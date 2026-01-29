@@ -37,20 +37,29 @@ final class OutboxFlowTest extends FunctionalTestCase
         $messageBus->dispatch($testEvent);
 
         // Then: Event is stored in messenger_outbox table
-        $this->assertDatabaseHasRecord('messenger_outbox', [
-            'queue_name' => 'outbox',
-        ]);
-
-        // And: Body contains serialised event data
         /** @var Connection $connection */
         $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+
+        // Check row exists
+        $count = $connection->fetchOne("SELECT COUNT(*) FROM messenger_outbox WHERE queue_name = 'outbox'");
+        $this->assertEquals(1, $count, 'Expected 1 message in outbox');
+
+        // Check body is JSON with semantic name
         $result = $connection->fetchAssociative(
-            "SELECT body FROM messenger_outbox WHERE queue_name = 'outbox'"
+            "SELECT body, headers FROM messenger_outbox WHERE queue_name = 'outbox' LIMIT 1"
         );
 
         $this->assertIsArray($result);
+
+        // Body should be JSON (OutboxSerializer)
         $body = json_decode($result['body'], true);
+        $this->assertIsArray($body, 'Body should be valid JSON');
         $this->assertEquals('integration-test-event', $body['name']);
+
+        // Headers should contain semantic name
+        $headers = json_decode($result['headers'], true);
+        $this->assertIsArray($headers);
+        $this->assertEquals('test.event.sent', $headers['type']);
     }
 
     public function testOutboxBridgePublishesToAmqp(): void
@@ -66,21 +75,31 @@ final class OutboxFlowTest extends FunctionalTestCase
         $messageBus = $this->getContainer()->get(MessageBusInterface::class);
         $messageBus->dispatch($testEvent);
 
-        // When: OutboxToAmqpBridge processes the outbox
-        $this->processOutbox();
+        // When: OutboxToAmqpBridge processes the outbox (with LIMIT to prevent hanging)
+        $this->processOutbox(limit: 1);
 
-        // Then: Message is published to AMQP exchange
-        $message = $this->assertMessageInQueue('outbox');
+        // Then: Message is published to AMQP (routing key = semantic name = test.event.sent)
+        // Messages are routed to queue bound with matching routing key
+        $message = $this->assertMessageInQueue('test.event.sent');
 
         // And: Message has correct type header (semantic name)
-        $this->assertArrayHasKey('type', $message['headers']);
-        $this->assertEquals('test.event.sent', $message['headers']->getNativeData()['type']);
-
-        // And: Message has MessageIdStamp header
         $headers = $message['headers']->getNativeData();
-        $this->assertArrayHasKey('X-Message-Stamp-MessageIdStamp', $headers);
+        $this->assertEquals('test.event.sent', $headers['type']);
+
+        // And: Message has MessageIdStamp header (full FQN in header key)
+        $this->assertArrayHasKey('X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp', $headers);
+
+        // And: MessageIdStamp contains a valid UUID v7
+        $messageIdStamp = json_decode($headers['X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp'], true);
+        $this->assertIsArray($messageIdStamp);
+        $this->assertArrayHasKey('messageId', $messageIdStamp[0]);
+        $this->assertMatchesRegularExpression(
+            '/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
+            $messageIdStamp[0]['messageId']
+        );
 
         // And: Body contains event data (no messageId in payload)
+        $this->assertIsArray($message['body']);
         $this->assertEquals('bridge-test-event', $message['body']['name']);
         $this->assertArrayNotHasKey('messageId', $message['body']);
     }
@@ -99,11 +118,12 @@ final class OutboxFlowTest extends FunctionalTestCase
         $messageBus = $this->getContainer()->get(MessageBusInterface::class);
         $messageBus->dispatch($testEvent);
 
-        // When: Bridge processes and publishes
-        $this->processOutbox();
+        // When: Bridge processes and publishes (with LIMIT to prevent hanging)
+        $this->processOutbox(limit: 1);
 
-        // Then: Message in AMQP has correct structure
-        $message = $this->assertMessageInQueue('outbox');
+        // Then: Message in AMQP has correct structure (routing key = semantic name = test.order.placed)
+        // With default exchange, message is routed to queue with same name as routing key
+        $message = $this->assertMessageInQueue('test.order.placed');
 
         // Semantic name in type header
         $headers = $message['headers']->getNativeData();

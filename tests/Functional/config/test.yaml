@@ -4,14 +4,13 @@ framework:
     messenger:
         failure_transport: failed
 
-        default_middleware:
-            enabled: true
-            allow_no_handlers: false
-
         transports:
             # Outbox transport - stores domain events with #[MessageName]
             outbox:
                 dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
+                serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
+                options:
+                    auto_setup: false
                 retry_strategy:
                     max_retries: 3
                     delay: 1000
@@ -23,6 +22,9 @@ framework:
                 serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
                 options:
                     auto_setup: false
+                    exchange:
+                        name: 'test_events'
+                        type: 'topic'
                 retry_strategy:
                     max_retries: 3
                     delay: 1000
@@ -48,7 +50,7 @@ framework:
                     auto_setup: false
 
         routing:
-            # Outbox messages route to outbox transport
+            # Route outbox messages to outbox transport
             'Freyr\MessageBroker\Tests\Functional\Fixtures\TestEvent': outbox
             'Freyr\MessageBroker\Tests\Functional\Fixtures\OrderPlaced': outbox
 
@@ -62,11 +64,8 @@ doctrine:
             collate: utf8mb4_unicode_ci
         types:
             id_binary: Freyr\MessageBroker\Doctrine\Type\IdType
-
-    orm:
-        auto_generate_proxy_classes: true
-        naming_strategy: doctrine.orm.naming_strategy.underscore_number_aware
-        auto_mapping: true
+        mapping_types:
+            binary: id_binary
 
 message_broker:
     inbox:
