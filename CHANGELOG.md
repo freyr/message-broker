@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-01-29
+
+### Fixed
+
+- **Critical: Wrong table name in cleanup command** - `DeduplicationStoreCleanup` command now uses correct table name `message_broker_deduplication` instead of non-existent `deduplication_store`
+- **MessageNameStamp duplication on retry** - Added existence checks before appending `MessageNameStamp` in both serialisers to prevent stamp accumulation during retry/failed scenarios
+
+### Documentation
+
+- **Removed non-existent features** - Cleaned up documentation to remove references to features that were never implemented:
+  - Removed `inbox:ingest` command references (never existed)
+  - Removed `inbox://` transport references (never existed)
+  - Removed `messenger_inbox` table references (incorrect table name)
+  - Removed "Automatic DLQ Routing" feature claim (standard Symfony failed transport is used)
+  - Removed `dlq_transport` configuration (never implemented)
+- **Fixed incorrect attribute names** - Changed `#[AmqpExchange]` to correct `#[MessengerTransport]` attribute throughout documentation
+- **Fixed serialiser terminology** - Corrected all references from non-existent `MessageNameSerializer` to actual classes:
+  - Publishing: `OutboxSerializer`
+  - Consuming: `InboxSerializer`
+- **Clarified deduplication mechanism** - Documented that deduplication uses `MessageIdStamp` + PHP class FQN (not `MessageNameStamp`)
+- **Fixed directory structure** - Updated `CLAUDE.md` directory tree to match actual file locations and structure
+- **Fixed cross-references** - Corrected `amqp-routing-guide.md` → `amqp-routing.md`
+
+### Added
+
+- **Database schema documentation** - New comprehensive `docs/database-schema.md` file with:
+  - Complete 3-table architecture explanation
+  - Full SQL schemas for all tables
+  - Migration examples
+  - Cleanup strategies and commands
+  - Performance optimisation notes
+  - Transport configuration examples
+  - Message flow diagrams
+
+### Changed
+
+- **Consolidated documentation** - Reduced duplication by creating single source of truth for 3-table architecture in `docs/database-schema.md`
+- **Improved README** - Updated documentation index with links to all architecture docs
+- **Code cleanup** - Applied coding standards and improved code consistency across codebase
+- **British English** - Standardised spelling throughout documentation (serialiser, optimised, customisation)
+
+### Development
+
+- Added `.idea/symfony2.xml` configuration
+- Updated `.gitignore` to exclude `cache/` directory
+- Updated `ecs.php` coding standards configuration
+- Improved `composer.json` structure
+
 ## [0.2.2] - 2025-10-16
 
 ### Fixed
@@ -86,6 +134,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Message Serialization - Semantic naming and cross-language compatibility
 - AMQP Routing - Convention-based routing with customization options
 
+[0.2.3]: https://github.com/freyr/message-broker/releases/tag/0.2.3
 [0.2.2]: https://github.com/freyr/message-broker/releases/tag/0.2.2
 [0.2.1]: https://github.com/freyr/message-broker/releases/tag/0.2.1
 [0.2.0]: https://github.com/freyr/message-broker/releases/tag/0.2.0
