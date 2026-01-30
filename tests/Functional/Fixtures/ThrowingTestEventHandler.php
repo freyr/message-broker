@@ -15,14 +15,13 @@ use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 #[AsMessageHandler]
 final class ThrowingTestEventHandler
 {
-    private static int $invocationCount = 0;
-    private static ?TestEvent $lastMessage = null;
+    use TrackableHandlerTrait;
+
     private static ?\Throwable $exceptionToThrow = null;
 
     public function __invoke(TestEvent $message): void
     {
-        self::$invocationCount++;
-        self::$lastMessage = $message;
+        $this->track($message);
 
         if (self::$exceptionToThrow !== null) {
             $exception = self::$exceptionToThrow;
@@ -39,20 +38,13 @@ final class ThrowingTestEventHandler
         self::$exceptionToThrow = $exception;
     }
 
-    public static function getInvocationCount(): int
-    {
-        return self::$invocationCount;
-    }
-
-    public static function getLastMessage(): ?TestEvent
-    {
-        return self::$lastMessage;
-    }
-
     public static function reset(): void
     {
+        // Reset tracking state from trait
         self::$invocationCount = 0;
         self::$lastMessage = null;
+
+        // Reset exception state specific to this handler
         self::$exceptionToThrow = null;
     }
 }

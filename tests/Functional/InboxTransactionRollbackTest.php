@@ -14,10 +14,14 @@ use Freyr\MessageBroker\Tests\Functional\Fixtures\ThrowingTestEventHandler;
  *
  * Tests transactional guarantee: deduplication entry + handler logic commit/rollback atomically.
  *
- * NOTE: These tests currently run WITHOUT doctrine_transaction middleware.
- * Current behavior: deduplication entry IS created even when handler throws.
- * This means failed messages will be treated as duplicates on retry.
- * TODO: Add doctrine_transaction middleware configuration to enable true transactional rollback.
+ * NOTE: Tests verify doctrine_transaction middleware integration.
+ * Configuration documented in: docs/solutions/test-failures/doctrine-transaction-middleware-orm-configuration.md
+ *
+ * Middleware stack:
+ * 1. doctrine_transaction (priority 0) - Starts transaction
+ * 2. DeduplicationMiddleware (priority -10) - Runs within transaction
+ * 3. Handler execution - Runs within transaction
+ * 4. Commit (success) or Rollback (exception)
  */
 final class InboxTransactionRollbackTest extends FunctionalTestCase
 {

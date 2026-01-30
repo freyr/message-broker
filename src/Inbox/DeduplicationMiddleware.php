@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Inbox;
 
 use Freyr\Identity\Id;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Middleware\MiddlewareInterface;
 use Symfony\Component\Messenger\Middleware\StackInterface;
@@ -14,6 +15,7 @@ readonly class DeduplicationMiddleware implements MiddlewareInterface
 {
     public function __construct(
         private DeduplicationStore $store,
+        private ?LoggerInterface $logger = null,
     ) {}
 
     public function handle(Envelope $envelope, StackInterface $stack): Envelope
@@ -38,13 +40,16 @@ readonly class DeduplicationMiddleware implements MiddlewareInterface
         try {
             Id::fromString($messageId);
         } catch (\InvalidArgumentException $e) {
+            // Log full details internally for debugging
+            $this->logger?->warning('Invalid UUID in MessageIdStamp', [
+                'message_id' => $messageId,
+                'message_class' => $envelope->getMessage()::class,
+                'error' => $e->getMessage(),
+            ]);
+
+            // Generic error message to external systems (prevents information disclosure)
             throw new \InvalidArgumentException(
-                sprintf(
-                    'MessageIdStamp contains invalid UUID: "%s". %s (message class: %s)',
-                    $messageId,
-                    $e->getMessage(),
-                    $envelope->getMessage()::class
-                ),
+                'MessageIdStamp contains invalid UUID format',
                 0,
                 $e
             );

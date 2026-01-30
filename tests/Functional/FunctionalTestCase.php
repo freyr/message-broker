@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Doctrine\DBAL\Connection;
+use Freyr\Identity\Id;
 use Freyr\MessageBroker\Tests\Functional\Fixtures;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
@@ -151,32 +152,6 @@ abstract class FunctionalTestCase extends KernelTestCase
 
     // Assertion Helpers
 
-    protected function assertDatabaseHasRecord(string $table, array $criteria): void
-    {
-        /** @var Connection $connection */
-        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
-
-        $qb = $connection->createQueryBuilder();
-        $qb->select('COUNT(*) as count')
-           ->from($table);
-
-        foreach ($criteria as $column => $value) {
-            // CRITICAL: Handle binary UUID columns with HEX comparison
-            if ($column === 'message_id' && $value instanceof \Freyr\Identity\Id) {
-                $qb->andWhere("HEX($column) = :$column")
-                   ->setParameter($column, strtoupper(str_replace('-', '', $value->__toString())));
-            } else {
-                $qb->andWhere("$column = :$column")
-                   ->setParameter($column, $value);
-            }
-        }
-
-        $count = (int) $qb->executeQuery()->fetchOne();
-
-        $this->assertGreaterThan(0, $count,
-            "Failed asserting that table '$table' contains a record matching criteria.");
-    }
-
     protected function assertMessageInQueue(string $queueName): ?array
     {
         $channel = self::getAmqpConnection()->channel();
@@ -231,6 +206,63 @@ abstract class FunctionalTestCase extends KernelTestCase
         $channel->close();
     }
 
+    /**
+     * Publish a TestEvent to AMQP inbox queue with proper headers.
+     *
+     * @param Fixtures\TestEvent $event The event to publish
+     * @param string|null $messageId Optional message ID (auto-generated if null)
+     * @param string $queue Queue name (default: test_inbox)
+     * @return string The message ID (for assertions)
+     */
+    protected function publishTestEvent(
+        Fixtures\TestEvent $event,
+        ?string $messageId = null,
+        string $queue = 'test_inbox'
+    ): string {
+        $messageId = $messageId ?? Id::new()->__toString();
+
+        $this->publishToAmqp($queue, [
+            'type' => 'test.event.sent',
+            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' =>
+                json_encode([['messageId' => $messageId]]),
+        ], [
+            'id' => $event->id->__toString(),
+            'name' => $event->name,
+            'timestamp' => $event->timestamp->toIso8601String(),
+        ]);
+
+        return $messageId;
+    }
+
+    /**
+     * Publish an OrderPlaced event to AMQP queue with proper headers.
+     *
+     * @param Fixtures\OrderPlaced $event The event to publish
+     * @param string|null $messageId Optional message ID (auto-generated if null)
+     * @param string $queue Queue name (default: test.order.placed)
+     * @return string The message ID (for assertions)
+     */
+    protected function publishOrderPlacedEvent(
+        Fixtures\OrderPlaced $event,
+        ?string $messageId = null,
+        string $queue = 'test.order.placed'
+    ): string {
+        $messageId = $messageId ?? Id::new()->__toString();
+
+        $this->publishToAmqp($queue, [
+            'type' => 'test.order.placed',
+            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' =>
+                json_encode([['messageId' => $messageId]]),
+        ], [
+            'id' => $event->id->__toString(),
+            'customerId' => $event->customerId->__toString(),
+            'totalAmount' => $event->totalAmount,
+            'placedAt' => $event->placedAt->toIso8601String(),
+        ]);
+
+        return $messageId;
+    }
+
     protected function consumeFromInbox(int $limit = 1): void
     {
         $receiver = $this->getContainer()->get('messenger.transport.amqp_test');
@@ -257,46 +289,6 @@ abstract class FunctionalTestCase extends KernelTestCase
      *
      * This simulates what would happen with doctrine_transaction middleware.
      */
-    protected function consumeFromInboxWithTransaction(int $limit = 1): void
-    {
-        /** @var Connection $connection */
-        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
-        $receiver = $this->getContainer()->get('messenger.transport.amqp_test');
-        $bus = $this->getContainer()->get('messenger.default_bus');
-
-        // Disable autocommit to enable transaction control
-        $originalAutoCommit = $connection->isAutoCommit();
-        $connection->setAutoCommit(false);
-
-        try {
-            $connection->beginTransaction();
-
-            try {
-                $eventDispatcher = new EventDispatcher();
-                $eventDispatcher->addSubscriber(new StopWorkerOnMessageLimitListener($limit, $this->getContainer()->get('logger')));
-
-                $worker = new Worker(
-                    ['amqp_test' => $receiver],
-                    $bus,
-                    $eventDispatcher,
-                    $this->getContainer()->get('logger')
-                );
-
-                $worker->run();
-
-                // If we get here without exception, commit
-                $connection->commit();
-            } catch (\Throwable $e) {
-                // If handler throws, rollback the transaction
-                $connection->rollBack();
-                throw $e; // Re-throw for test assertions
-            }
-        } finally {
-            // Restore original autocommit setting
-            $connection->setAutoCommit($originalAutoCommit);
-        }
-    }
-
     protected function processOutbox(int $limit = 1): void
     {
         $receiver = $this->getContainer()->get('messenger.transport.outbox');
@@ -417,10 +409,31 @@ abstract class FunctionalTestCase extends KernelTestCase
     }
 
     /**
+     * Allowed tables for getTableRowCount() to prevent SQL injection.
+     */
+    private const ALLOWED_TABLES = [
+        'message_broker_deduplication',
+        'messenger_outbox',
+        'messenger_messages',
+    ];
+
+    /**
      * Get row count for a table (helper for quick assertions).
+     *
+     * @throws \InvalidArgumentException If table name is not in whitelist
      */
     protected function getTableRowCount(string $table): int
     {
+        if (!in_array($table, self::ALLOWED_TABLES, strict: true)) {
+            throw new \InvalidArgumentException(
+                sprintf(
+                    'Invalid table name: "%s". Allowed tables: %s',
+                    $table,
+                    implode(', ', self::ALLOWED_TABLES)
+                )
+            );
+        }
+
         /** @var Connection $connection */
         $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
 
