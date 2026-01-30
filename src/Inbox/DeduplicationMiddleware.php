@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Inbox;
 
+use Freyr\Identity\Id;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Middleware\MiddlewareInterface;
 use Symfony\Component\Messenger\Middleware\StackInterface;
@@ -32,6 +33,23 @@ readonly class DeduplicationMiddleware implements MiddlewareInterface
         }
 
         $messageId = $messageIdStamp->messageId;
+
+        // Validate UUID format using Freyr\Identity\Id (throws exception if invalid)
+        try {
+            Id::fromString($messageId);
+        } catch (\InvalidArgumentException $e) {
+            throw new \InvalidArgumentException(
+                sprintf(
+                    'MessageIdStamp contains invalid UUID: "%s". %s (message class: %s)',
+                    $messageId,
+                    $e->getMessage(),
+                    $envelope->getMessage()::class
+                ),
+                0,
+                $e
+            );
+        }
+
         $messageName = $envelope->getMessage()::class;
 
         // Check if duplicate using store
