@@ -37,7 +37,7 @@ final class InboxConcurrentProcessingTest extends FunctionalTestCase
 
             $this->publishToAmqp('test_inbox', [
                 'type' => 'test.event.sent',
-                'X-Message-Stamp-MessageIdStamp' => json_encode([['messageId' => $messageId]]),
+                'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
             ], [
                 'id' => Id::new()->__toString(),
                 'name' => "message-{$i}",
@@ -87,7 +87,7 @@ final class InboxConcurrentProcessingTest extends FunctionalTestCase
 
         $this->publishToAmqp('test_inbox', [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-MessageIdStamp' => json_encode([['messageId' => $messageId]]),
+            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
         ], [
             'id' => $testEvent->id->__toString(),
             'name' => $testEvent->name,
@@ -104,7 +104,7 @@ final class InboxConcurrentProcessingTest extends FunctionalTestCase
         // When: Same message republished (simulating redelivery)
         $this->publishToAmqp('test_inbox', [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-MessageIdStamp' => json_encode([['messageId' => $messageId]]),
+            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
         ], [
             'id' => $testEvent->id->__toString(),
             'name' => $testEvent->name,

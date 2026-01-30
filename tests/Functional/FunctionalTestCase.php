@@ -252,6 +252,51 @@ abstract class FunctionalTestCase extends KernelTestCase
         $worker->run();
     }
 
+    /**
+     * Consume from inbox with manual transaction wrapping for testing rollback behavior.
+     *
+     * This simulates what would happen with doctrine_transaction middleware.
+     */
+    protected function consumeFromInboxWithTransaction(int $limit = 1): void
+    {
+        /** @var Connection $connection */
+        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+        $receiver = $this->getContainer()->get('messenger.transport.amqp_test');
+        $bus = $this->getContainer()->get('messenger.default_bus');
+
+        // Disable autocommit to enable transaction control
+        $originalAutoCommit = $connection->isAutoCommit();
+        $connection->setAutoCommit(false);
+
+        try {
+            $connection->beginTransaction();
+
+            try {
+                $eventDispatcher = new EventDispatcher();
+                $eventDispatcher->addSubscriber(new StopWorkerOnMessageLimitListener($limit, $this->getContainer()->get('logger')));
+
+                $worker = new Worker(
+                    ['amqp_test' => $receiver],
+                    $bus,
+                    $eventDispatcher,
+                    $this->getContainer()->get('logger')
+                );
+
+                $worker->run();
+
+                // If we get here without exception, commit
+                $connection->commit();
+            } catch (\Throwable $e) {
+                // If handler throws, rollback the transaction
+                $connection->rollBack();
+                throw $e; // Re-throw for test assertions
+            }
+        } finally {
+            // Restore original autocommit setting
+            $connection->setAutoCommit($originalAutoCommit);
+        }
+    }
+
     protected function processOutbox(int $limit = 1): void
     {
         $receiver = $this->getContainer()->get('messenger.transport.outbox');
@@ -402,9 +447,9 @@ abstract class FunctionalTestCase extends KernelTestCase
 
         if (!in_array('missingMessageId', $options)) {
             if (in_array('invalidUuid', $options)) {
-                $headers['X-Message-Stamp-MessageIdStamp'] = json_encode([['messageId' => 'not-a-uuid']]);
+                $headers['X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp'] = json_encode([['messageId' => 'not-a-uuid']]);
             } else {
-                $headers['X-Message-Stamp-MessageIdStamp'] = json_encode([['messageId' => '01234567-89ab-cdef-0123-456789abcdef']]);
+                $headers['X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp'] = json_encode([['messageId' => '01234567-89ab-cdef-0123-456789abcdef']]);
             }
         }
 

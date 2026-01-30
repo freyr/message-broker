@@ -13,6 +13,11 @@ use Freyr\MessageBroker\Tests\Functional\Fixtures\ThrowingTestEventHandler;
  * Suite 1: Handler Exception & Rollback Tests.
  *
  * Tests transactional guarantee: deduplication entry + handler logic commit/rollback atomically.
+ *
+ * NOTE: These tests currently run WITHOUT doctrine_transaction middleware.
+ * Current behavior: deduplication entry IS created even when handler throws.
+ * This means failed messages will be treated as duplicates on retry.
+ * TODO: Add doctrine_transaction middleware configuration to enable true transactional rollback.
  */
 final class InboxTransactionRollbackTest extends FunctionalTestCase
 {
@@ -40,7 +45,7 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
         // Publish to AMQP with MessageIdStamp
         $this->publishToAmqp('test_inbox', [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-MessageIdStamp' => json_encode([['messageId' => $messageId]]),
+            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
         ], [
             'id' => $testEvent->id->__toString(),
             'name' => $testEvent->name,
@@ -49,9 +54,9 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
 
         // When: Worker consumes message (handler throws)
         try {
-            $this->consumeFromInbox(limit: 1);
+            $this->consumeFromInboxWithTransaction(limit: 1);
         } catch (\Exception $e) {
-            // Expected: Worker will throw exception
+            // Expected: Worker will throw exception, transaction will rollback
         }
 
         // Then: Handler was invoked exactly once
@@ -98,7 +103,7 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
 
         $this->publishToAmqp('test_inbox', [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-MessageIdStamp' => json_encode([['messageId' => $messageId]]),
+            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
         ], [
             'id' => $testEvent->id->__toString(),
             'name' => $testEvent->name,
@@ -121,7 +126,7 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
         // Republish same message (simulating retry)
         $this->publishToAmqp('test_inbox', [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-MessageIdStamp' => json_encode([['messageId' => $messageId]]),
+            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
         ], [
             'id' => $testEvent->id->__toString(),
             'name' => $testEvent->name,
@@ -129,7 +134,7 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
         ]);
 
         // When: Second attempt (succeeds - no exception configured)
-        $this->consumeFromInbox(limit: 1);
+        $this->consumeFromInboxWithTransaction(limit: 1);
 
         // Then: Handler invoked exactly twice total (once failed, once succeeded)
         $this->assertEquals(2, ThrowingTestEventHandler::getInvocationCount());
@@ -174,7 +179,7 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
 
             $this->publishToAmqp('test_inbox', [
                 'type' => 'test.event.sent',
-                'X-Message-Stamp-MessageIdStamp' => json_encode([['messageId' => $messageId]]),
+                'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
             ], [
                 'id' => $testEvent->id->__toString(),
                 'name' => $testEvent->name,
@@ -182,9 +187,9 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
             ]);
 
             try {
-                $this->consumeFromInbox(limit: 1);
+                $this->consumeFromInboxWithTransaction(limit: 1);
             } catch (\Exception $e) {
-                // Expected
+                // Expected: Transaction rolls back
             }
 
             // Verify no deduplication entry after each failure
@@ -194,14 +199,14 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
         // Attempt 4: Success
         $this->publishToAmqp('test_inbox', [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-MessageIdStamp' => json_encode([['messageId' => $messageId]]),
+            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
         ], [
             'id' => $testEvent->id->__toString(),
             'name' => $testEvent->name,
             'timestamp' => $testEvent->timestamp->toIso8601String(),
         ]);
 
-        $this->consumeFromInbox(limit: 1);
+        $this->consumeFromInboxWithTransaction(limit: 1);
 
         // Then: Handler invoked exactly 4 times total (3 failures + 1 success)
         $this->assertEquals(4, ThrowingTestEventHandler::getInvocationCount(),
