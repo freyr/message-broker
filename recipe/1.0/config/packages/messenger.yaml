@@ -18,17 +18,20 @@ framework:
                     # Runs after transaction starts, before handlers
 
         transports:
+            # Outbox transport - AUTO-MANAGED (auto_setup: true)
             outbox:
                 dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
                 serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
+                options:
+                    auto_setup: true
                 retry_strategy:
                   max_retries: 3
                   delay: 1000
                   multiplier: 2
 
 
-            # AMQP transport - external message broker
-            # For publishing (outbox) and consuming (inbox)
+            # AMQP transport - MANUAL MANAGEMENT (auto_setup: false)
+            # Infrastructure managed by operations/IaC
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
                 serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
@@ -39,11 +42,11 @@ framework:
                   delay: 1000
                   multiplier: 2
 
-            # Failed transport - for all failed messages
+            # Failed transport - AUTO-MANAGED (auto_setup: true)
             failed:
                 dsn: 'doctrine://default?queue_name=failed'
                 options:
-                    auto_setup: false
+                    auto_setup: true
 
         routing:
             # Outbox messages - route domain events to outbox transport

@@ -93,6 +93,7 @@ jobs:
 
       - name: Setup database schema
         run: |
+          # Only create deduplication table (messenger tables are auto-managed by Symfony)
           mysql -h 127.0.0.1 -P 3308 -u messenger -pmessenger messenger_test < migrations/schema.sql
         continue-on-error: true
 

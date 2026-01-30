@@ -76,10 +76,19 @@ abstract class FunctionalTestCase extends KernelTestCase
         }
 
         // Truncate tables (order matters due to foreign keys if any)
+        // Messenger tables (outbox, messages) may not exist yet (auto_setup: true)
         $connection->executeStatement('SET FOREIGN_KEY_CHECKS=0');
         $connection->executeStatement('TRUNCATE TABLE message_broker_deduplication');
-        $connection->executeStatement('TRUNCATE TABLE messenger_outbox');
-        $connection->executeStatement('TRUNCATE TABLE messenger_messages');
+
+        // Only truncate messenger tables if they exist (auto_setup: true creates them on first use)
+        $schemaManager = $connection->createSchemaManager();
+        if ($schemaManager->tablesExist(['messenger_outbox'])) {
+            $connection->executeStatement('TRUNCATE TABLE messenger_outbox');
+        }
+        if ($schemaManager->tablesExist(['messenger_messages'])) {
+            $connection->executeStatement('TRUNCATE TABLE messenger_messages');
+        }
+
         $connection->executeStatement('SET FOREIGN_KEY_CHECKS=1');
     }
 

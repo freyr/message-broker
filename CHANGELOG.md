@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **BREAKING: Enabled `auto_setup: true` for Doctrine Messenger transports** (outbox, failed)
+  - `messenger_outbox` and `messenger_messages` tables are now auto-created by Symfony Messenger
+  - Tables are created automatically on first worker run (first `messenger:consume` command)
+  - `migrations/schema.sql` reduced to only `message_broker_deduplication` table
+  - **Migration path for existing installations**: Existing installations must have messenger tables created before upgrading (tables are not dropped, only management changes)
+  - **Benefit**: Eliminates manual migration maintenance, reduces deployment friction, aligns with Symfony Messenger best practices
+
+### Removed
+
+- Manual messenger table definitions from `migrations/schema.sql` (now auto-managed by Symfony)
+- Recipe migration no longer creates `messenger_outbox` and `messenger_messages` tables
+
+### Documentation
+
+- Updated `docs/database-schema.md` with table management strategy section
+- Updated `README.md` setup instructions to reflect auto-managed tables
+- Updated `CLAUDE.md` configuration to document auto_setup policy
+- Updated `.github/workflows/tests.yml` with clarifying comment about reduced schema
+
 ## [0.2.3] - 2026-01-29
 
 ### Fixed

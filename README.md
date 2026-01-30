@@ -33,9 +33,25 @@ composer require freyr/message-broker
 
 ### Setup Database
 
+The package uses a **3-table architecture** with mixed management:
+
+**Auto-Managed by Symfony (no manual setup needed):**
+1. **`messenger_outbox`** - Dedicated outbox table for publishing events
+2. **`messenger_messages`** - Standard table for failed messages
+
+**Application-Managed (manual setup required):**
+3. **`message_broker_deduplication`** - Deduplication tracking (binary UUID v7 PK)
+
+**Setup:**
+
 ```bash
+# Run migrations to create deduplication table (messenger tables auto-created)
 php bin/console doctrine:migrations:migrate
 ```
+
+**First-Run Note:** The `messenger_outbox` and `messenger_messages` tables will be automatically created when you first start the worker. This is expected behaviour with `auto_setup: true`.
+
+See `docs/database-schema.md` for complete schema details and rationale.
 
 ## How it works
 
@@ -302,26 +318,34 @@ framework:
         failure_transport: failed
 
         transports:
+            # Outbox transport - AUTO-MANAGED (auto_setup: true)
             outbox:
                 dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
                 serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
+                options:
+                    auto_setup: true  # Symfony creates table automatically
 
+            # AMQP publish transport - MANUAL MANAGEMENT (auto_setup: false)
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
                 serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
                 options:
-                    auto_setup: false
+                    auto_setup: false  # Infrastructure managed by ops
 
+            # AMQP consumption transport - MANUAL MANAGEMENT (auto_setup: false)
             amqp_orders:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
                 serializer: 'Freyr\MessageBroker\Serializer\InboxSerializer'
                 options:
-                    auto_setup: false
+                    auto_setup: false  # Infrastructure managed by ops
                     queues:
                         orders_queue: ~
 
+            # Failed transport - AUTO-MANAGED (auto_setup: true)
             failed:
                 dsn: 'doctrine://default?queue_name=failed'
+                options:
+                    auto_setup: true  # Symfony creates table automatically
 
         routing:
             # Add your domain events here:
