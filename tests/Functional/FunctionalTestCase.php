@@ -44,6 +44,14 @@ abstract class FunctionalTestCase extends KernelTestCase
         $this->resetHandlers();
     }
 
+    protected function tearDown(): void
+    {
+        // Defensive: Always reset handlers even if test failed
+        // Prevents static state leakage between tests
+        $this->resetHandlers();
+        parent::tearDown();
+    }
+
     public static function tearDownAfterClass(): void
     {
         if (self::$amqpConnection !== null) {
@@ -126,7 +134,18 @@ abstract class FunctionalTestCase extends KernelTestCase
 
             $channel->close();
         } catch (\Exception $e) {
-            // AMQP setup failure - not critical for outbox-only tests
+            // CRITICAL: Inbox tests MUST fail if AMQP is unavailable
+            // Prevents false positives when RabbitMQ is down
+            if (str_contains(static::class, 'Inbox')) {
+                throw new \RuntimeException(
+                    'AMQP setup failed for inbox test. RabbitMQ must be running: ' . $e->getMessage(),
+                    previous: $e
+                );
+            }
+
+            // Outbox tests can continue without AMQP (they only test database storage)
+            // Log the warning but don't fail
+            error_log("AMQP unavailable for outbox test: " . $e->getMessage());
         }
     }
 
@@ -260,6 +279,7 @@ abstract class FunctionalTestCase extends KernelTestCase
     {
         Fixtures\TestEventHandler::reset();
         Fixtures\OrderPlacedHandler::reset();
+        Fixtures\ThrowingTestEventHandler::reset();
     }
 
     protected function assertHandlerInvoked(string $handlerClass, int $expectedCount = 1): void
@@ -294,5 +314,110 @@ abstract class FunctionalTestCase extends KernelTestCase
         $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
 
         return (int) $connection->fetchOne('SELECT COUNT(*) FROM message_broker_deduplication');
+    }
+
+    /**
+     * Assert that no deduplication entry exists for given message ID.
+     *
+     * Used to verify transaction rollback after handler failure.
+     */
+    protected function assertNoDeduplicationEntryExists(string $messageId): void
+    {
+        /** @var Connection $connection */
+        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+
+        // Convert UUID string to uppercase hex (no dashes) for binary comparison
+        $messageIdHex = strtoupper(str_replace('-', '', $messageId));
+
+        $result = $connection->fetchOne(
+            'SELECT COUNT(*) FROM message_broker_deduplication WHERE HEX(message_id) = ?',
+            [$messageIdHex]
+        );
+
+        $this->assertEquals(
+            0,
+            (int) $result,
+            sprintf('Expected no deduplication entry for message ID %s, but found one', $messageId)
+        );
+    }
+
+    /**
+     * Assert that a message exists in the failed transport.
+     *
+     * @return array{body: array, headers: array}
+     */
+    protected function assertMessageInFailedTransport(string $messageClass): array
+    {
+        /** @var Connection $connection */
+        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+
+        $result = $connection->fetchAssociative(
+            "SELECT body, headers FROM messenger_messages WHERE queue_name = 'failed' ORDER BY id DESC LIMIT 1"
+        );
+
+        $this->assertIsArray($result, 'Expected message in failed transport, but failed transport is empty');
+
+        $headers = json_decode($result['headers'], true);
+        $this->assertIsArray($headers);
+        $this->assertArrayHasKey('X-Message-Class', $headers);
+        $this->assertEquals($messageClass, $headers['X-Message-Class'][0]);
+
+        $body = json_decode($result['body'], true);
+        $this->assertIsArray($body);
+
+        return [
+            'body' => $body,
+            'headers' => $headers,
+        ];
+    }
+
+    /**
+     * Get row count for a table (helper for quick assertions).
+     */
+    protected function getTableRowCount(string $table): int
+    {
+        /** @var Connection $connection */
+        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+
+        return (int) $connection->fetchOne("SELECT COUNT(*) FROM {$table}");
+    }
+
+    /**
+     * Publish a malformed AMQP message for testing error handling.
+     *
+     * @param string $queue Queue name
+     * @param array $options Options: 'missingType', 'missingMessageId', 'invalidUuid', 'invalidJson'
+     */
+    protected function publishMalformedAmqpMessage(string $queue, array $options = []): void
+    {
+        $channel = self::getAmqpConnection()->channel();
+
+        $headers = [];
+        $body = '{"id": "01234567-89ab-cdef-0123-456789abcdef", "name": "test", "timestamp": "2026-01-30T12:00:00+00:00"}';
+
+        // Apply malformation options
+        if (!in_array('missingType', $options)) {
+            $headers['type'] = 'test.event.sent';
+        }
+
+        if (!in_array('missingMessageId', $options)) {
+            if (in_array('invalidUuid', $options)) {
+                $headers['X-Message-Stamp-MessageIdStamp'] = json_encode([['messageId' => 'not-a-uuid']]);
+            } else {
+                $headers['X-Message-Stamp-MessageIdStamp'] = json_encode([['messageId' => '01234567-89ab-cdef-0123-456789abcdef']]);
+            }
+        }
+
+        if (in_array('invalidJson', $options)) {
+            $body = '{invalid json';
+        }
+
+        $message = new AMQPMessage($body, [
+            'content_type' => 'application/json',
+            'application_headers' => new AMQPTable($headers),
+        ]);
+
+        $channel->basic_publish($message, '', $queue);
+        $channel->close();
     }
 }

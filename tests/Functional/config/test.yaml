@@ -155,3 +155,6 @@ services:
 
     Freyr\MessageBroker\Tests\Functional\Fixtures\OrderPlacedHandler:
         autoconfigure: true
+
+    Freyr\MessageBroker\Tests\Functional\Fixtures\ThrowingTestEventHandler:
+        autoconfigure: true
