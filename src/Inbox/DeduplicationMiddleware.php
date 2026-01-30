@@ -25,7 +25,8 @@ readonly class DeduplicationMiddleware implements MiddlewareInterface
 
         $messageIdStamp = $envelope->last(MessageIdStamp::class);
         if ($messageIdStamp === null) {
-            // Skipping deduplication for messages without MessageIdStamp
+            // No MessageIdStamp - cannot deduplicate, but can still process
+            // This means "at most once" guarantee is not provided
             return $stack->next()
                 ->handle($envelope, $stack);
         }
