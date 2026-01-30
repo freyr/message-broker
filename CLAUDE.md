@@ -455,34 +455,39 @@ framework:
           # Runs after transaction starts, before handlers
 
     transports:
-      # Outbox transport - stores domain events with #[MessageName]
+      # Outbox transport - AUTO-MANAGED (auto_setup: true)
+      # Stores domain events with #[MessageName]
       # Consumed by OutboxToAmqpBridge, uses default serializer
       outbox:
         dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
+        options:
+          auto_setup: true  # Symfony creates table automatically
         # No custom serializer needed - messages have #[MessageName] attribute
         retry_strategy:
           max_retries: 3
           delay: 1000
           multiplier: 2
 
-      # AMQP publish transport - OutboxToAmqpBridge publishes here
+      # AMQP publish transport - MANUAL MANAGEMENT (auto_setup: false)
+      # OutboxToAmqpBridge publishes here
       # Uses OutboxSerializer to translate FQN → semantic name
       amqp:
         dsn: '%env(MESSENGER_AMQP_DSN)%'
         serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
         options:
-          auto_setup: false
+          auto_setup: false  # Infrastructure managed by ops
         retry_strategy:
           max_retries: 3
           delay: 1000
           multiplier: 2
 
-      # AMQP consumption transport (example) - uses InboxSerializer
+      # AMQP consumption transport - MANUAL MANAGEMENT (auto_setup: false)
+      # Uses InboxSerializer
       amqp_orders:
         dsn: '%env(MESSENGER_AMQP_DSN)%'
         serializer: 'Freyr\MessageBroker\Serializer\InboxSerializer'
         options:
-          auto_setup: false
+          auto_setup: false  # Infrastructure managed by ops
           queue:
             name: 'orders_queue'
         retry_strategy:
@@ -490,11 +495,11 @@ framework:
           delay: 1000
           multiplier: 2
 
-      # Failed transport - for all failed messages
+      # Failed transport - AUTO-MANAGED (auto_setup: true)
       failed:
         dsn: 'doctrine://default?queue_name=failed'
         options:
-          auto_setup: false
+          auto_setup: true  # Symfony creates table automatically
 
     routing:
     # Outbox messages - route domain events to outbox transport
@@ -510,6 +515,11 @@ framework:
     # #[AsMessageHandler]
     # class OrderPlacedHandler { public function __invoke(OrderPlaced $message) {} }
 ```
+
+**Auto-Setup Policy:**
+- **Doctrine transports (outbox, failed)**: `auto_setup: true` - Symfony manages tables automatically
+- **AMQP transports**: `auto_setup: false` - Infrastructure managed separately (RabbitMQ exchanges/queues)
+- **Deduplication table**: Manual migration required (custom binary UUID v7 schema)
 
 ### Doctrine Configuration
 Register the custom UUID type in `config/packages/doctrine.yaml`:
@@ -651,12 +661,18 @@ See `docs/amqp-routing.md` for complete routing documentation.
 
 ### Database Schema Requirements ✨ **3-TABLE ARCHITECTURE**
 
-**Tables:**
-1. **`messenger_outbox`** - Outbox-specific standard Doctrine transport
-2. **`message_broker_deduplication`** - Deduplication tracking (binary(16) message_id PK)
-3. **`messenger_messages`** - Standard (bigint auto-increment for failed)
+**Table Management Strategy:**
+
+**Auto-Managed by Symfony (no manual setup needed):**
+1. **`messenger_outbox`** - Outbox-specific standard Doctrine transport (auto_setup: true)
+2. **`messenger_messages`** - Standard for failed messages (auto_setup: true)
+
+**Application-Managed (manual migration required):**
+3. **`message_broker_deduplication`** - Deduplication tracking (binary(16) message_id PK)
 
 **Key Points:**
+- Outbox and failed tables are **auto-created** by Symfony on first worker run (auto_setup: true)
+- Only deduplication table requires manual migration (custom binary UUID v7 schema)
 - Outbox table isolated for publishing performance
 - Failed messages → `messenger_messages` table (unified monitoring)
 - Required Doctrine custom type: `id_binary` (provided by `Freyr\MessageBroker\Doctrine\Type\IdType`)
