@@ -53,8 +53,9 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
         ]);
 
         // When: Worker consumes message (handler throws)
+        // doctrine_transaction middleware automatically wraps in transaction
         try {
-            $this->consumeFromInboxWithTransaction(limit: 1);
+            $this->consumeFromInbox(limit: 1);
         } catch (\Exception $e) {
             // Expected: Worker will throw exception, transaction will rollback
         }
@@ -134,7 +135,8 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
         ]);
 
         // When: Second attempt (succeeds - no exception configured)
-        $this->consumeFromInboxWithTransaction(limit: 1);
+        // doctrine_transaction middleware automatically wraps in transaction
+        $this->consumeFromInbox(limit: 1);
 
         // Then: Handler invoked exactly twice total (once failed, once succeeded)
         $this->assertEquals(2, ThrowingTestEventHandler::getInvocationCount());
@@ -187,7 +189,8 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
             ]);
 
             try {
-                $this->consumeFromInboxWithTransaction(limit: 1);
+                // doctrine_transaction middleware automatically wraps in transaction
+                $this->consumeFromInbox(limit: 1);
             } catch (\Exception $e) {
                 // Expected: Transaction rolls back
             }
@@ -206,7 +209,8 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
             'timestamp' => $testEvent->timestamp->toIso8601String(),
         ]);
 
-        $this->consumeFromInboxWithTransaction(limit: 1);
+        // doctrine_transaction middleware automatically wraps in transaction
+        $this->consumeFromInbox(limit: 1);
 
         // Then: Handler invoked exactly 4 times total (3 failures + 1 success)
         $this->assertEquals(4, ThrowingTestEventHandler::getInvocationCount(),
