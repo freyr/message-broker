@@ -28,13 +28,16 @@ final class InboxSerializerDebugTest extends FunctionalTestCase
             'headers' => [
                 'type' => 'test.event.sent',
                 'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([
-                    ['messageId' => $messageId],
+                    [
+                        'messageId' => $messageId,
+                    ],
                 ]),
             ],
         ];
 
         // When: We decode it with InboxSerializer
-        $serializer = $this->getContainer()->get('Freyr\MessageBroker\Serializer\InboxSerializer');
+        $serializer = $this->getContainer()
+            ->get('Freyr\MessageBroker\Serializer\InboxSerializer');
         $envelope = $serializer->decode($encodedEnvelope);
 
         // Then: Verify MessageIdStamp exists

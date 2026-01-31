@@ -33,12 +33,14 @@ final class OutboxFlowTest extends FunctionalTestCase
 
         // When: Event is dispatched to message bus
         /** @var MessageBusInterface $messageBus */
-        $messageBus = $this->getContainer()->get(MessageBusInterface::class);
+        $messageBus = $this->getContainer()
+            ->get(MessageBusInterface::class);
         $messageBus->dispatch($testEvent);
 
         // Then: Event is stored in messenger_outbox table
         /** @var Connection $connection */
-        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+        $connection = $this->getContainer()
+            ->get('doctrine.dbal.default_connection');
 
         // Check row exists
         $count = $connection->fetchOne("SELECT COUNT(*) FROM messenger_outbox WHERE queue_name = 'outbox'");
@@ -65,14 +67,11 @@ final class OutboxFlowTest extends FunctionalTestCase
     public function testOutboxBridgePublishesToAmqp(): void
     {
         // Given: An event in the outbox
-        $testEvent = new TestEvent(
-            id: Id::new(),
-            name: 'bridge-test-event',
-            timestamp: CarbonImmutable::now()
-        );
+        $testEvent = new TestEvent(id: Id::new(), name: 'bridge-test-event', timestamp: CarbonImmutable::now());
 
         /** @var MessageBusInterface $messageBus */
-        $messageBus = $this->getContainer()->get(MessageBusInterface::class);
+        $messageBus = $this->getContainer()
+            ->get(MessageBusInterface::class);
         $messageBus->dispatch($testEvent);
 
         // When: OutboxToAmqpBridge processes the outbox (with LIMIT to prevent hanging)
@@ -115,7 +114,8 @@ final class OutboxFlowTest extends FunctionalTestCase
         );
 
         /** @var MessageBusInterface $messageBus */
-        $messageBus = $this->getContainer()->get(MessageBusInterface::class);
+        $messageBus = $this->getContainer()
+            ->get(MessageBusInterface::class);
         $messageBus->dispatch($testEvent);
 
         // When: Bridge processes and publishes (with LIMIT to prevent hanging)
