@@ -28,10 +28,22 @@ abstract class FunctionalTestCase extends KernelTestCase
 {
     // PERFORMANCE: Static connection pooling to avoid overhead (saves ~800ms-1.7s for 20 tests)
     private static ?AMQPStreamConnection $amqpConnection = null;
+    private static bool $schemaInitialized = false;
 
     protected static function getKernelClass(): string
     {
         return TestKernel::class;
+    }
+
+    public static function setUpBeforeClass(): void
+    {
+        parent::setUpBeforeClass();
+
+        // Setup database schema once for entire functional test suite
+        if (!self::$schemaInitialized) {
+            self::setupDatabaseSchema();
+            self::$schemaInitialized = true;
+        }
     }
 
     protected function setUp(): void
@@ -59,6 +71,86 @@ abstract class FunctionalTestCase extends KernelTestCase
             self::$amqpConnection = null;
         }
         parent::tearDownAfterClass();
+    }
+
+    /**
+     * Setup database schema for functional tests.
+     *
+     * Runs once when functional test suite starts (setUpBeforeClass).
+     * Uses tests/Functional/schema.sql which includes all tables needed for testing.
+     */
+    private static function setupDatabaseSchema(): void
+    {
+        $schemaFile = __DIR__.'/schema.sql';
+        $databaseUrl = $_ENV['DATABASE_URL'] ?? 'mysql://messenger:messenger@127.0.0.1:3308/messenger_test';
+
+        // Parse DATABASE_URL
+        $parts = parse_url($databaseUrl);
+        $host = $parts['host'] ?? '127.0.0.1';
+        $port = $parts['port'] ?? 3306;
+        $user = $parts['user'] ?? 'messenger';
+        $pass = $parts['pass'] ?? 'messenger';
+        $dbname = ltrim($parts['path'] ?? '/messenger_test', '/');
+
+        // SAFETY CHECK: Only run on test databases
+        if (!str_contains($dbname, '_test')) {
+            throw new \RuntimeException(
+                sprintf('SAFETY CHECK FAILED: Database must contain "_test" in name. Got: %s', $dbname)
+            );
+        }
+
+        try {
+            // Wait for database to be ready (max 30 seconds)
+            $maxRetries = 30;
+            $retryDelay = 1;
+            $pdo = null;
+
+            for ($i = 0; $i < $maxRetries; $i++) {
+                try {
+                    $pdo = new \PDO(
+                        sprintf('mysql:host=%s;port=%d;dbname=%s', $host, $port, $dbname),
+                        $user,
+                        $pass,
+                        [
+                            \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+                            \PDO::MYSQL_ATTR_MULTI_STATEMENTS => true,
+                        ]
+                    );
+                    break;
+                } catch (\PDOException $e) {
+                    if ($i === $maxRetries - 1) {
+                        throw new \RuntimeException(
+                            sprintf('Failed to connect to database after %d attempts: %s', $maxRetries, $e->getMessage())
+                        );
+                    }
+                    sleep($retryDelay);
+                }
+            }
+
+            if ($pdo === null) {
+                throw new \RuntimeException('Failed to establish database connection');
+            }
+
+            // Read and execute schema file
+            $schema = file_get_contents($schemaFile);
+            if ($schema === false) {
+                throw new \RuntimeException('Failed to read schema file: '.$schemaFile);
+            }
+
+            // Execute entire schema file (PDO with MYSQL_ATTR_MULTI_STATEMENTS handles multiple statements)
+            $pdo->exec($schema);
+
+            // Verify tables were created
+            $stmt = $pdo->query("SHOW TABLES LIKE 'message_broker_deduplication'");
+            if ($stmt->fetch() === false) {
+                throw new \RuntimeException('Schema applied but message_broker_deduplication table not found');
+            }
+        } catch (\Throwable $e) {
+            throw new \RuntimeException(
+                sprintf('Failed to setup database schema: %s', $e->getMessage()),
+                previous: $e
+            );
+        }
     }
 
     private function cleanDatabase(): void

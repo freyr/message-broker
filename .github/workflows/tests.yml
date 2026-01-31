@@ -91,15 +91,6 @@ jobs:
           done
           echo 'RabbitMQ is ready!'
 
-      - name: Setup database schema
-        run: |
-          echo "Setting up application-managed database tables..."
-          # Only create deduplication table (messenger tables are auto-managed by Symfony)
-          mysql -h 127.0.0.1 -P 3308 -u messenger -pmessenger messenger_test < migrations/schema.sql
-          echo "Schema setup complete!"
-          # Verify table was created
-          mysql -h 127.0.0.1 -P 3308 -u messenger -pmessenger messenger_test -e "SHOW TABLES;" | grep message_broker_deduplication
-
       - name: Run tests
         env:
           DATABASE_URL: mysql://messenger:messenger@127.0.0.1:3308/messenger_test
