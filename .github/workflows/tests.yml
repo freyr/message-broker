@@ -91,11 +91,6 @@ jobs:
           done
           echo 'RabbitMQ is ready!'
 
-      - name: Setup database schema
-        run: |
-          mysql -h 127.0.0.1 -P 3308 -u messenger -pmessenger messenger_test < migrations/schema.sql
-        continue-on-error: true
-
       - name: Run tests
         env:
           DATABASE_URL: mysql://messenger:messenger@127.0.0.1:3308/messenger_test

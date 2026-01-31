@@ -1,12 +1,42 @@
 # Database Schema - 3-Table Architecture
 
+## Table Management Strategy
+
+The package uses a **mixed management strategy** for database tables:
+
+### Auto-Managed Tables (Symfony Messenger)
+These tables are created and managed automatically by Symfony Messenger when `auto_setup: true`:
+
+1. **`messenger_outbox`** - Outbox pattern transport table
+   - Created on first `messenger:consume outbox` command
+   - Standard Symfony Messenger Doctrine transport schema
+   - Uses `table_name=messenger_outbox` parameter
+
+2. **`messenger_messages`** - Failed messages transport table
+   - Created on first `messenger:consume` command (any transport)
+   - Standard Symfony Messenger Doctrine transport schema
+   - Uses default table name
+
+**First-Run Behaviour:**
+- Symfony uses `CREATE TABLE IF NOT EXISTS` (idempotent)
+- Tables are created when the worker first polls the transport
+- No manual migration or schema.sql setup required
+
+### Application-Managed Tables (Manual Migration)
+These tables require manual migration (custom schema requirements):
+
+1. **`message_broker_deduplication`** - Inbox deduplication tracking
+   - Created via `migrations/schema.sql` or recipe migration
+   - Custom schema: `BINARY(16)` UUID v7 primary key
+   - Required before running inbox consumers
+
 ## Overview
 
 The Freyr Message Broker uses a **3-table architecture** for optimal performance and separation of concerns:
 
-1. **`messenger_outbox`** - Dedicated outbox table for publishing events
-2. **`message_broker_deduplication`** - Deduplication tracking (binary UUID v7 PK)
-3. **`messenger_messages`** - Standard table for failed messages (shared monitoring)
+1. **`messenger_outbox`** - Auto-managed by Symfony (outbox publishing)
+2. **`message_broker_deduplication`** - Application-managed (deduplication tracking)
+3. **`messenger_messages`** - Auto-managed by Symfony (failed messages)
 
 ## Benefits
 
@@ -20,14 +50,16 @@ The Freyr Message Broker uses a **3-table architecture** for optimal performance
 
 ## Table Schemas
 
-### 1. messenger_outbox
+### 1. messenger_outbox (Auto-Managed)
 
 **Purpose:** Stores domain events for transactional outbox pattern.
+
+**Management:** Auto-created by Symfony Messenger (`auto_setup: true`)
 
 **Schema:**
 ```sql
 CREATE TABLE messenger_outbox (
-    id BINARY(16) NOT NULL PRIMARY KEY COMMENT '(DC2Type:id_binary)',
+    id BIGINT AUTO_INCREMENT NOT NULL PRIMARY KEY,
     body LONGTEXT NOT NULL,
     headers LONGTEXT NOT NULL,
     queue_name VARCHAR(190) NOT NULL,
@@ -41,8 +73,9 @@ CREATE TABLE messenger_outbox (
 ```
 
 **Key Points:**
-- Binary UUID v7 primary key (sortable by creation time)
+- **Auto-increment ID** (Symfony Messenger requirement, not UUID)
 - Standard Symfony Messenger Doctrine transport structure
+- Created automatically on first `messenger:consume outbox` command
 - Used exclusively for outbox pattern
 - Consumed by `OutboxToAmqpBridge`
 - Published events use `OutboxSerializer`
@@ -53,9 +86,11 @@ CREATE TABLE messenger_outbox (
 php bin/console messenger:cleanup-outbox --days=7
 ```
 
-### 2. message_broker_deduplication
+### 2. message_broker_deduplication (Application-Managed)
 
 **Purpose:** Tracks processed messages to prevent duplicate execution.
+
+**Management:** Manual migration required (custom schema with binary UUID v7)
 
 **Schema:**
 ```sql
@@ -82,9 +117,11 @@ CREATE TABLE message_broker_deduplication (
 php bin/console message-broker:deduplication-cleanup --days=30
 ```
 
-### 3. messenger_messages
+### 3. messenger_messages (Auto-Managed)
 
 **Purpose:** Stores failed messages from all transports for unified monitoring.
+
+**Management:** Auto-created by Symfony Messenger (`auto_setup: true`)
 
 **Schema:**
 ```sql
@@ -104,6 +141,7 @@ CREATE TABLE messenger_messages (
 
 **Key Points:**
 - Standard Symfony Messenger Doctrine transport
+- Created automatically on first `messenger:consume` command
 - Used for failed transport (`queue_name='failed'`)
 - Auto-increment ID (not UUID)
 - Shared across all transport failures
@@ -119,6 +157,8 @@ php bin/console messenger:failed:retry
 
 ## Migration Example
 
+**Note:** Only the deduplication table requires manual migration. Messenger tables (`messenger_outbox` and `messenger_messages`) are auto-created by Symfony.
+
 ```php
 <?php
 
@@ -133,28 +173,12 @@ final class Version20250103000001 extends AbstractMigration
 {
     public function getDescription(): string
     {
-        return 'Create message broker tables (outbox, deduplication, failed)';
+        return 'Create message_broker_deduplication table for middleware-based deduplication';
     }
 
     public function up(Schema $schema): void
     {
-        // 1. Outbox table
-        $this->addSql("
-            CREATE TABLE messenger_outbox (
-                id BINARY(16) NOT NULL PRIMARY KEY COMMENT '(DC2Type:id_binary)',
-                body LONGTEXT NOT NULL,
-                headers LONGTEXT NOT NULL,
-                queue_name VARCHAR(190) NOT NULL,
-                created_at DATETIME NOT NULL,
-                available_at DATETIME NOT NULL,
-                delivered_at DATETIME DEFAULT NULL,
-                INDEX idx_queue_name (queue_name),
-                INDEX idx_available_at (available_at),
-                INDEX idx_delivered_at (delivered_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        ");
-
-        // 2. Deduplication table
+        // Only create deduplication table (messenger tables are auto-managed)
         $this->addSql("
             CREATE TABLE message_broker_deduplication (
                 message_id BINARY(16) NOT NULL PRIMARY KEY COMMENT '(DC2Type:id_binary)',
@@ -164,29 +188,11 @@ final class Version20250103000001 extends AbstractMigration
                 INDEX idx_processed_at (processed_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
-
-        // 3. Failed messages table (standard)
-        $this->addSql("
-            CREATE TABLE messenger_messages (
-                id BIGINT AUTO_INCREMENT NOT NULL PRIMARY KEY,
-                body LONGTEXT NOT NULL,
-                headers LONGTEXT NOT NULL,
-                queue_name VARCHAR(190) NOT NULL,
-                created_at DATETIME NOT NULL,
-                available_at DATETIME NOT NULL,
-                delivered_at DATETIME DEFAULT NULL,
-                INDEX idx_queue_name (queue_name),
-                INDEX idx_available_at (available_at),
-                INDEX idx_delivered_at (delivered_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        ");
     }
 
     public function down(Schema $schema): void
     {
-        $this->addSql('DROP TABLE messenger_outbox');
         $this->addSql('DROP TABLE message_broker_deduplication');
-        $this->addSql('DROP TABLE messenger_messages');
     }
 }
 ```
@@ -199,32 +205,34 @@ framework:
     failure_transport: failed
 
     transports:
-      # Outbox transport - uses messenger_outbox table
+      # Outbox transport - AUTO-MANAGED (auto_setup: true)
       outbox:
         dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
         serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
+        options:
+          auto_setup: true  # Symfony creates table automatically
 
-      # AMQP publish transport
+      # AMQP publish transport - MANUAL MANAGEMENT (auto_setup: false)
       amqp:
         dsn: '%env(MESSENGER_AMQP_DSN)%'
         serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
         options:
-          auto_setup: false
+          auto_setup: false  # Infrastructure managed by ops
 
-      # AMQP consumption transport
+      # AMQP consumption transport - MANUAL MANAGEMENT (auto_setup: false)
       amqp_orders:
         dsn: '%env(MESSENGER_AMQP_DSN)%'
         serializer: 'Freyr\MessageBroker\Serializer\InboxSerializer'
         options:
-          auto_setup: false
+          auto_setup: false  # Infrastructure managed by ops
           queue:
             name: 'orders_queue'
 
-      # Failed transport - uses messenger_messages table
+      # Failed transport - AUTO-MANAGED (auto_setup: true)
       failed:
         dsn: 'doctrine://default?queue_name=failed'
         options:
-          auto_setup: false
+          auto_setup: true  # Symfony creates table automatically
 ```
 
 ## Message Flow
