@@ -1,5 +1,5 @@
 ---
-status: pending
+status: complete
 priority: p2
 issue_id: 7
 tags: [code-review, refactoring, code-simplicity, duplication]
