@@ -451,6 +451,8 @@ abstract class FunctionalTestCase extends KernelTestCase
 
     /**
      * Get row count for a table (helper for quick assertions).
+     *
+     * Returns 0 if table doesn't exist (handles auto-managed tables that may not be created yet).
      */
     protected function getTableRowCount(string $table): int
     {
@@ -465,6 +467,12 @@ abstract class FunctionalTestCase extends KernelTestCase
         /** @var Connection $connection */
         $connection = $this->getContainer()
             ->get('doctrine.dbal.default_connection');
+
+        // Check if table exists first (auto-managed tables may not be created yet)
+        $schemaManager = $connection->createSchemaManager();
+        if (!$schemaManager->tablesExist([$table])) {
+            return 0;
+        }
 
         return (int) $connection->fetchOne("SELECT COUNT(*) FROM {$table}");
     }
