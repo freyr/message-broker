@@ -24,7 +24,7 @@ trait TrackableHandlerTrait
      */
     protected function track(mixed $message): void
     {
-        self::$invocationCount++;
+        ++self::$invocationCount;
         self::$lastMessage = $message;
     }
 

@@ -26,11 +26,7 @@ final class TestKernel extends Kernel
 
     public function registerBundles(): array
     {
-        return [
-            new FrameworkBundle(),
-            new DoctrineBundle(),
-            new FreyrMessageBrokerBundle(),
-        ];
+        return [new FrameworkBundle(), new DoctrineBundle(), new FreyrMessageBrokerBundle()];
     }
 
     public function getProjectDir(): string
@@ -40,6 +36,6 @@ final class TestKernel extends Kernel
 
     protected function configureContainer(ContainerBuilder $container, LoaderInterface $loader): void
     {
-        $loader->load(__DIR__ . '/config/test.yaml');
+        $loader->load(__DIR__.'/config/test.yaml');
     }
 }

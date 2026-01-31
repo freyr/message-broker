@@ -23,7 +23,9 @@ final class InboxHeaderDebugTest extends FunctionalTestCase
             [
                 'type' => 'test.event.sent',
                 'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([
-                    ['messageId' => $messageId],
+                    [
+                        'messageId' => $messageId,
+                    ],
                 ]),
             ],
             [

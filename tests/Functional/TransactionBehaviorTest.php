@@ -18,20 +18,16 @@ final class TransactionBehaviorTest extends FunctionalTestCase
     {
         // Given: A message that will cause handler to throw
         $messageId = Id::new()->__toString();
-        $testEvent = new TestEvent(
-            id: Id::new(),
-            name: 'transaction-test',
-            timestamp: CarbonImmutable::now()
-        );
+        $testEvent = new TestEvent(id: Id::new(), name: 'transaction-test', timestamp: CarbonImmutable::now());
 
-        ThrowingTestEventHandler::throwOnNextInvocation(
-            new \RuntimeException('Test exception')
-        );
+        ThrowingTestEventHandler::throwOnNextInvocation(new \RuntimeException('Test exception'));
 
         $this->publishToAmqp('test_inbox', [
             'type' => 'test.event.sent',
             'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([
-                ['messageId' => $messageId]
+                [
+                    'messageId' => $messageId,
+                ],
             ]),
         ], [
             'id' => $testEvent->id->__toString(),
@@ -47,7 +43,8 @@ final class TransactionBehaviorTest extends FunctionalTestCase
         }
 
         // Check actual behavior - does dedup entry exist or not?
-        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+        $connection = $this->getContainer()
+            ->get('doctrine.dbal.default_connection');
         $messageIdHex = strtoupper(str_replace('-', '', $messageId));
         $count = (int) $connection->fetchOne(
             'SELECT COUNT(*) FROM message_broker_deduplication WHERE HEX(message_id) = ?',
@@ -57,13 +54,13 @@ final class TransactionBehaviorTest extends FunctionalTestCase
         // Report actual behavior
         if ($count === 0) {
             $this->markTestIncomplete(
-                "Transaction rollback IS working! Dedup entry was rolled back when handler threw. " .
-                "This means doctrine_transaction middleware IS active."
+                'Transaction rollback IS working! Dedup entry was rolled back when handler threw. '.
+                'This means doctrine_transaction middleware IS active.'
             );
         } else {
             $this->markTestIncomplete(
-                "Transaction rollback NOT working. Dedup entry exists even though handler threw. " .
-                "Count: $count. This means doctrine_transaction middleware is NOT active or not working properly."
+                'Transaction rollback NOT working. Dedup entry exists even though handler threw. '.
+                "Count: {$count}. This means doctrine_transaction middleware is NOT active or not working properly."
             );
         }
     }

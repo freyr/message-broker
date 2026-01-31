@@ -31,13 +31,15 @@ final class InboxConcurrentProcessingTest extends FunctionalTestCase
     {
         // Given: 10 unique messages published to queue
         $messageIds = [];
-        for ($i = 1; $i <= 10; $i++) {
+        for ($i = 1; $i <= 10; ++$i) {
             $messageId = Id::new()->__toString();
             $messageIds[] = $messageId;
 
             $this->publishToAmqp('test_inbox', [
                 'type' => 'test.event.sent',
-                'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
+                'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([[
+                    'messageId' => $messageId,
+                ]]),
             ], [
                 'id' => Id::new()->__toString(),
                 'name' => "message-{$i}",
@@ -79,15 +81,13 @@ final class InboxConcurrentProcessingTest extends FunctionalTestCase
     {
         // Given: A message processed by first worker
         $messageId = Id::new()->__toString();
-        $testEvent = new TestEvent(
-            id: Id::new(),
-            name: 'first-worker',
-            timestamp: CarbonImmutable::now()
-        );
+        $testEvent = new TestEvent(id: Id::new(), name: 'first-worker', timestamp: CarbonImmutable::now());
 
         $this->publishToAmqp('test_inbox', [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
+            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([[
+                'messageId' => $messageId,
+            ]]),
         ], [
             'id' => $testEvent->id->__toString(),
             'name' => $testEvent->name,
@@ -104,7 +104,9 @@ final class InboxConcurrentProcessingTest extends FunctionalTestCase
         // When: Same message republished (simulating redelivery)
         $this->publishToAmqp('test_inbox', [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
+            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([[
+                'messageId' => $messageId,
+            ]]),
         ], [
             'id' => $testEvent->id->__toString(),
             'name' => $testEvent->name,

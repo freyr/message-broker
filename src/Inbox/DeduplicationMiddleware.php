@@ -48,11 +48,7 @@ readonly class DeduplicationMiddleware implements MiddlewareInterface
             ]);
 
             // Generic error message to external systems (prevents information disclosure)
-            throw new \InvalidArgumentException(
-                'MessageIdStamp contains invalid UUID format',
-                0,
-                $e
-            );
+            throw new \InvalidArgumentException('MessageIdStamp contains invalid UUID format', 0, $e);
         }
 
         $messageName = $envelope->getMessage()::class;

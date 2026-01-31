@@ -11,16 +11,17 @@ declare(strict_types=1);
  * 3. Transaction behavior (commit or rollback)
  */
 
-require __DIR__ . '/../../../vendor/autoload.php';
+require __DIR__.'/../../../vendor/autoload.php';
 
-use Freyr\MessageBroker\Tests\Functional\TestKernel;
 use Doctrine\DBAL\Connection;
+use Freyr\MessageBroker\Tests\Functional\TestKernel;
 
 // Boot test kernel to get configured connection
 $kernel = new TestKernel('test', true);
 $kernel->boot();
 
-$connection = $kernel->getContainer()->get('doctrine.dbal.default_connection');
+$connection = $kernel->getContainer()
+    ->get('doctrine.dbal.default_connection');
 assert($connection instanceof Connection);
 
 $messageId = '01234567-89ab-cdef-0123-456789abcdef';
@@ -43,7 +44,7 @@ try {
     $connection->insert('message_broker_deduplication', [
         'message_id' => $messageIdBinary,
         'message_name' => 'TestEvent',
-        'processed_at' => new \DateTimeImmutable(),
+        'processed_at' => new DateTimeImmutable(),
     ], [
         'message_id' => 'binary',
         'processed_at' => 'datetime_immutable',
@@ -52,9 +53,8 @@ try {
 
     // Simulate handler throwing exception
     echo "2. Handler throws exception\n";
-    throw new \RuntimeException('Handler failed!');
-
-} catch (\RuntimeException $e) {
+    throw new RuntimeException('Handler failed!');
+} catch (RuntimeException $e) {
     echo "3. Exception caught: {$e->getMessage()}\n";
 }
 
@@ -65,7 +65,7 @@ $count = (int) $connection->fetchOne(
     ['binary']
 );
 
-echo "4. Deduplication entry exists? " . ($count > 0 ? "YES ❌" : "NO ✓") . "\n";
+echo '4. Deduplication entry exists? '.($count > 0 ? 'YES ❌' : 'NO ✓')."\n";
 echo "   → Result: Deduplication entry was NOT rolled back\n";
 echo "   → Impact: Message will be treated as DUPLICATE on retry\n";
 echo "   → Outcome: HANDLER WILL NEVER RUN AGAIN = DATA LOSS\n\n";
@@ -87,7 +87,7 @@ try {
     $connection->insert('message_broker_deduplication', [
         'message_id' => $messageIdBinary,
         'message_name' => 'TestEvent',
-        'processed_at' => new \DateTimeImmutable(),
+        'processed_at' => new DateTimeImmutable(),
     ], [
         'message_id' => 'binary',
         'processed_at' => 'datetime_immutable',
@@ -96,10 +96,9 @@ try {
 
     // Simulate handler throwing exception
     echo "3. Handler throws exception\n";
-    throw new \RuntimeException('Handler failed!');
-
+    throw new RuntimeException('Handler failed!');
     $connection->commit();
-} catch (\RuntimeException $e) {
+} catch (RuntimeException $e) {
     echo "4. Exception caught: {$e->getMessage()}\n";
     $connection->rollBack();
     echo "5. Transaction rolled back\n";
@@ -112,7 +111,7 @@ $count = (int) $connection->fetchOne(
     ['binary']
 );
 
-echo "6. Deduplication entry exists? " . ($count > 0 ? "YES ❌" : "NO ✓") . "\n";
+echo '6. Deduplication entry exists? '.($count > 0 ? 'YES ❌' : 'NO ✓')."\n";
 echo "   → Result: Deduplication entry WAS rolled back\n";
 echo "   → Impact: Message can be retried\n";
 echo "   → Outcome: HANDLER WILL RUN AGAIN = EVENTUAL SUCCESS\n\n";

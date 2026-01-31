@@ -32,7 +32,9 @@ final class InboxFlowTest extends FunctionalTestCase
             [
                 'type' => 'test.event.sent',
                 'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([
-                    ['messageId' => $messageId],
+                    [
+                        'messageId' => $messageId,
+                    ],
                 ]),
             ],
             [
@@ -70,7 +72,9 @@ final class InboxFlowTest extends FunctionalTestCase
         $headers = [
             'type' => 'test.event.sent',
             'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([
-                ['messageId' => $messageId],
+                [
+                    'messageId' => $messageId,
+                ],
             ]),
         ];
 
@@ -109,7 +113,9 @@ final class InboxFlowTest extends FunctionalTestCase
             [
                 'type' => 'test.event.sent',  // Semantic name
                 'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([
-                    ['messageId' => $messageId],
+                    [
+                        'messageId' => $messageId,
+                    ],
                 ]),
             ],
             [
@@ -144,7 +150,9 @@ final class InboxFlowTest extends FunctionalTestCase
             [
                 'type' => 'test.order.placed',
                 'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([
-                    ['messageId' => $messageId],
+                    [
+                        'messageId' => $messageId,
+                    ],
                 ]),
             ],
             [

@@ -6,7 +6,6 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Doctrine\DBAL\Connection;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Tests\Functional\Fixtures;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
@@ -65,14 +64,14 @@ abstract class FunctionalTestCase extends KernelTestCase
     private function cleanDatabase(): void
     {
         /** @var Connection $connection */
-        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+        $connection = $this->getContainer()
+            ->get('doctrine.dbal.default_connection');
 
         // SAFETY CHECK: Prevent accidental test-against-production scenarios
         $params = $connection->getParams();
         if (!str_contains($params['dbname'] ?? '', '_test')) {
             throw new \RuntimeException(
-                'Safety check failed: Database must contain "_test" in name. ' .
-                'Got: ' . ($params['dbname'] ?? 'unknown')
+                'Safety check failed: Database must contain "_test" in name. Got: '.($params['dbname'] ?? 'unknown')
             );
         }
 
@@ -101,6 +100,7 @@ abstract class FunctionalTestCase extends KernelTestCase
                 $vhost
             );
         }
+
         return self::$amqpConnection;
     }
 
@@ -139,14 +139,14 @@ abstract class FunctionalTestCase extends KernelTestCase
             // Prevents false positives when RabbitMQ is down
             if (str_contains(static::class, 'Inbox')) {
                 throw new \RuntimeException(
-                    'AMQP setup failed for inbox test. RabbitMQ must be running: ' . $e->getMessage(),
+                    'AMQP setup failed for inbox test. RabbitMQ must be running: '.$e->getMessage(),
                     previous: $e
                 );
             }
 
             // Outbox tests can continue without AMQP (they only test database storage)
             // Log the warning but don't fail
-            error_log("AMQP unavailable for outbox test: " . $e->getMessage());
+            error_log('AMQP unavailable for outbox test: '.$e->getMessage());
         }
     }
 
@@ -161,7 +161,7 @@ abstract class FunctionalTestCase extends KernelTestCase
         $channel->close();
 
         if ($message === null) {
-            $this->fail("No message found in queue '$queueName'");
+            $this->fail("No message found in queue '{$queueName}'");
         }
 
         $body = json_decode($message->body, true);
@@ -182,7 +182,7 @@ abstract class FunctionalTestCase extends KernelTestCase
 
         $channel->close();
 
-        $this->assertNull($message, "Queue '$queueName' should be empty but contains messages");
+        $this->assertNull($message, "Queue '{$queueName}' should be empty but contains messages");
     }
 
     // AMQP Helper Methods
@@ -212,19 +212,21 @@ abstract class FunctionalTestCase extends KernelTestCase
      * @param Fixtures\TestEvent $event The event to publish
      * @param string|null $messageId Optional message ID (auto-generated if null)
      * @param string $queue Queue name (default: test_inbox)
+     *
      * @return string The message ID (for assertions)
      */
     protected function publishTestEvent(
         Fixtures\TestEvent $event,
         ?string $messageId = null,
-        string $queue = 'test_inbox'
+        string $queue = 'test_inbox',
     ): string {
         $messageId = $messageId ?? Id::new()->__toString();
 
         $this->publishToAmqp($queue, [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' =>
-                json_encode([['messageId' => $messageId]]),
+            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([[
+                'messageId' => $messageId,
+            ]]),
         ], [
             'id' => $event->id->__toString(),
             'name' => $event->name,
@@ -240,19 +242,21 @@ abstract class FunctionalTestCase extends KernelTestCase
      * @param Fixtures\OrderPlaced $event The event to publish
      * @param string|null $messageId Optional message ID (auto-generated if null)
      * @param string $queue Queue name (default: test.order.placed)
+     *
      * @return string The message ID (for assertions)
      */
     protected function publishOrderPlacedEvent(
         Fixtures\OrderPlaced $event,
         ?string $messageId = null,
-        string $queue = 'test.order.placed'
+        string $queue = 'test.order.placed',
     ): string {
         $messageId = $messageId ?? Id::new()->__toString();
 
         $this->publishToAmqp($queue, [
             'type' => 'test.order.placed',
-            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' =>
-                json_encode([['messageId' => $messageId]]),
+            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([[
+                'messageId' => $messageId,
+            ]]),
         ], [
             'id' => $event->id->__toString(),
             'customerId' => $event->customerId->__toString(),
@@ -265,18 +269,25 @@ abstract class FunctionalTestCase extends KernelTestCase
 
     protected function consumeFromInbox(int $limit = 1): void
     {
-        $receiver = $this->getContainer()->get('messenger.transport.amqp_test');
-        $bus = $this->getContainer()->get('messenger.default_bus');
+        $receiver = $this->getContainer()
+            ->get('messenger.transport.amqp_test');
+        $bus = $this->getContainer()
+            ->get('messenger.default_bus');
 
         // Create a custom event dispatcher with StopWorkerOnMessageLimitListener
         $eventDispatcher = new EventDispatcher();
-        $eventDispatcher->addSubscriber(new StopWorkerOnMessageLimitListener($limit, $this->getContainer()->get('logger')));
+        $eventDispatcher->addSubscriber(
+            new StopWorkerOnMessageLimitListener($limit, $this->getContainer()->get('logger'))
+        );
 
         $worker = new Worker(
-            ['amqp_test' => $receiver],
+            [
+                'amqp_test' => $receiver,
+            ],
             $bus,
             $eventDispatcher,
-            $this->getContainer()->get('logger')
+            $this->getContainer()
+                ->get('logger')
         );
 
         // Stop after processing N messages (handled by StopWorkerOnMessageLimitListener)
@@ -291,18 +302,25 @@ abstract class FunctionalTestCase extends KernelTestCase
      */
     protected function processOutbox(int $limit = 1): void
     {
-        $receiver = $this->getContainer()->get('messenger.transport.outbox');
-        $bus = $this->getContainer()->get('messenger.default_bus');
+        $receiver = $this->getContainer()
+            ->get('messenger.transport.outbox');
+        $bus = $this->getContainer()
+            ->get('messenger.default_bus');
 
         // Create a custom event dispatcher with StopWorkerOnMessageLimitListener
         $eventDispatcher = new EventDispatcher();
-        $eventDispatcher->addSubscriber(new StopWorkerOnMessageLimitListener($limit, $this->getContainer()->get('logger')));
+        $eventDispatcher->addSubscriber(
+            new StopWorkerOnMessageLimitListener($limit, $this->getContainer()->get('logger'))
+        );
 
         $worker = new Worker(
-            ['outbox' => $receiver],
+            [
+                'outbox' => $receiver,
+            ],
             $bus,
             $eventDispatcher,
-            $this->getContainer()->get('logger')
+            $this->getContainer()
+                ->get('logger')
         );
 
         // Stop after processing N messages (handled by StopWorkerOnMessageLimitListener)
@@ -332,13 +350,14 @@ abstract class FunctionalTestCase extends KernelTestCase
     protected function assertDeduplicationEntryExists(string $messageId): void
     {
         /** @var Connection $connection */
-        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+        $connection = $this->getContainer()
+            ->get('doctrine.dbal.default_connection');
 
         // Convert UUID string to uppercase hex (no dashes) for binary comparison
         $messageIdHex = strtoupper(str_replace('-', '', $messageId));
 
         $count = (int) $connection->fetchOne(
-            "SELECT COUNT(*) FROM message_broker_deduplication WHERE HEX(message_id) = ?",
+            'SELECT COUNT(*) FROM message_broker_deduplication WHERE HEX(message_id) = ?',
             [$messageIdHex]
         );
 
@@ -348,7 +367,8 @@ abstract class FunctionalTestCase extends KernelTestCase
     protected function getDeduplicationEntryCount(): int
     {
         /** @var Connection $connection */
-        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+        $connection = $this->getContainer()
+            ->get('doctrine.dbal.default_connection');
 
         return (int) $connection->fetchOne('SELECT COUNT(*) FROM message_broker_deduplication');
     }
@@ -361,7 +381,8 @@ abstract class FunctionalTestCase extends KernelTestCase
     protected function assertNoDeduplicationEntryExists(string $messageId): void
     {
         /** @var Connection $connection */
-        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+        $connection = $this->getContainer()
+            ->get('doctrine.dbal.default_connection');
 
         // Convert UUID string to uppercase hex (no dashes) for binary comparison
         $messageIdHex = strtoupper(str_replace('-', '', $messageId));
@@ -386,7 +407,8 @@ abstract class FunctionalTestCase extends KernelTestCase
     protected function assertMessageInFailedTransport(string $messageClass): array
     {
         /** @var Connection $connection */
-        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+        $connection = $this->getContainer()
+            ->get('doctrine.dbal.default_connection');
 
         $result = $connection->fetchAssociative(
             "SELECT body, headers FROM messenger_messages WHERE queue_name = 'failed' ORDER BY id DESC LIMIT 1"
@@ -411,31 +433,24 @@ abstract class FunctionalTestCase extends KernelTestCase
     /**
      * Allowed tables for getTableRowCount() to prevent SQL injection.
      */
-    private const ALLOWED_TABLES = [
-        'message_broker_deduplication',
-        'messenger_outbox',
-        'messenger_messages',
-    ];
+    private const ALLOWED_TABLES = ['message_broker_deduplication', 'messenger_outbox', 'messenger_messages'];
 
     /**
      * Get row count for a table (helper for quick assertions).
-     *
-     * @throws \InvalidArgumentException If table name is not in whitelist
      */
     protected function getTableRowCount(string $table): int
     {
         if (!in_array($table, self::ALLOWED_TABLES, strict: true)) {
-            throw new \InvalidArgumentException(
-                sprintf(
-                    'Invalid table name: "%s". Allowed tables: %s',
-                    $table,
-                    implode(', ', self::ALLOWED_TABLES)
-                )
-            );
+            throw new \InvalidArgumentException(sprintf(
+                'Invalid table name: "%s". Allowed tables: %s',
+                $table,
+                implode(', ', self::ALLOWED_TABLES)
+            ));
         }
 
         /** @var Connection $connection */
-        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+        $connection = $this->getContainer()
+            ->get('doctrine.dbal.default_connection');
 
         return (int) $connection->fetchOne("SELECT COUNT(*) FROM {$table}");
     }
@@ -460,9 +475,13 @@ abstract class FunctionalTestCase extends KernelTestCase
 
         if (!in_array('missingMessageId', $options)) {
             if (in_array('invalidUuid', $options)) {
-                $headers['X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp'] = json_encode([['messageId' => 'not-a-uuid']]);
+                $headers['X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp'] = json_encode([[
+                    'messageId' => 'not-a-uuid',
+                ]]);
             } else {
-                $headers['X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp'] = json_encode([['messageId' => '01234567-89ab-cdef-0123-456789abcdef']]);
+                $headers['X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp'] = json_encode([[
+                    'messageId' => '01234567-89ab-cdef-0123-456789abcdef',
+                ]]);
             }
         }
 

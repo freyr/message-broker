@@ -6,11 +6,11 @@ declare(strict_types=1);
  * Quick test: Publish message → consume it → check if dedup entry exists.
  */
 
-require __DIR__ . '/../../../vendor/autoload.php';
+require __DIR__.'/../../../vendor/autoload.php';
 
-use Freyr\MessageBroker\Tests\Functional\TestKernel;
-use Freyr\Identity\Id;
 use Carbon\CarbonImmutable;
+use Freyr\Identity\Id;
+use Freyr\MessageBroker\Tests\Functional\TestKernel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
@@ -21,7 +21,8 @@ use Symfony\Component\Messenger\Worker;
 $kernel = new TestKernel('test', true);
 $kernel->boot();
 
-$connection = $kernel->getContainer()->get('doctrine.dbal.default_connection');
+$connection = $kernel->getContainer()
+    ->get('doctrine.dbal.default_connection');
 
 // Clean tables
 $connection->executeStatement('DELETE FROM message_broker_deduplication');
@@ -40,20 +41,26 @@ $message = new AMQPMessage(json_encode([
     'content_type' => 'application/json',
     'application_headers' => new AMQPTable([
         'type' => 'test.event.sent',
-        'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
+        'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([[
+            'messageId' => $messageId,
+        ]]),
     ]),
 ]);
 $channel->basic_publish($message, '', 'test_inbox');
 $channel->close();
 $amqpConn->close();
-echo "✓ Published message with ID: $messageId\n";
+echo "✓ Published message with ID: {$messageId}\n";
 
 // Consume it
-$receiver = $kernel->getContainer()->get('messenger.transport.amqp_test');
-$bus = $kernel->getContainer()->get('messenger.default_bus');
+$receiver = $kernel->getContainer()
+    ->get('messenger.transport.amqp_test');
+$bus = $kernel->getContainer()
+    ->get('messenger.default_bus');
 $eventDispatcher = new EventDispatcher();
 $eventDispatcher->addSubscriber(new StopWorkerOnMessageLimitListener(1, $kernel->getContainer()->get('logger')));
-$worker = new Worker(['amqp_test' => $receiver], $bus, $eventDispatcher, $kernel->getContainer()->get('logger'));
+$worker = new Worker([
+    'amqp_test' => $receiver,
+], $bus, $eventDispatcher, $kernel->getContainer()->get('logger'));
 $worker->run();
 echo "✓ Consumed message\n";
 
@@ -65,7 +72,7 @@ $count = (int) $connection->fetchOne(
     ['binary']
 );
 
-echo "\nResult: Dedup entry exists? " . ($count > 0 ? "YES ✓" : "NO ❌") . "\n";
+echo "\nResult: Dedup entry exists? ".($count > 0 ? 'YES ✓' : 'NO ❌')."\n";
 echo "Expected: YES (handler succeeded, transaction should commit)\n";
 
 if ($count === 0) {

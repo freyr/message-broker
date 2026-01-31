@@ -20,7 +20,8 @@ final class InboxDeduplicationOnlyTest extends FunctionalTestCase
         $messageName = 'Freyr\MessageBroker\Tests\Functional\Fixtures\TestEvent';
 
         // When: We check if it's a duplicate (first time)
-        $store = $this->getContainer()->get('Freyr\MessageBroker\Inbox\DeduplicationStore');
+        $store = $this->getContainer()
+            ->get('Freyr\MessageBroker\Inbox\DeduplicationStore');
         $isDuplicate1 = $store->isDuplicate($messageId, $messageName);
 
         // Then: It's not a duplicate (first occurrence)
@@ -48,7 +49,9 @@ final class InboxDeduplicationOnlyTest extends FunctionalTestCase
         $headers = [
             'type' => 'test.event.sent',
             'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([
-                ['messageId' => $messageId],
+                [
+                    'messageId' => $messageId,
+                ],
             ]),
         ];
 
