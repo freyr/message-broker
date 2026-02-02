@@ -75,6 +75,25 @@ When running `/workflows:review`, leverage these agents as appropriate:
 
 ---
 
+## 📋 Critical Patterns - Required Reading
+
+**IMPORTANT:** Before making changes to database setup, testing infrastructure, CI workflows, or core architecture, review:
+
+**→ `docs/solutions/patterns/critical-patterns.md`**
+
+This document contains patterns that MUST be followed to avoid recurring issues. Each pattern represents a mistake that was made multiple times or has significant impact.
+
+**Current Critical Patterns:**
+1. **Test Environment Schema Setup** - Schema setup must happen in test bootstrap, not as CI-specific steps
+
+**Why this matters:**
+- Prevents environment parity issues between local and CI
+- Avoids silent failures that mask setup problems
+- Ensures tests work in fresh environments
+- Reduces debugging time for infrastructure issues
+
+---
+
 ## Git/GitHub Conventions
 
 ### Branch Naming
