@@ -9,6 +9,7 @@ use Freyr\MessageBroker\Inbox\MessageIdStamp;
 use Freyr\MessageBroker\Outbox\MessageName;
 use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface;
 use Psr\Log\LoggerInterface;
+use RuntimeException;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
 use Symfony\Component\Messenger\Envelope;
@@ -35,7 +36,8 @@ final readonly class OutboxToAmqpBridge
     public function __invoke(OutboxMessage $event): void
     {
         // Extract message name (cached per class)
-        $messageName = MessageName::fromClass($event);
+        $messageName = MessageName::fromClass($event)
+            ?? throw new RuntimeException(sprintf('Event %s must have #[MessageName] attribute', $event::class));
 
         // Generate messageId for this publishing (UUID v7 for ordering)
         $messageId = Id::new();

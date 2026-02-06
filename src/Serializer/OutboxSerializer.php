@@ -48,7 +48,8 @@ final class OutboxSerializer extends Serializer
         $fqn = $message::class;
 
         // Extract semantic name from #[MessageName] attribute (cached per class)
-        $semanticName = MessageName::fromClass($message);
+        $semanticName = MessageName::fromClass($message)
+            ?? throw new \RuntimeException(sprintf('Message %s must have #[MessageName] attribute', $fqn));
 
         // Add MessageNameStamp if not present (avoid duplicates on retry)
         $existingStamp = $envelope->last(MessageNameStamp::class);

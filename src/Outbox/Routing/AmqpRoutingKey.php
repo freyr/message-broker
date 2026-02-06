@@ -31,7 +31,7 @@ final class AmqpRoutingKey
     private static array $cache = [];
 
     public function __construct(
-        public readonly string $key,
+        public readonly string $name,
     ) {}
 
     /**
@@ -58,6 +58,6 @@ final class AmqpRoutingKey
         /** @var self $attribute */
         $attribute = $attributes[0]->newInstance();
 
-        return self::$cache[$class] = $attribute->key;
+        return self::$cache[$class] = $attribute->name;
     }
 }
