@@ -330,9 +330,7 @@ abstract class FunctionalTestCase extends KernelTestCase
 
         $this->publishToAmqp($queue, [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([[
-                'messageId' => $messageId,
-            ]]),
+            'X-Message-Id' => $messageId,
         ], [
             'id' => $event->id->__toString(),
             'name' => $event->name,
@@ -360,9 +358,7 @@ abstract class FunctionalTestCase extends KernelTestCase
 
         $this->publishToAmqp($queue, [
             'type' => 'test.order.placed',
-            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([[
-                'messageId' => $messageId,
-            ]]),
+            'X-Message-Id' => $messageId,
         ], [
             'id' => $event->id->__toString(),
             'customerId' => $event->customerId->__toString(),
@@ -589,13 +585,9 @@ abstract class FunctionalTestCase extends KernelTestCase
 
         if (!in_array('missingMessageId', $options)) {
             if (in_array('invalidUuid', $options)) {
-                $headers['X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp'] = json_encode([[
-                    'messageId' => 'not-a-uuid',
-                ]]);
+                $headers['X-Message-Id'] = 'not-a-uuid';
             } else {
-                $headers['X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp'] = json_encode([[
-                    'messageId' => '01234567-89ab-cdef-0123-456789abcdef',
-                ]]);
+                $headers['X-Message-Id'] = '01234567-89ab-cdef-0123-456789abcdef';
             }
         }
 

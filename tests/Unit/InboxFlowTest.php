@@ -6,7 +6,7 @@ namespace Freyr\MessageBroker\Tests\Unit;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Inbox\MessageIdStamp;
+use Freyr\MessageBroker\Stamp\MessageIdStamp;
 use Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge;
 use Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy;
 use Freyr\MessageBroker\Tests\Unit\Factory\EventBusFactory;

@@ -41,9 +41,7 @@ $message = new AMQPMessage(json_encode([
     'content_type' => 'application/json',
     'application_headers' => new AMQPTable([
         'type' => 'test.event.sent',
-        'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([[
-            'messageId' => $messageId,
-        ]]),
+        'X-Message-Id' => $messageId,
     ]),
 ]);
 $channel->basic_publish($message, '', 'test_inbox');

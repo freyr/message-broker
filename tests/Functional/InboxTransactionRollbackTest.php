@@ -43,9 +43,7 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
         // Publish to AMQP with MessageIdStamp
         $this->publishToAmqp('test_inbox', [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([[
-                'messageId' => $messageId,
-            ]]),
+            'X-Message-Id' => $messageId,
         ], [
             'id' => $testEvent->id->__toString(),
             'name' => $testEvent->name,
@@ -98,9 +96,7 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
 
         $this->publishToAmqp('test_inbox', [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([[
-                'messageId' => $messageId,
-            ]]),
+            'X-Message-Id' => $messageId,
         ], [
             'id' => $testEvent->id->__toString(),
             'name' => $testEvent->name,
@@ -123,9 +119,7 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
         // Republish same message (simulating retry)
         $this->publishToAmqp('test_inbox', [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([[
-                'messageId' => $messageId,
-            ]]),
+            'X-Message-Id' => $messageId,
         ], [
             'id' => $testEvent->id->__toString(),
             'name' => $testEvent->name,
@@ -173,9 +167,7 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
 
             $this->publishToAmqp('test_inbox', [
                 'type' => 'test.event.sent',
-                'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([[
-                    'messageId' => $messageId,
-                ]]),
+                'X-Message-Id' => $messageId,
             ], [
                 'id' => $testEvent->id->__toString(),
                 'name' => $testEvent->name,
@@ -196,9 +188,7 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
         // Attempt 4: Success
         $this->publishToAmqp('test_inbox', [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([[
-                'messageId' => $messageId,
-            ]]),
+            'X-Message-Id' => $messageId,
         ], [
             'id' => $testEvent->id->__toString(),
             'name' => $testEvent->name,

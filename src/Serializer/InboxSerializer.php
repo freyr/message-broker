@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Serializer;
 
+use Freyr\MessageBroker\Stamp\MessageIdStamp;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\MessageDecodingFailedException;
 use Symfony\Component\Messenger\Transport\Serialization\Serializer;
@@ -16,12 +17,17 @@ use Symfony\Component\Serializer\SerializerInterface;
  * - decode(): Semantic name (e.g., 'order.placed') → FQN (e.g., 'App\Message\OrderPlaced')
  * - encode(): FQN → Semantic name (for retry/failed scenarios)
  *
+ * Also manages X-Message-Id header → MessageIdStamp translation,
+ * ensuring the wire format never contains PHP class FQNs for stamps.
+ *
  * Uses Symfony's native @serializer service with all registered normalizers.
  *
  * Usage: Configure on AMQP consumption transports.
  */
 final class InboxSerializer extends Serializer
 {
+    private const MESSAGE_ID_HEADER = 'X-Message-Id';
+
     /**
      * @param SerializerInterface $serializer Symfony's native @serializer service
      * @param array<string, class-string> $messageTypes Mapping: semantic_name => FQN
@@ -41,6 +47,7 @@ final class InboxSerializer extends Serializer
      * 2. Look up FQN in messageTypes mapping
      * 3. Replace 'type' header with FQN for parent decoder
      * 4. Store semantic name in MessageNameStamp for encode()
+     * 5. Read X-Message-Id header and attach MessageIdStamp
      *
      * @param array<string, mixed> $encodedEnvelope
      */
@@ -71,6 +78,14 @@ final class InboxSerializer extends Serializer
         // Replace 'type' header with FQN for parent decode
         $encodedEnvelope['headers']['type'] = $fqn;
 
+        // Extract message ID from semantic header
+        $messageId = isset($headers[self::MESSAGE_ID_HEADER]) && is_string($headers[self::MESSAGE_ID_HEADER])
+            ? $headers[self::MESSAGE_ID_HEADER]
+            : null;
+
+        // Strip auto-generated stamp header so parent doesn't try to deserialise it
+        unset($encodedEnvelope['headers']['X-Message-Stamp-' . MessageIdStamp::class]);
+
         // Decode with FQN
         $envelope = parent::decode($encodedEnvelope);
 
@@ -78,6 +93,11 @@ final class InboxSerializer extends Serializer
         $existingStamp = $envelope->last(MessageNameStamp::class);
         if (!$existingStamp instanceof MessageNameStamp) {
             $envelope = $envelope->with(new MessageNameStamp($semanticName));
+        }
+
+        // Attach MessageIdStamp from X-Message-Id header
+        if ($messageId !== null && !$envelope->last(MessageIdStamp::class) instanceof MessageIdStamp) {
+            $envelope = $envelope->with(new MessageIdStamp($messageId));
         }
 
         return $envelope;
@@ -90,6 +110,7 @@ final class InboxSerializer extends Serializer
      * 1. Let parent encode (produces FQN in 'type' header)
      * 2. Check for MessageNameStamp (added during decode)
      * 3. Replace 'type' header with semantic name
+     * 4. Replace auto-generated X-Message-Stamp-MessageIdStamp with X-Message-Id
      *
      * @return array<string, mixed>
      */
@@ -98,17 +119,25 @@ final class InboxSerializer extends Serializer
         // Parent encode produces FQN in 'type' header
         $encoded = parent::encode($envelope);
 
+        $headers = $encoded['headers'] ?? [];
+
         // Retrieve semantic name from stamp
         $messageNameStamp = $envelope->last(MessageNameStamp::class);
-
         if ($messageNameStamp instanceof MessageNameStamp) {
-            // Replace FQN with semantic name in 'type' header
-            $headers = $encoded['headers'] ?? [];
             $headers['type'] = $messageNameStamp->messageName;
-            $encoded['headers'] = $headers;
         }
+
+        // Replace auto-generated stamp header with semantic X-Message-Id
+        $messageIdStamp = $envelope->last(MessageIdStamp::class);
+        if ($messageIdStamp instanceof MessageIdStamp) {
+            $headers[self::MESSAGE_ID_HEADER] = $messageIdStamp->messageId;
+            unset($headers['X-Message-Stamp-' . MessageIdStamp::class]);
+        }
+
+        $encoded['headers'] = $headers;
 
         /** @var array<string, mixed> $encoded */
         return $encoded;
     }
+
 }

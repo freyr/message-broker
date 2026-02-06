@@ -28,7 +28,6 @@ trait ResolvesFromClass
      * Results are cached in memory per class — reflection runs at most
      * once per class per process.
      *
-     * @return static|null
      */
     protected static function resolve(object $message): ?static
     {

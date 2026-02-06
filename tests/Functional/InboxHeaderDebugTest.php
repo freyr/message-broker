@@ -22,11 +22,7 @@ final class InboxHeaderDebugTest extends FunctionalTestCase
             'test_inbox',
             [
                 'type' => 'test.event.sent',
-                'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([
-                    [
-                        'messageId' => $messageId,
-                    ],
-                ]),
+                'X-Message-Id' => $messageId,
             ],
             [
                 'id' => $testId->__toString(),
@@ -41,12 +37,10 @@ final class InboxHeaderDebugTest extends FunctionalTestCase
         // Then: Verify the actual headers
         $headers = $message['headers']->getNativeData();
 
-        // Verify the MessageIdStamp header exists
-        $this->assertArrayHasKey('X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp', $headers);
+        // Verify the X-Message-Id header exists
+        $this->assertArrayHasKey('X-Message-Id', $headers);
 
-        // Verify it can be decoded
-        $stampData = json_decode($headers['X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp'], true);
-        $this->assertIsArray($stampData);
-        $this->assertEquals($messageId, $stampData[0]['messageId']);
+        // Verify it contains the correct message ID
+        $this->assertEquals($messageId, $headers['X-Message-Id']);
     }
 }

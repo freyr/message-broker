@@ -6,32 +6,28 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Inbox\MessageIdStamp;
+use Freyr\MessageBroker\Stamp\MessageIdStamp;
 
 /**
- * Debug test to inspect InboxSerializer deserialization.
+ * Tests InboxSerializer X-Message-Id header handling.
  */
 final class InboxSerializerDebugTest extends FunctionalTestCase
 {
-    public function testInspectEnvelopeBeforeAndAfterDecode(): void
+    public function testSemanticMessageIdHeaderIsDeserialisedCorrectly(): void
     {
-        // Given: An encoded envelope like AMQP transport provides
+        // Given: An encoded envelope with the semantic header
         $messageId = Id::new()->__toString();
         $testId = Id::new();
 
         $encodedEnvelope = [
             'body' => json_encode([
                 'id' => $testId->__toString(),
-                'name' => 'serializer-debug',
+                'name' => 'semantic-header-test',
                 'timestamp' => CarbonImmutable::now()->toIso8601String(),
             ]),
             'headers' => [
                 'type' => 'test.event.sent',
-                'X-Message-Stamp-Freyr\MessageBroker\Inbox\MessageIdStamp' => json_encode([
-                    [
-                        'messageId' => $messageId,
-                    ],
-                ]),
+                'X-Message-Id' => $messageId,
             ],
         ];
 
@@ -40,10 +36,10 @@ final class InboxSerializerDebugTest extends FunctionalTestCase
             ->get('Freyr\MessageBroker\Serializer\InboxSerializer');
         $envelope = $serializer->decode($encodedEnvelope);
 
-        // Then: Verify MessageIdStamp exists
+        // Then: MessageIdStamp exists (created from X-Message-Id header)
         $messageIdStamp = $envelope->last(MessageIdStamp::class);
 
-        $this->assertNotNull($messageIdStamp, 'MessageIdStamp was not deserialized from headers');
+        $this->assertNotNull($messageIdStamp, 'MessageIdStamp should be created from X-Message-Id header');
         $this->assertEquals($messageId, $messageIdStamp->messageId);
     }
 }
