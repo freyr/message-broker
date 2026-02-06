@@ -69,21 +69,29 @@ composer require freyr/message-broker
 
 ## Testing the Recipe Locally
 
-To test this recipe without publishing:
+Symfony Flex does **not** support `file://` URLs. To test locally, serve the recipe over HTTP
+or use a GitHub repository. See `recipe/TESTING.md` for full details.
 
-1. In your test Symfony project, add this to `composer.json`:
+**Quick approach — local HTTP server:**
+
+1. Build the recipe JSON files (see `recipe/TESTING.md`)
+2. Serve them: `php -S 127.0.0.1:8088` from the recipe directory
+3. In your test project's `composer.json`:
 
 ```json
 {
     "extra": {
         "symfony": {
-            "allow-contrib": true
+            "endpoint": [
+                "http://127.0.0.1:8088/index.json",
+                "flex://defaults"
+            ]
         }
     }
 }
 ```
 
-2. Create a local recipes repository or use Flex's testing features
+4. Run `composer require freyr/message-broker`
 
 ## Recipe Versioning
 

@@ -2,219 +2,270 @@
 
 This guide shows how to test the Symfony Flex recipe before publishing it.
 
-## Method 1: Local Recipe Repository (Recommended)
+> **Important:** Symfony Flex does **not** support `file://` URLs. All recipe endpoints
+> must be served over HTTP/HTTPS.
 
-### Step 1: Create a Local Recipe Server
+## Method 1: Local HTTP Server (Fastest Iteration)
 
-Create a simple local recipe repository structure:
+Serve the recipe JSON files from your machine using PHP's built-in server. No GitHub
+repository required.
+
+### Step 1: Build the Recipe JSON
+
+Flex expects two JSON files in a specific format. Create a directory for them:
 
 ```bash
-mkdir -p ~/symfony-recipes/freyr/message-broker/1.0
-cp -r recipe/1.0/* ~/symfony-recipes/freyr/message-broker/1.0/
+mkdir -p ~/flex-recipes
 ```
 
-### Step 2: Create index.json
-
-Create `~/symfony-recipes/index.json`:
+Create `~/flex-recipes/index.json`:
 
 ```json
 {
     "recipes": {
-        "freyr/message-broker": [
-            "file:///"
-        ]
+        "freyr/message-broker": ["1.0"]
+    },
+    "branch": "main",
+    "is_contrib": true,
+    "_links": {
+        "repository": "localhost",
+        "origin_template": "{package}:{version}@localhost:main",
+        "recipe_template": "http://127.0.0.1:8088/{package_dotted}.{version}.json"
     }
 }
 ```
 
+Create `~/flex-recipes/freyr.message-broker.1.0.json`. This file wraps the manifest and
+inlines all recipe file contents as arrays of lines:
+
+```json
+{
+    "manifests": {
+        "freyr/message-broker": {
+            "manifest": {
+                "bundles": {
+                    "Freyr\\MessageBroker\\FreyrMessageBrokerBundle": ["all"]
+                },
+                "copy-from-recipe": {
+                    "config/": "%CONFIG_DIR%/",
+                    "migrations/": "%MIGRATIONS_DIR%/"
+                },
+                "env": {
+                    "MESSENGER_AMQP_DSN": "amqp://guest:guest@localhost:5672/%2f"
+                }
+            },
+            "files": {
+                "config/packages/message_broker.yaml": {
+                    "contents": [
+                        "message_broker:",
+                        "    inbox:",
+                        "        message_types:",
+                        "            # 'order.placed': 'App\\\\Message\\\\OrderPlaced'"
+                    ],
+                    "executable": false
+                },
+                "config/packages/messenger.yaml": {
+                    "contents": ["... each line of messenger.yaml as a separate element ..."],
+                    "executable": false
+                },
+                "config/packages/doctrine.yaml": {
+                    "contents": ["... each line of doctrine.yaml as a separate element ..."],
+                    "executable": false
+                },
+                "migrations/Version20250103000001.php": {
+                    "contents": ["... each line of the migration file ..."],
+                    "executable": false
+                }
+            },
+            "ref": "REPLACE_WITH_RANDOM_HEX"
+        }
+    }
+}
+```
+
+Generate a `ref` value:
+
+```bash
+php -r "echo bin2hex(random_bytes(20)) . PHP_EOL;"
+```
+
+### Step 2: Start the Server
+
+```bash
+cd ~/flex-recipes
+php -S 127.0.0.1:8088
+```
+
 ### Step 3: Configure Test Project
 
-In your test Symfony project, add to `composer.json`:
+In your test Symfony project's `composer.json`:
 
 ```json
 {
     "extra": {
         "symfony": {
             "endpoint": [
-                "file:///Users/YOUR_USERNAME/symfony-recipes/index.json",
+                "http://127.0.0.1:8088/index.json",
                 "flex://defaults"
-            ],
-            "allow-contrib": true
+            ]
         }
     }
 }
 ```
 
-### Step 4: Test Installation
+### Step 4: Install and Iterate
 
 ```bash
-cd your-test-project
 composer require freyr/message-broker
+
+# Re-install after changing the recipe (regenerate ref first)
+composer recipes:install freyr/message-broker --force
 ```
 
-### Step 5: Verify
+## Method 2: Private GitHub Repository (Recommended for CI/Team Use)
 
-Check that these files were created:
-- `config/bundles.php` - Bundle registered
-- `config/packages/message_broker.yaml` - Configuration created
-- `config/packages/messenger.yaml` - Messenger config created
-- `migrations/Version20250103000000.php` - Migration copied
-- `.env` - `MESSENGER_AMQP_DSN` added
+Host recipes in a GitHub repository with automatic JSON generation via a GitHub Action.
 
-## Method 2: Using Symfony Recipes Test Server
+### Step 1: Create a GitHub Repository
 
-### Prerequisites
+Create a repository (e.g., `freyr/recipes`) with this structure on the `main` branch:
 
-```bash
-composer global require symfony/flex
-git clone https://github.com/symfony/recipes-contrib.git
+```
+freyr/
+  message-broker/
+    1.0/
+      manifest.json
+      config/
+        packages/
+          message_broker.yaml
+          messenger.yaml
+          doctrine.yaml
+      migrations/
+        Version20250103000001.php
 ```
 
-### Setup
+### Step 2: Add the Flex Update GitHub Action
 
-1. Copy recipe to contrib repository:
+Create `.github/workflows/flex-update.yml`:
 
-```bash
-cd symfony-recipes-contrib
-mkdir -p freyr/message-broker/1.0
-cp -r /path/to/messenger/recipe/1.0/* freyr/message-broker/1.0/
+```yaml
+name: Update Flex endpoint
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  call-flex-update:
+    uses: symfony/recipes/.github/workflows/callable-flex-update.yml@main
+    with:
+      versions_json: .github/versions.json
 ```
 
-2. Start local recipe server:
+This action reads `manifest.json` files from `main`, generates the machine-readable JSON
+format, and pushes it to a `flex/main` branch automatically.
 
-```bash
-symfony local:server:start --recipe-server
-```
-
-3. Configure test project to use local server:
+### Step 3: Configure the Consumer Project
 
 ```json
 {
     "extra": {
         "symfony": {
-            "endpoint": "http://127.0.0.1:8000",
-            "allow-contrib": true
+            "endpoint": [
+                "https://api.github.com/repos/freyr/recipes/contents/index.json",
+                "flex://defaults"
+            ]
         }
     }
 }
 ```
 
-## Method 3: Direct Testing (Quick & Dirty)
+> **Note:** The URL must use `https://api.github.com/repos/...` — not `github.com` or
+> `raw.githubusercontent.com`.
 
-For quick testing without a recipe server:
+### Step 4: Install
 
-### Step 1: Manually Install Bundle
+```bash
+composer require freyr/message-broker
+```
+
+## Method 3: Manual File Copy (Quick Smoke Test)
+
+For a quick check that recipe files are valid, without testing Flex itself:
 
 ```bash
 cd your-test-project
-composer require freyr/message-broker --no-scripts
-```
 
-### Step 2: Manually Run Recipe Tasks
-
-```bash
 # Copy config files
-cp vendor/freyr/message-broker/recipe/1.0/config/packages/message_broker.yaml config/packages/
-cp vendor/freyr/message-broker/recipe/1.0/config/packages/messenger.yaml config/packages/
+cp vendor/freyr/message-broker/recipe/1.0/config/packages/*.yaml config/packages/
 
 # Copy migration
-cp vendor/freyr/message-broker/recipe/1.0/migrations/Version20250103000000.php migrations/
+cp vendor/freyr/message-broker/recipe/1.0/migrations/*.php migrations/
 
 # Add env variable
-echo "\n# Message Broker\nMESSENGER_AMQP_DSN=amqp://guest:guest@localhost:5672/%2f" >> .env
+echo "MESSENGER_AMQP_DSN=amqp://guest:guest@localhost:5672/%2f" >> .env
+
+# Register the bundle manually in config/bundles.php
 ```
 
-### Step 3: Verify Everything Works
+This does **not** test Flex recipe execution — only that the shipped files work in a real
+application.
 
-```bash
-# Run migration
-php bin/console doctrine:migrations:migrate
+## Useful Commands
 
-# Check services are registered
-php bin/console debug:container | grep MessageBroker
-
-# Try to start consumers
-php bin/console messenger:consume --help
-```
+| Command | Purpose |
+|---------|---------|
+| `composer recipes` | List installed recipes and check for updates |
+| `composer recipes:install freyr/message-broker --force` | Re-install a recipe (overwrites files) |
+| `composer require freyr/message-broker -vvv` | Verbose output for debugging recipe resolution |
 
 ## Validation Checklist
 
-After testing installation, verify:
+After installation, verify:
 
-### ✅ Configuration Files
+### Configuration Files
 
 - [ ] `config/packages/message_broker.yaml` exists
-- [ ] `config/packages/messenger.yaml` exists (or merged correctly)
-- [ ] Configuration syntax is valid: `php bin/console debug:config message_broker`
+- [ ] `config/packages/messenger.yaml` exists
+- [ ] `config/packages/doctrine.yaml` has `id_binary` type registered
+- [ ] Configuration is valid: `php bin/console debug:config message_broker`
 
-### ✅ Database
+### Database
 
 - [ ] Migration file in `migrations/` directory
-- [ ] Migration runs successfully: `php bin/console doctrine:migrations:migrate`
-- [ ] Tables created: `messenger_outbox`, `message_broker_deduplication`, `messenger_messages`
+- [ ] Migration runs: `php bin/console doctrine:migrations:migrate`
+- [ ] `message_broker_deduplication` table created
 
-### ✅ Services
+### Services
 
 - [ ] Bundle registered in `config/bundles.php`
-- [ ] Transport factories registered: `php bin/console debug:container | grep TransportFactory`
-- [ ] Serializers registered: `php bin/console debug:container | grep Serializer`
+- [ ] Serialisers registered: `php bin/console debug:container | grep Serializer`
 
-### ✅ Messenger
+### Messenger
 
 - [ ] Transports configured: `php bin/console debug:messenger`
-- [ ] Can list transports: `outbox`, `amqp`, `failed`
+- [ ] Transports listed: `outbox`, `amqp`, `failed`
 
-### ✅ Environment
+### Environment
 
-- [ ] `MESSENGER_AMQP_DSN` in `.env` file
-- [ ] Can read env: `php bin/console debug:container --env-vars | grep MESSENGER`
-
-### ✅ Documentation
-
-- [ ] Post-install message is helpful
-- [ ] README is accessible in `vendor/freyr/message-broker/README.md`
-- [ ] Examples can be followed
+- [ ] `MESSENGER_AMQP_DSN` in `.env`
+- [ ] Readable: `php bin/console debug:container --env-vars | grep MESSENGER`
 
 ## Testing Uninstallation
 
-Flex should reverse all recipe actions:
+Flex should reverse recipe actions on removal:
 
 ```bash
 composer remove freyr/message-broker
 ```
 
-Verify these are removed:
-- Bundle from `config/bundles.php`
-- Configuration files (if added by recipe)
-- **Note:** Migrations and `.env` changes are typically NOT removed
+Verify:
+- Bundle removed from `config/bundles.php`
+- Configuration files removed
+- **Note:** Migrations and `.env` changes are typically **not** removed
 
-## Common Issues
+## References
 
-### Issue: Recipe Not Executing
-
-**Cause:** Flex not detecting recipe
-**Solution:** Clear Flex cache: `composer symfony:recipes:install --force --reset`
-
-### Issue: Config Files Not Copied
-
-**Cause:** `copy-from-recipe` path incorrect
-**Solution:** Verify paths in `manifest.json` use correct variables:
-- `%CONFIG_DIR%` → `config/`
-- `%MIGRATIONS_DIR%` → `migrations/`
-
-### Issue: Bundle Not Registered
-
-**Cause:** `bundles` configurator not working
-**Solution:** Check bundle class name in `manifest.json` matches exactly
-
-## Next Steps
-
-Once testing is successful:
-
-1. ✅ All validation checks pass
-2. ✅ Installation works on fresh Symfony 6.4 project
-3. ✅ Installation works on fresh Symfony 7.0 project
-4. ✅ Uninstallation cleans up correctly
-5. ✅ Ready to submit to symfony/recipes-contrib
-
-See `CONTRIBUTING.md` for submission instructions.
+- [Symfony Flex Private Recipes](https://symfony.com/doc/current/setup/flex_private_recipes.html)
+- [symfony/recipes Repository](https://github.com/symfony/recipes)
+- [symfony/flex Downloader Source](https://github.com/symfony/flex/blob/2.x/src/Downloader.php)
