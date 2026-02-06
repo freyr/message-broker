@@ -96,8 +96,8 @@ doctrine:
             FreyrMessageBroker:
                 is_bundle: false
                 type: attribute
-                dir: '%kernel.project_dir%/src/Entity'
-                prefix: 'Freyr\MessageBroker\Entity'
+                dir: '%kernel.project_dir%/tests/Functional/Entity'
+                prefix: 'Freyr\MessageBroker\Tests\Functional\Entity'
                 alias: FreyrMessageBroker
 
 message_broker:
