@@ -22,7 +22,7 @@ use Symfony\Component\Messenger\Stamp\ReceivedStamp;
  * Tests the full message flow:
  * 1. Publish to outbox transport
  * 2. OutboxToAmqpBridge consumes from outbox and republishes to AMQP
- * 3. Consume from AMQP with MessageNameSerializer (semantic name → FQN)
+ * 3. Consume from AMQP with InboxSerializer (semantic name → FQN)
  * 4. DeduplicationMiddleware checks MessageIdStamp
  * 5. Handler receives typed message
  * 6. Duplicate messages are rejected
@@ -191,7 +191,7 @@ final class InboxFlowTest extends TestCase
         $this->assertEquals(1, $context->deduplicationStore->getDuplicateCount(), 'Duplicate should be detected');
     }
 
-    public function testMessageNameSerializerTranslatesSemanticNameToFqn(): void
+    public function testInboxSerializerTranslatesSemanticNameToFqn(): void
     {
         // Given: Inbox flow setup
         $handledMessages = [];

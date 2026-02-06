@@ -15,13 +15,13 @@ use PHPUnit\Framework\TestCase;
  * Unit test for transport-specific serializer usage.
  *
  * Tests that:
- * - Outbox transport uses MessageNameSerializer (semantic names in type header)
- * - AMQP transport uses standard Symfony serializer (FQN in type header)
- * - This ensures MessageNameSerializer is only triggered for outbox messages
+ * - Outbox transport uses OutboxSerializer (semantic names in type header)
+ * - AMQP transport uses standard Symfony serialiser (FQN in type header)
+ * - This ensures OutboxSerializer is only triggered for outbox messages
  */
 final class TransportSerializerTest extends TestCase
 {
-    public function testOutboxTransportUsesMessageNameSerializer(): void
+    public function testOutboxTransportUsesOutboxSerializer(): void
     {
         // Given: EventBus with message routed to outbox
         $context = EventBusFactory::createForOutboxTesting(
@@ -38,7 +38,7 @@ final class TransportSerializerTest extends TestCase
         // When: Message is dispatched
         $context->bus->dispatch($message);
 
-        // Then: Message should be serialized with MessageNameSerializer
+        // Then: Message should be serialised with OutboxSerializer
         $serialized = $context->outboxTransport->getLastSerialized();
         $this->assertNotNull($serialized);
 
@@ -46,7 +46,7 @@ final class TransportSerializerTest extends TestCase
         $this->assertEquals(
             'test.message.sent',
             $serialized['headers']['type'],
-            'Outbox transport should use MessageNameSerializer - type header should be semantic name'
+            'Outbox transport should use OutboxSerializer — type header should be semantic name'
         );
 
         $this->assertNotEquals(
@@ -151,7 +151,7 @@ final class TransportSerializerTest extends TestCase
         );
     }
 
-    public function testMessageNameSerializerOnlyTriggeredForOutbox(): void
+    public function testOutboxSerializerOnlyTriggeredForOutbox(): void
     {
         // Given: Multiple messages with MessageName attributes
         $context = EventBusFactory::createForOutboxTesting(

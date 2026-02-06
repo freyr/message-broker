@@ -29,7 +29,7 @@ use Symfony\Component\Serializer\Serializer;
  *
  * Creates a complete Messenger setup programmatically without YAML configuration:
  * - In-memory transports (outbox, amqp)
- * - MessageNameSerializer with custom normalizers
+ * - OutboxSerializer/InboxSerializer with custom normalizers
  * - Routing configuration
  * - Middleware chain
  */

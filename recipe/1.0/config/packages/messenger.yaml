@@ -19,9 +19,10 @@ framework:
 
         transports:
             # Outbox transport - AUTO-MANAGED (auto_setup: true)
+            # No custom serialiser needed — messages are native PHP objects
+            # OutboxToAmqpBridge consumes from this transport
             outbox:
                 dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
-                serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
                 options:
                     auto_setup: true
                 retry_strategy:
@@ -29,14 +30,29 @@ framework:
                   delay: 1000
                   multiplier: 2
 
-
-            # AMQP transport - MANUAL MANAGEMENT (auto_setup: false)
-            # Infrastructure managed by operations/IaC
+            # AMQP publish transport - MANUAL MANAGEMENT (auto_setup: false)
+            # OutboxToAmqpBridge publishes here
+            # Uses OutboxSerializer to translate FQN → semantic name in 'type' header
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
-                serializer: 'Freyr\MessageBroker\Serializer\MessageNameSerializer'
+                serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
                 options:
                     auto_setup: false
+                retry_strategy:
+                  max_retries: 3
+                  delay: 1000
+                  multiplier: 2
+
+            # AMQP consumption transport - MANUAL MANAGEMENT (auto_setup: false)
+            # Uses InboxSerializer to translate semantic name → FQN
+            # Duplicate and rename for each queue your application consumes from
+            amqp_orders:
+                dsn: '%env(MESSENGER_AMQP_DSN)%'
+                serializer: 'Freyr\MessageBroker\Serializer\InboxSerializer'
+                options:
+                    auto_setup: false
+                    queue:
+                        name: 'orders_queue'
                 retry_strategy:
                   max_retries: 3
                   delay: 1000
@@ -55,9 +71,9 @@ framework:
             # 'App\Domain\Event\UserRegistered': outbox
 
             # Inbox messages (consumed from AMQP transports)
-            # Messages are deserialized by MessageNameSerializer into typed objects
+            # Messages are deserialised by InboxSerializer into typed objects
             # DeduplicationMiddleware automatically prevents duplicate processing
-            # Handlers execute synchronously (no routing needed - AMQP transport handles delivery)
+            # Handlers execute synchronously (no routing needed — AMQP transport handles delivery)
             # Example handlers:
             # #[AsMessageHandler]
             # class OrderPlacedHandler { public function __invoke(OrderPlaced $message) {} }
