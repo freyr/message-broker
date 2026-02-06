@@ -9,6 +9,33 @@ on:
       - develop
 
 jobs:
+  ecs:
+    name: ECS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
+      - run: vendor/bin/ecs check
+
+  phpstan:
+    name: PHPStan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: amqp
+          coverage: none
+          tools: composer:v2
+      - run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
+      - run: vendor/bin/phpstan analyse --memory-limit=-1
+
   tests:
     name: PHP ${{ matrix.php }} - ${{ matrix.stability }}
     runs-on: ubuntu-latest
