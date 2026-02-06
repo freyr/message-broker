@@ -8,9 +8,12 @@ use Doctrine\DBAL\Schema\Schema;
 use Doctrine\Migrations\AbstractMigration;
 
 /**
- * Auto-generated Migration: Message Broker Deduplication table
+ * Auto-generated Migration: Message Broker Deduplication table.
  *
  * Creates deduplication tracking table with binary UUID v7 for middleware-based deduplication.
+ *
+ * The table name must match the `message_broker.inbox.deduplication_table_name`
+ * configuration value (defaults to 'message_broker_deduplication').
  */
 final class Version20250103000001 extends AbstractMigration
 {

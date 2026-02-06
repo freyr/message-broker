@@ -6,3 +6,6 @@ message_broker:
             # Examples:
             # 'order.placed': 'App\Message\OrderPlaced'
             # 'user.registered': 'App\Message\UserRegistered'
+
+        # Table name for deduplication tracking (must match migration)
+        # deduplication_table_name: 'message_broker_deduplication'

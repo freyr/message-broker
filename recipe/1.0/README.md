@@ -22,7 +22,7 @@ recipe/1.0/
 │   ├── message_broker.yaml                 # Bundle configuration
 │   └── messenger.yaml                      # Messenger transports
 ├── migrations/
-│   └── Version20250103000000.php           # Database tables migration
+│   └── Version20250103000001.php           # Deduplication table migration
 └── README.md                               # This file
 ```
 
@@ -107,10 +107,10 @@ To test this recipe without publishing:
 
 ### Database Migration
 
-**migrations/Version20250103000000.php:**
-- Creates `messenger_outbox` table (binary UUID v7)
+**migrations/Version20250103000001.php:**
 - Creates `message_broker_deduplication` table (binary UUID v7 for deduplication)
-- Creates `messenger_messages` table (standard for failed messages)
+- Table name must match `message_broker.inbox.deduplication_table_name` config
+- Other tables (`messenger_outbox`, `messenger_messages`) are auto-managed by Symfony
 
 ### Environment Variables
 
