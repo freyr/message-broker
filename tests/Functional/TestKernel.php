@@ -44,11 +44,15 @@ final class TestKernel extends Kernel
         // - PHP 8.2–8.3: lazy ghost objects via symfony/var-exporter LazyGhostTrait
         if (\PHP_VERSION_ID >= 80400) {
             $container->loadFromExtension('doctrine', [
-                'orm' => ['enable_native_lazy_objects' => true],
+                'orm' => [
+                    'enable_native_lazy_objects' => true,
+                ],
             ]);
         } else {
             $container->loadFromExtension('doctrine', [
-                'orm' => ['enable_lazy_ghost_objects' => true],
+                'orm' => [
+                    'enable_lazy_ghost_objects' => true,
+                ],
             ]);
         }
     }
