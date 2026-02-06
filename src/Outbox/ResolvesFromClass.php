@@ -27,7 +27,6 @@ trait ResolvesFromClass
      * Returns the attribute instance if present, null otherwise.
      * Results are cached in memory per class — reflection runs at most
      * once per class per process.
-     *
      */
     protected static function resolve(object $message): ?static
     {

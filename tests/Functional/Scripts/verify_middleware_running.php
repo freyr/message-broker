@@ -12,7 +12,7 @@ require __DIR__.'/../../../vendor/autoload.php';
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Tests\Functional\Fixtures\TestEventHandler;
-use Freyr\MessageBroker\Tests\Functional\{FunctionalTestCase};
+use Freyr\MessageBroker\Tests\Functional\FunctionalTestCase;
 
 class MiddlewareTest extends FunctionalTestCase
 {

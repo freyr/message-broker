@@ -58,7 +58,8 @@ $eventDispatcher = new EventDispatcher();
 $eventDispatcher->addSubscriber(new StopWorkerOnMessageLimitListener(1, $kernel->getContainer()->get('logger')));
 $worker = new Worker([
     'amqp_test' => $receiver,
-], $bus, $eventDispatcher, $kernel->getContainer()->get('logger'));
+], $bus, $eventDispatcher, $kernel->getContainer()
+    ->get('logger'));
 $worker->run();
 echo "✓ Consumed message\n";
 

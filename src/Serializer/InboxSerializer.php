@@ -84,7 +84,7 @@ final class InboxSerializer extends Serializer
             : null;
 
         // Strip auto-generated stamp header so parent doesn't try to deserialise it
-        unset($encodedEnvelope['headers']['X-Message-Stamp-' . MessageIdStamp::class]);
+        unset($encodedEnvelope['headers']['X-Message-Stamp-'.MessageIdStamp::class]);
 
         // Decode with FQN
         $envelope = parent::decode($encodedEnvelope);
@@ -131,7 +131,7 @@ final class InboxSerializer extends Serializer
         $messageIdStamp = $envelope->last(MessageIdStamp::class);
         if ($messageIdStamp instanceof MessageIdStamp) {
             $headers[self::MESSAGE_ID_HEADER] = $messageIdStamp->messageId;
-            unset($headers['X-Message-Stamp-' . MessageIdStamp::class]);
+            unset($headers['X-Message-Stamp-'.MessageIdStamp::class]);
         }
 
         $encoded['headers'] = $headers;
@@ -139,5 +139,4 @@ final class InboxSerializer extends Serializer
         /** @var array<string, mixed> $encoded */
         return $encoded;
     }
-
 }

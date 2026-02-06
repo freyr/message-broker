@@ -94,9 +94,10 @@ abstract class FunctionalTestCase extends KernelTestCase
 
         // SAFETY CHECK: Only run on test databases
         if (!str_contains($dbname, '_test')) {
-            throw new \RuntimeException(
-                sprintf('SAFETY CHECK FAILED: Database must contain "_test" in name. Got: %s', $dbname)
-            );
+            throw new \RuntimeException(sprintf(
+                'SAFETY CHECK FAILED: Database must contain "_test" in name. Got: %s',
+                $dbname
+            ));
         }
 
         try {
@@ -105,7 +106,7 @@ abstract class FunctionalTestCase extends KernelTestCase
             $retryDelay = 1;
             $pdo = null;
 
-            for ($i = 0; $i < $maxRetries; $i++) {
+            for ($i = 0; $i < $maxRetries; ++$i) {
                 try {
                     $pdo = new \PDO(
                         sprintf('mysql:host=%s;port=%d;dbname=%s', $host, $port, $dbname),
@@ -119,9 +120,11 @@ abstract class FunctionalTestCase extends KernelTestCase
                     break;
                 } catch (\PDOException $e) {
                     if ($i === $maxRetries - 1) {
-                        throw new \RuntimeException(
-                            sprintf('Failed to connect to database after %d attempts: %s', $maxRetries, $e->getMessage())
-                        );
+                        throw new \RuntimeException(sprintf(
+                            'Failed to connect to database after %d attempts: %s',
+                            $maxRetries,
+                            $e->getMessage()
+                        ));
                     }
                     sleep($retryDelay);
                 }
@@ -146,10 +149,7 @@ abstract class FunctionalTestCase extends KernelTestCase
                 throw new \RuntimeException('Schema applied but message_broker_deduplication table not found');
             }
         } catch (\Throwable $e) {
-            throw new \RuntimeException(
-                sprintf('Failed to setup database schema: %s', $e->getMessage()),
-                previous: $e
-            );
+            throw new \RuntimeException(sprintf('Failed to setup database schema: %s', $e->getMessage()), previous: $e);
         }
     }
 
