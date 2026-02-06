@@ -62,7 +62,6 @@ final class OutboxSerializer extends Serializer
 
         // Preserve FQN and replace 'type' with semantic name
         $headers = $encoded['headers'] ?? [];
-        assert(is_array($headers));
         $headers['X-Message-Class'] = $fqn;         // Preserve FQN for decode()
         $headers['type'] = $semanticName;           // Replace with semantic name
         $encoded['headers'] = $headers;
@@ -85,7 +84,6 @@ final class OutboxSerializer extends Serializer
     public function decode(array $encodedEnvelope): Envelope
     {
         $headers = $encodedEnvelope['headers'] ?? [];
-        assert(is_array($headers));
 
         $semanticName = $headers['type'] ?? null;
         $fqn = $headers['X-Message-Class'] ?? null;

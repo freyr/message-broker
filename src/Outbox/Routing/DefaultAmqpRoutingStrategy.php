@@ -36,13 +36,8 @@ final readonly class DefaultAmqpRoutingStrategy implements AmqpRoutingStrategyIn
      */
     public function getHeaders(string $messageName): array
     {
-        $parts = explode('.', $messageName);
-
         return [
             'x-message-name' => $messageName,
-            'x-message-domain' => $parts[0],
-            'x-message-subdomain' => $parts[1] ?? 'unknown',
-            'x-message-action' => $parts[2] ?? 'unknown',
         ];
     }
 }

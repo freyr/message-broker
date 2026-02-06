@@ -285,15 +285,15 @@ provides atomicity — and the lock duration depends on handler execution time, 
 
 ## Priority Action Items
 
-| #  | Severity | Action                                                                   | Effort  |
-|----|----------|--------------------------------------------------------------------------|---------|
-| 1  | Critical | Fix recipe serialiser class references                                   | Small   |
-| 2  | High     | Extract shared `extractMessageName()` utility                            | Small   |
-| 3  | High     | Add `final` to `DeduplicationMiddleware` and `DeduplicationStoreCleanup` | Trivial |
-| 4  | High     | Inject `@logger` into `DeduplicationMiddleware` service definition       | Trivial |
-| 5  | High     | Document/harmonise middleware registration between bundle and tests      | Medium  |
-| 6  | Medium   | Move `MessageIdStamp` to shared namespace                                | Small   |
-| 7  | Medium   | Replace `assert()` with explicit exceptions in serialisers               | Small   |
-| 8  | Medium   | Move `php-amqplib` to `require-dev`                                      | Trivial |
-| 9  | Medium   | Make deduplication table name configurable                               | Medium  |
-| 10 | Medium   | Simplify speculative AMQP headers                                        | Small   |
+| #  | Severity | Action                                                                   | Effort  | Status   |
+|----|----------|--------------------------------------------------------------------------|---------|----------|
+| 1  | Critical | Fix recipe serialiser class references                                   | Small   | RESOLVED |
+| 2  | High     | Extract shared `extractMessageName()` utility                            | Small   | RESOLVED |
+| 3  | High     | Add `final` to `DeduplicationMiddleware` and `DeduplicationStoreCleanup` | Trivial | RESOLVED |
+| 4  | High     | Inject `@logger` into `DeduplicationMiddleware` service definition       | Trivial | RESOLVED |
+| 5  | High     | Document/harmonise middleware registration between bundle and tests      | Medium  | RESOLVED |
+| 6  | Medium   | Move `MessageIdStamp` to shared namespace                                | Small   | DEFERRED |
+| 7  | Medium   | Replace `assert()` with explicit exceptions in serialisers               | Small   | RESOLVED |
+| 8  | Medium   | Move `php-amqplib` to `require-dev`                                      | Trivial | RESOLVED |
+| 9  | Medium   | Make deduplication table name configurable                               | Medium  |          |
+| 10 | Medium   | Simplify speculative AMQP headers                                        | Small   | RESOLVED |

@@ -47,15 +47,16 @@ final class InboxSerializer extends Serializer
     public function decode(array $encodedEnvelope): Envelope
     {
         $headers = $encodedEnvelope['headers'] ?? [];
-        assert(is_array($headers));
+
+        if (!is_array($headers)) {
+            throw new MessageDecodingFailedException('Encoded envelope headers must be an array.');
+        }
 
         $semanticName = $headers['type'] ?? null;
 
-        if (empty($semanticName)) {
+        if (!is_string($semanticName) || $semanticName === '') {
             throw new MessageDecodingFailedException('Encoded envelope does not have a "type" header.');
         }
-
-        assert(is_string($semanticName));
 
         // Look up FQN from semantic name
         $fqn = $this->messageTypes[$semanticName] ?? null;
@@ -103,7 +104,6 @@ final class InboxSerializer extends Serializer
         if ($messageNameStamp instanceof MessageNameStamp) {
             // Replace FQN with semantic name in 'type' header
             $headers = $encoded['headers'] ?? [];
-            assert(is_array($headers));
             $headers['type'] = $messageNameStamp->messageName;
             $encoded['headers'] = $headers;
         }

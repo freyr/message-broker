@@ -6,15 +6,17 @@ framework:
 
         buses:
             messenger.bus.default:
-                # Middleware configuration
-                # DeduplicationMiddleware runs AFTER doctrine_transaction (priority -10)
-                # This ensures deduplication INSERT is within the transaction
+                # Note: DeduplicationMiddleware is listed explicitly here because
+                # the test kernel's service definitions duplicate bundle config.
+                # In production, the bundle's services.yaml registers it via
+                # messenger.middleware tag (priority -10). Both approaches produce
+                # the same middleware ordering.
                 default_middleware:
                     enabled: true
                     allow_no_handlers: false
                 middleware:
-                    - doctrine_transaction  # Priority 0 (starts transaction)
-                    - 'Freyr\MessageBroker\Inbox\DeduplicationMiddleware'  # Priority -10 (runs after transaction starts)
+                    - doctrine_transaction
+                    - 'Freyr\MessageBroker\Inbox\DeduplicationMiddleware'
 
         transports:
             # Outbox transport - AUTO-MANAGED (auto_setup: true)
