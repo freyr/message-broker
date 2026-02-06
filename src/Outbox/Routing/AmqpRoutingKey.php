@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Outbox\Routing;
 
 use Attribute;
+use ReflectionClass;
 
 /**
  * AMQP Routing Key Attribute.
@@ -24,9 +25,39 @@ use Attribute;
  * ```
  */
 #[Attribute(Attribute::TARGET_CLASS)]
-final readonly class AmqpRoutingKey
+final class AmqpRoutingKey
 {
+    /** @var array<class-string, string|null> */
+    private static array $cache = [];
+
     public function __construct(
-        public string $key,
+        public readonly string $key,
     ) {}
+
+    /**
+     * Extract the routing key from an object's #[AmqpRoutingKey] attribute.
+     *
+     * Returns null if the attribute is not present (caller should use default).
+     * Results are cached in memory per class.
+     */
+    public static function fromClass(object $message): ?string
+    {
+        $class = $message::class;
+
+        if (array_key_exists($class, self::$cache)) {
+            return self::$cache[$class];
+        }
+
+        $reflection = new ReflectionClass($message);
+        $attributes = $reflection->getAttributes(self::class);
+
+        if ($attributes === []) {
+            return self::$cache[$class] = null;
+        }
+
+        /** @var self $attribute */
+        $attribute = $attributes[0]->newInstance();
+
+        return self::$cache[$class] = $attribute->key;
+    }
 }

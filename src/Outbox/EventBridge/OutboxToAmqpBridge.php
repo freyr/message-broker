@@ -9,8 +9,6 @@ use Freyr\MessageBroker\Inbox\MessageIdStamp;
 use Freyr\MessageBroker\Outbox\MessageName;
 use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface;
 use Psr\Log\LoggerInterface;
-use ReflectionClass;
-use RuntimeException;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
 use Symfony\Component\Messenger\Envelope;
@@ -36,8 +34,8 @@ final readonly class OutboxToAmqpBridge
     #[AsMessageHandler(fromTransport: 'outbox')]
     public function __invoke(OutboxMessage $event): void
     {
-        // Extract message name
-        $messageName = $this->extractMessageName($event);
+        // Extract message name (cached per class)
+        $messageName = MessageName::fromClass($event);
 
         // Generate messageId for this publishing (UUID v7 for ordering)
         $messageId = Id::new();
@@ -64,20 +62,5 @@ final readonly class OutboxToAmqpBridge
         ]);
 
         $this->eventBus->dispatch($envelope);
-    }
-
-    private function extractMessageName(OutboxMessage $event): string
-    {
-        $reflection = new ReflectionClass($event);
-        $attributes = $reflection->getAttributes(MessageName::class);
-
-        if (empty($attributes)) {
-            throw new RuntimeException(sprintf('Event %s must have #[MessageName] attribute', $event::class));
-        }
-
-        /** @var MessageName $messageNameAttribute */
-        $messageNameAttribute = $attributes[0]->newInstance();
-
-        return $messageNameAttribute->name;
     }
 }

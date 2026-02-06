@@ -47,8 +47,8 @@ final class OutboxSerializer extends Serializer
         $message = $envelope->getMessage();
         $fqn = $message::class;
 
-        // Extract semantic name from #[MessageName] attribute
-        $semanticName = $this->extractMessageName($message);
+        // Extract semantic name from #[MessageName] attribute (cached per class)
+        $semanticName = MessageName::fromClass($message);
 
         // Add MessageNameStamp if not present (avoid duplicates on retry)
         $existingStamp = $envelope->last(MessageNameStamp::class);
@@ -107,23 +107,5 @@ final class OutboxSerializer extends Serializer
         }
 
         return $envelope;
-    }
-
-    private function extractMessageName(object $message): string
-    {
-        $reflection = new \ReflectionClass($message);
-        $attributes = $reflection->getAttributes(MessageName::class);
-
-        if (empty($attributes)) {
-            throw new \RuntimeException(sprintf(
-                'Producer message %s must have #[MessageName] attribute',
-                $message::class
-            ));
-        }
-
-        /** @var MessageName $messageNameAttr */
-        $messageNameAttr = $attributes[0]->newInstance();
-
-        return $messageNameAttr->name;
     }
 }

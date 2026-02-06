@@ -4,12 +4,10 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Outbox\Routing;
 
-use ReflectionClass;
-
 /**
  * Default AMQP Routing Strategy.
  *
- * Routes messages based on default symfony messenger behavior.
+ * Routes messages based on default Symfony Messenger behaviour.
  * Exchange is statically configured in the transport.
  *
  * Routing key is determined by the message name:
@@ -25,32 +23,12 @@ final readonly class DefaultAmqpRoutingStrategy implements AmqpRoutingStrategyIn
 {
     public function getTransport(object $event): string
     {
-        $reflection = new ReflectionClass($event);
-        $attributes = $reflection->getAttributes(MessengerTransport::class);
-
-        if (!empty($attributes)) {
-            /** @var MessengerTransport $exchangeAttr */
-            $exchangeAttr = $attributes[0]->newInstance();
-
-            return $exchangeAttr->name;
-        }
-
-        return 'amqp';
+        return MessengerTransport::fromClass($event) ?? 'amqp';
     }
 
     public function getRoutingKey(object $event, string $messageName): string
     {
-        $reflection = new ReflectionClass($event);
-        $attributes = $reflection->getAttributes(AmqpRoutingKey::class);
-
-        if (!empty($attributes)) {
-            /** @var AmqpRoutingKey $routingKeyAttr */
-            $routingKeyAttr = $attributes[0]->newInstance();
-
-            return $routingKeyAttr->key;
-        }
-
-        return $messageName;
+        return AmqpRoutingKey::fromClass($event) ?? $messageName;
     }
 
     /**
