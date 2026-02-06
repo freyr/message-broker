@@ -153,6 +153,7 @@ services:
         public: true
         arguments:
             $connection: '@doctrine.dbal.default_connection'
+            $tableName: '%message_broker.inbox.deduplication_table_name%'
             $logger: '@logger'
 
     # Deduplication Middleware

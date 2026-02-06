@@ -292,8 +292,8 @@ provides atomicity — and the lock duration depends on handler execution time, 
 | 3  | High     | Add `final` to `DeduplicationMiddleware` and `DeduplicationStoreCleanup` | Trivial | RESOLVED |
 | 4  | High     | Inject `@logger` into `DeduplicationMiddleware` service definition       | Trivial | RESOLVED |
 | 5  | High     | Document/harmonise middleware registration between bundle and tests      | Medium  | RESOLVED |
-| 6  | Medium   | Move `MessageIdStamp` to shared namespace                                | Small   | DEFERRED |
+| 6  | Medium   | Move `MessageIdStamp` to shared namespace                                | Small   | RESOLVED |
 | 7  | Medium   | Replace `assert()` with explicit exceptions in serialisers               | Small   | RESOLVED |
 | 8  | Medium   | Move `php-amqplib` to `require-dev`                                      | Trivial | RESOLVED |
-| 9  | Medium   | Make deduplication table name configurable                               | Medium  |          |
+| 9  | Medium   | Make deduplication table name configurable                               | Medium  | RESOLVED |
 | 10 | Medium   | Simplify speculative AMQP headers                                        | Small   | RESOLVED |

@@ -16,6 +16,7 @@ final class DeduplicationStoreCleanup extends Command
 {
     public function __construct(
         private Connection $connection,
+        private string $tableName = 'message_broker_deduplication',
     ) {
         parent::__construct();
     }
@@ -30,8 +31,7 @@ final class DeduplicationStoreCleanup extends Command
         $days = (int) $input->getOption('days');
 
         $deleted = $this->connection->executeStatement(
-            'DELETE FROM message_broker_deduplication
-             WHERE processed_at < DATE_SUB(NOW(), INTERVAL ? DAY)',
+            sprintf('DELETE FROM %s WHERE processed_at < DATE_SUB(NOW(), INTERVAL ? DAY)', $this->tableName),
             [$days]
         );
 

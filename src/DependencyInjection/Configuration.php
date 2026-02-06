@@ -32,6 +32,11 @@ final class Configuration implements ConfigurationInterface
             ->scalarPrototype()
             ->end()
             ->end()
+            ->scalarNode('deduplication_table_name')
+            ->info('Database table name for deduplication tracking')
+            ->defaultValue('message_broker_deduplication')
+            ->cannotBeEmpty()
+            ->end()
             ->end()
             ->end()
             ->end();

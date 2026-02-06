@@ -19,6 +19,7 @@ final readonly class DeduplicationDbalStore implements DeduplicationStore
 {
     public function __construct(
         private Connection $connection,
+        private string $tableName = 'message_broker_deduplication',
         private ?LoggerInterface $logger = null,
     ) {}
 
@@ -27,7 +28,7 @@ final readonly class DeduplicationDbalStore implements DeduplicationStore
         $binaryMessageId = Id::fromString($messageId)->toBinary();
 
         try {
-            $this->connection->insert('message_broker_deduplication', [
+            $this->connection->insert($this->tableName, [
                 'message_id' => $binaryMessageId,
                 'message_name' => $messageName,
                 'processed_at' => date('Y-m-d H:i:s'),
