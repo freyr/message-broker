@@ -85,9 +85,8 @@ doctrine:
 
     # Standard ORM configuration (required by doctrine_transaction middleware)
     # Even though we don't use entities, ORM must be properly configured for the middleware
+    # Note: lazy object strategy is set in TestKernel::configureContainer() based on PHP version
     orm:
-        # Use PHP 8.4 native lazy objects (symfony/var-exporter 8.0 removed LazyGhost support)
-        enable_native_lazy_objects: true   # PHP 8.4+ native lazy objects
         report_fields_where_declared: true # Standard Symfony setting
         naming_strategy: doctrine.orm.naming_strategy.underscore_number_aware
         auto_mapping: true

@@ -27,7 +27,7 @@ use Symfony\Component\Serializer\SerializerInterface;
  */
 final class OutboxSerializer extends Serializer
 {
-    private const string MESSAGE_ID_HEADER = 'X-Message-Id';
+    private const MESSAGE_ID_HEADER = 'X-Message-Id';
 
     /**
      * @param SerializerInterface $serializer Symfony's native @serializer service

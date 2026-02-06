@@ -11,7 +11,7 @@ use InvalidArgumentException;
 
 final class IdType extends Type
 {
-    public const string NAME = 'id_binary';
+    public const NAME = 'id_binary';
 
     public function getSQLDeclaration(array $column, AbstractPlatform $platform): string
     {

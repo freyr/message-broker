@@ -117,6 +117,25 @@ To test this recipe without publishing:
 **\.env:**
 - `MESSENGER_AMQP_DSN` - Default RabbitMQ connection string
 
+## Prerequisites
+
+This bundle uses the `doctrine_transaction` middleware, which requires **Doctrine ORM** to be
+configured in your application. Most Symfony applications using Doctrine already have this in
+`config/packages/doctrine.yaml`. If you do not have ORM configured, add a minimal `orm:` section:
+
+```yaml
+# config/packages/doctrine.yaml
+doctrine:
+    dbal:
+        url: '%env(DATABASE_URL)%'
+    orm:
+        auto_generate_proxy_classes: true
+        naming_strategy: doctrine.orm.naming_strategy.underscore_number_aware
+        auto_mapping: true
+```
+
+The bundle itself only uses DBAL (not ORM entities), but the middleware requires ORM to be bootstrapped.
+
 ## Post-Installation Steps
 
 After running `composer require freyr/message-broker`, users need to:
