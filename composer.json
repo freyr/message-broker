@@ -62,6 +62,12 @@
         "preferred-install": "dist",
         "optimize-autoloader": true
     },
+    "scripts": {
+        "phpstan": "phpstan analyse --memory-limit=-1",
+        "ecs": "ecs check",
+        "ecs:fix": "ecs check --fix",
+        "test": "phpunit"
+    },
     "minimum-stability": "stable",
     "prefer-stable": true
 }

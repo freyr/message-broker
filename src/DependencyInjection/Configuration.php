@@ -17,7 +17,6 @@ final class Configuration implements ConfigurationInterface
         /** @var ArrayNodeDefinition $rootNode */
         $rootNode = $treeBuilder->getRootNode();
 
-        // @phpstan-ignore-next-line
         $rootNode
             ->children()
             ->arrayNode('inbox')
@@ -25,7 +24,7 @@ final class Configuration implements ConfigurationInterface
             ->children()
             ->arrayNode('message_types')
             ->info(
-                'Map of message_name => PHP class for InboxSerializer (e.g., "order.placed" => "App\\Message\\OrderPlaced")'
+                'Map of message_name => PHP class for InboxSerializer (e.g., "order.placed" => "App\\Message\\OrderPlaced")',
             )
             ->useAttributeAsKey('name')
             ->defaultValue([])

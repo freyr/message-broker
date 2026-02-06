@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Carbon\CarbonImmutable;
+use Doctrine\DBAL\Connection;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Tests\Functional\Fixtures\TestEvent;
 use Freyr\MessageBroker\Tests\Functional\Fixtures\ThrowingTestEventHandler;
@@ -39,13 +40,16 @@ final class TransactionBehaviorTest extends FunctionalTestCase
         }
 
         // Check actual behavior - does dedup entry exist or not?
+        /** @var Connection $connection */
         $connection = $this->getContainer()
             ->get('doctrine.dbal.default_connection');
         $messageIdHex = strtoupper(str_replace('-', '', $messageId));
-        $count = (int) $connection->fetchOne(
+        /** @var numeric-string $countResult */
+        $countResult = $connection->fetchOne(
             'SELECT COUNT(*) FROM message_broker_deduplication WHERE HEX(message_id) = ?',
             [$messageIdHex]
         );
+        $count = (int) $countResult;
 
         // Report actual behavior
         if ($count === 0) {

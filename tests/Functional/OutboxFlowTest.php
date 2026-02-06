@@ -54,11 +54,13 @@ final class OutboxFlowTest extends FunctionalTestCase
         $this->assertIsArray($result);
 
         // Body should be JSON (OutboxSerializer)
+        $this->assertIsString($result['body']);
         $body = json_decode($result['body'], true);
         $this->assertIsArray($body, 'Body should be valid JSON');
         $this->assertEquals('integration-test-event', $body['name']);
 
         // Headers should contain semantic name
+        $this->assertIsString($result['headers']);
         $headers = json_decode($result['headers'], true);
         $this->assertIsArray($headers);
         $this->assertEquals('test.event.sent', $headers['type']);
@@ -82,6 +84,7 @@ final class OutboxFlowTest extends FunctionalTestCase
         $message = $this->assertMessageInQueue('test.event.sent');
 
         // And: Message has correct type header (semantic name)
+        /** @var array<string, mixed> $headers */
         $headers = $message['headers']->getNativeData();
         $this->assertEquals('test.event.sent', $headers['type']);
 
@@ -89,15 +92,17 @@ final class OutboxFlowTest extends FunctionalTestCase
         $this->assertArrayHasKey('X-Message-Id', $headers);
 
         // And: X-Message-Id contains a valid UUID v7
+        $this->assertIsString($headers['X-Message-Id']);
         $this->assertMatchesRegularExpression(
             '/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
             $headers['X-Message-Id']
         );
 
         // And: Body contains event data (no messageId in payload)
-        $this->assertIsArray($message['body']);
-        $this->assertEquals('bridge-test-event', $message['body']['name']);
-        $this->assertArrayNotHasKey('messageId', $message['body']);
+        $body = $message['body'];
+        $this->assertIsArray($body);
+        $this->assertEquals('bridge-test-event', $body['name']);
+        $this->assertArrayNotHasKey('messageId', $body);
     }
 
     public function testPublishedMessageHasCorrectFormat(): void
@@ -123,23 +128,27 @@ final class OutboxFlowTest extends FunctionalTestCase
         $message = $this->assertMessageInQueue('test.order.placed');
 
         // Semantic name in type header
+        /** @var array<string, mixed> $headers */
         $headers = $message['headers']->getNativeData();
         $this->assertEquals('test.order.placed', $headers['type']);
 
         // UUIDs are serialised as strings
-        $this->assertIsString($message['body']['orderId']);
+        $body = $message['body'];
+        $this->assertIsArray($body);
+        $this->assertIsString($body['orderId']);
         $this->assertMatchesRegularExpression(
             '/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
-            $message['body']['orderId']
+            $body['orderId']
         );
 
         // Timestamps are ISO 8601
+        $this->assertIsString($body['placedAt']);
         $this->assertMatchesRegularExpression(
             '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/',
-            $message['body']['placedAt']
+            $body['placedAt']
         );
 
         // Numeric values preserved
-        $this->assertSame(99.99, $message['body']['totalAmount']);
+        $this->assertSame(99.99, $body['totalAmount']);
     }
 }

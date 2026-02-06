@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Tests\Unit;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
+use Freyr\MessageBroker\Outbox\EventBridge\OutboxMessage;
 use Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge;
 use Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy;
 use Freyr\MessageBroker\Stamp\MessageIdStamp;
@@ -77,6 +78,7 @@ final class InboxFlowTest extends TestCase
         $outboxEnvelopes = $context->outboxTransport->get();
         foreach ($outboxEnvelopes as $envelope) {
             $originalMessage = $envelope->getMessage();
+            $this->assertInstanceOf(OutboxMessage::class, $originalMessage);
             $bridge->__invoke($originalMessage);
         }
 
@@ -156,7 +158,9 @@ final class InboxFlowTest extends TestCase
         // Step 2: Bridge republishes to AMQP
         $outboxEnvelopes = $context->outboxTransport->get();
         foreach ($outboxEnvelopes as $envelope) {
-            $bridge->__invoke($envelope->getMessage());
+            $message = $envelope->getMessage();
+            $this->assertInstanceOf(OutboxMessage::class, $message);
+            $bridge->__invoke($message);
         }
 
         // Get the AMQP envelope with MessageIdStamp
@@ -226,7 +230,9 @@ final class InboxFlowTest extends TestCase
         // And: Bridge republishes to AMQP
         $outboxEnvelopes = $context->outboxTransport->get();
         foreach ($outboxEnvelopes as $envelope) {
-            $bridge->__invoke($envelope->getMessage());
+            $message = $envelope->getMessage();
+            $this->assertInstanceOf(OutboxMessage::class, $message);
+            $bridge->__invoke($message);
         }
 
         // Then: AMQP message should have semantic name in type header

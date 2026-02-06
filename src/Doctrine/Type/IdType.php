@@ -7,6 +7,7 @@ namespace Freyr\MessageBroker\Doctrine\Type;
 use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Types\Type;
 use Freyr\Identity\Id;
+use InvalidArgumentException;
 
 final class IdType extends Type
 {
@@ -24,7 +25,7 @@ final class IdType extends Type
         }
 
         if (!is_string($value)) {
-            throw new \InvalidArgumentException('Expected string value from database');
+            throw new InvalidArgumentException('Expected string value from database');
         }
 
         return Id::fromBinary($value);
@@ -37,7 +38,7 @@ final class IdType extends Type
         }
 
         if (!$value instanceof Id) {
-            throw new \InvalidArgumentException('Expected Id instance');
+            throw new InvalidArgumentException('Expected Id instance');
         }
 
         return $value->toBinary();

@@ -49,7 +49,11 @@ final class InboxDeserializationTest extends FunctionalTestCase
 
         // And: Handler received correctly deserialized object with all properties
         $receivedMessage = TestEventHandler::getLastMessage();
-        $this->assertNotNull($receivedMessage, 'Handler should have received a message');
+        $this->assertInstanceOf(
+            Fixtures\TestEvent::class,
+            $receivedMessage,
+            'Handler should have received a TestEvent'
+        );
 
         // Verify all properties were correctly deserialized
         $this->assertEquals($testId->__toString(), $receivedMessage->id->__toString(), 'Id should match');

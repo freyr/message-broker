@@ -98,7 +98,12 @@ final class InMemoryTransport implements TransportInterface
             return null;
         }
 
-        return $this->serializer->encode($envelope);
+        $encoded = $this->serializer->encode($envelope);
+
+        return [
+            'body' => $encoded['body'],
+            'headers' => $encoded['headers'] ?? [],
+        ];
     }
 
     /**

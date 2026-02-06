@@ -24,6 +24,7 @@ final class TestKernel extends Kernel
 {
     use MicroKernelTrait;
 
+    /** @return array<\Symfony\Component\HttpKernel\Bundle\BundleInterface> */
     public function registerBundles(): array
     {
         return [new FrameworkBundle(), new DoctrineBundle(), new FreyrMessageBrokerBundle()];

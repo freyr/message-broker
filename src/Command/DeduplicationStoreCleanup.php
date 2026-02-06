@@ -15,8 +15,8 @@ use Symfony\Component\Console\Output\OutputInterface;
 final class DeduplicationStoreCleanup extends Command
 {
     public function __construct(
-        private Connection $connection,
-        private string $tableName = 'message_broker_deduplication',
+        private readonly Connection $connection,
+        private readonly string $tableName = 'message_broker_deduplication',
     ) {
         parent::__construct();
     }
@@ -28,7 +28,8 @@ final class DeduplicationStoreCleanup extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $days = (int) $input->getOption('days');
+        $daysOption = $input->getOption('days');
+        $days = is_numeric($daysOption) ? (int) $daysOption : 30;
 
         $deleted = $this->connection->executeStatement(
             sprintf('DELETE FROM %s WHERE processed_at < DATE_SUB(NOW(), INTERVAL ? DAY)', $this->tableName),

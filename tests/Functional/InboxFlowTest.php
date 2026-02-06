@@ -6,7 +6,9 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
+use Freyr\MessageBroker\Tests\Functional\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Functional\Fixtures\OrderPlacedHandler;
+use Freyr\MessageBroker\Tests\Functional\Fixtures\TestEvent;
 use Freyr\MessageBroker\Tests\Functional\Fixtures\TestEventHandler;
 
 /**
@@ -119,7 +121,7 @@ final class InboxFlowTest extends FunctionalTestCase
         // Then: InboxSerializer translated semantic name to FQN
         // And: Handler received correctly typed object
         $lastMessage = TestEventHandler::getLastMessage();
-        $this->assertNotNull($lastMessage, 'Handler should have received a message');
+        $this->assertInstanceOf(TestEvent::class, $lastMessage, 'Handler should have received a TestEvent');
         $this->assertEquals($testName, $lastMessage->name);
         $this->assertEquals($testId->__toString(), $lastMessage->id->__toString());
     }
@@ -155,7 +157,7 @@ final class InboxFlowTest extends FunctionalTestCase
 
         // And: Value objects were correctly deserialized
         $lastMessage = OrderPlacedHandler::getLastMessage();
-        $this->assertNotNull($lastMessage, 'Handler should have received a message');
+        $this->assertInstanceOf(OrderPlaced::class, $lastMessage, 'Handler should have received an OrderPlaced');
 
         // UUIDs deserialized as Id objects
         $this->assertInstanceOf(Id::class, $lastMessage->orderId);

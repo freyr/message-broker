@@ -9,9 +9,12 @@ use Freyr\Identity\Id;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
+use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\Messenger\EventListener\StopWorkerOnMessageLimitListener;
+use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Messenger\Transport\Receiver\ReceiverInterface;
 use Symfony\Component\Messenger\Worker;
 
 /**
@@ -82,7 +85,9 @@ abstract class FunctionalTestCase extends KernelTestCase
     private static function setupDatabaseSchema(): void
     {
         $schemaFile = __DIR__.'/schema.sql';
-        $databaseUrl = $_ENV['DATABASE_URL'] ?? 'mysql://messenger:messenger@127.0.0.1:3308/messenger_test';
+        $databaseUrl = isset($_ENV['DATABASE_URL']) && is_string($_ENV['DATABASE_URL'])
+            ? $_ENV['DATABASE_URL']
+            : 'mysql://messenger:messenger@127.0.0.1:3308/messenger_test';
 
         // Parse DATABASE_URL
         $parts = parse_url($databaseUrl);
@@ -145,7 +150,7 @@ abstract class FunctionalTestCase extends KernelTestCase
 
             // Verify tables were created
             $stmt = $pdo->query("SHOW TABLES LIKE 'message_broker_deduplication'");
-            if ($stmt->fetch() === false) {
+            if ($stmt === false || $stmt->fetch() === false) {
                 throw new \RuntimeException('Schema applied but message_broker_deduplication table not found');
             }
         } catch (\Throwable $e) {
@@ -192,7 +197,9 @@ abstract class FunctionalTestCase extends KernelTestCase
     protected static function getAmqpConnection(): AMQPStreamConnection
     {
         if (self::$amqpConnection === null) {
-            $dsn = $_ENV['MESSENGER_AMQP_DSN'] ?? 'amqp://guest:guest@127.0.0.1:5673/%2f';
+            $dsn = isset($_ENV['MESSENGER_AMQP_DSN']) && is_string($_ENV['MESSENGER_AMQP_DSN'])
+                ? $_ENV['MESSENGER_AMQP_DSN']
+                : 'amqp://guest:guest@127.0.0.1:5673/%2f';
             $parts = parse_url($dsn);
 
             // Decode vhost from URL path (%2f -> /)
@@ -258,7 +265,10 @@ abstract class FunctionalTestCase extends KernelTestCase
 
     // Assertion Helpers
 
-    protected function assertMessageInQueue(string $queueName): ?array
+    /**
+     * @return array{body: mixed, headers: AMQPTable, envelope: AMQPMessage}
+     */
+    protected function assertMessageInQueue(string $queueName): array
     {
         $channel = self::getAmqpConnection()->channel();
 
@@ -271,7 +281,9 @@ abstract class FunctionalTestCase extends KernelTestCase
         }
 
         $body = json_decode($message->body, true);
-        $headers = $message->get_properties()['application_headers'] ?? [];
+
+        /** @var AMQPTable $headers */
+        $headers = $message->get_properties()['application_headers'] ?? new AMQPTable();
 
         return [
             'body' => $body,
@@ -293,6 +305,10 @@ abstract class FunctionalTestCase extends KernelTestCase
 
     // AMQP Helper Methods
 
+    /**
+     * @param array<string, mixed> $headers
+     * @param array<string, mixed> $body
+     */
     protected function publishToAmqp(string $queue, array $headers, array $body): void
     {
         $channel = self::getAmqpConnection()->channel();
@@ -300,7 +316,7 @@ abstract class FunctionalTestCase extends KernelTestCase
         $channel->queue_declare($queue, false, true, false, false);
 
         $message = new AMQPMessage(
-            json_encode($body),
+            (string) json_encode($body),
             [
                 'application_headers' => new AMQPTable($headers),
                 'content_type' => 'application/json',
@@ -360,7 +376,7 @@ abstract class FunctionalTestCase extends KernelTestCase
             'type' => 'test.order.placed',
             'X-Message-Id' => $messageId,
         ], [
-            'id' => $event->id->__toString(),
+            'orderId' => $event->orderId->__toString(),
             'customerId' => $event->customerId->__toString(),
             'totalAmount' => $event->totalAmount,
             'placedAt' => $event->placedAt->toIso8601String(),
@@ -371,29 +387,22 @@ abstract class FunctionalTestCase extends KernelTestCase
 
     protected function consumeFromInbox(int $limit = 1): void
     {
+        /** @var ReceiverInterface $receiver */
         $receiver = $this->getContainer()
             ->get('messenger.transport.amqp_test');
+        /** @var MessageBusInterface $bus */
         $bus = $this->getContainer()
             ->get('messenger.default_bus');
+        /** @var LoggerInterface $logger */
+        $logger = $this->getContainer()
+            ->get('logger');
 
-        // Create a custom event dispatcher with StopWorkerOnMessageLimitListener
         $eventDispatcher = new EventDispatcher();
-        $eventDispatcher->addSubscriber(
-            new StopWorkerOnMessageLimitListener($limit, $this->getContainer()->get('logger'))
-        );
+        $eventDispatcher->addSubscriber(new StopWorkerOnMessageLimitListener($limit, $logger));
 
-        $worker = new Worker(
-            [
-                'amqp_test' => $receiver,
-            ],
-            $bus,
-            $eventDispatcher,
-            $this->getContainer()
-                ->get('logger')
-        );
-
-        // Stop after processing N messages (handled by StopWorkerOnMessageLimitListener)
-        // Handler cleanup is done in tearDown()
+        $worker = new Worker([
+            'amqp_test' => $receiver,
+        ], $bus, $eventDispatcher, $logger);
         $worker->run();
     }
 
@@ -404,29 +413,22 @@ abstract class FunctionalTestCase extends KernelTestCase
      */
     protected function processOutbox(int $limit = 1): void
     {
+        /** @var ReceiverInterface $receiver */
         $receiver = $this->getContainer()
             ->get('messenger.transport.outbox');
+        /** @var MessageBusInterface $bus */
         $bus = $this->getContainer()
             ->get('messenger.default_bus');
+        /** @var LoggerInterface $logger */
+        $logger = $this->getContainer()
+            ->get('logger');
 
-        // Create a custom event dispatcher with StopWorkerOnMessageLimitListener
         $eventDispatcher = new EventDispatcher();
-        $eventDispatcher->addSubscriber(
-            new StopWorkerOnMessageLimitListener($limit, $this->getContainer()->get('logger'))
-        );
+        $eventDispatcher->addSubscriber(new StopWorkerOnMessageLimitListener($limit, $logger));
 
-        $worker = new Worker(
-            [
-                'outbox' => $receiver,
-            ],
-            $bus,
-            $eventDispatcher,
-            $this->getContainer()
-                ->get('logger')
-        );
-
-        // Stop after processing N messages (handled by StopWorkerOnMessageLimitListener)
-        // Handler cleanup is done in tearDown()
+        $worker = new Worker([
+            'outbox' => $receiver,
+        ], $bus, $eventDispatcher, $logger);
         $worker->run();
     }
 
@@ -441,11 +443,17 @@ abstract class FunctionalTestCase extends KernelTestCase
 
     protected function assertHandlerInvoked(string $handlerClass, int $expectedCount = 1): void
     {
+        /** @var int $actualCount */
         $actualCount = $handlerClass::getInvocationCount();
         $this->assertEquals(
             $expectedCount,
             $actualCount,
-            "Expected handler {$handlerClass} to be invoked {$expectedCount} time(s), but was invoked {$actualCount} time(s)"
+            sprintf(
+                'Expected handler %s to be invoked %d time(s), but was invoked %d time(s)',
+                $handlerClass,
+                $expectedCount,
+                $actualCount
+            )
         );
     }
 
@@ -458,12 +466,17 @@ abstract class FunctionalTestCase extends KernelTestCase
         // Convert UUID string to uppercase hex (no dashes) for binary comparison
         $messageIdHex = strtoupper(str_replace('-', '', $messageId));
 
-        $count = (int) $connection->fetchOne(
+        /** @var numeric-string $count */
+        $count = $connection->fetchOne(
             'SELECT COUNT(*) FROM message_broker_deduplication WHERE HEX(message_id) = ?',
             [$messageIdHex]
         );
 
-        $this->assertGreaterThan(0, $count, "Expected deduplication entry for message ID {$messageId} but none found");
+        $this->assertGreaterThan(
+            0,
+            (int) $count,
+            "Expected deduplication entry for message ID {$messageId} but none found"
+        );
     }
 
     protected function getDeduplicationEntryCount(): int
@@ -472,7 +485,10 @@ abstract class FunctionalTestCase extends KernelTestCase
         $connection = $this->getContainer()
             ->get('doctrine.dbal.default_connection');
 
-        return (int) $connection->fetchOne('SELECT COUNT(*) FROM message_broker_deduplication');
+        /** @var numeric-string $count */
+        $count = $connection->fetchOne('SELECT COUNT(*) FROM message_broker_deduplication');
+
+        return (int) $count;
     }
 
     /**
@@ -496,7 +512,7 @@ abstract class FunctionalTestCase extends KernelTestCase
 
         $this->assertEquals(
             0,
-            (int) $result,
+            (int) (is_numeric($result) ? $result : 0),
             sprintf('Expected no deduplication entry for message ID %s, but found one', $messageId)
         );
     }
@@ -504,7 +520,7 @@ abstract class FunctionalTestCase extends KernelTestCase
     /**
      * Assert that a message exists in the failed transport.
      *
-     * @return array{body: array, headers: array}
+     * @return array{body: array<mixed>, headers: array<mixed>}
      */
     protected function assertMessageInFailedTransport(string $messageClass): array
     {
@@ -518,12 +534,19 @@ abstract class FunctionalTestCase extends KernelTestCase
 
         $this->assertIsArray($result, 'Expected message in failed transport, but failed transport is empty');
 
-        $headers = json_decode($result['headers'], true);
+        $headersRaw = $result['headers'];
+        $this->assertIsString($headersRaw);
+        $headers = json_decode($headersRaw, true);
         $this->assertIsArray($headers);
         $this->assertArrayHasKey('X-Message-Class', $headers);
-        $this->assertEquals($messageClass, $headers['X-Message-Class'][0]);
 
-        $body = json_decode($result['body'], true);
+        $xMessageClass = $headers['X-Message-Class'];
+        $this->assertIsArray($xMessageClass);
+        $this->assertEquals($messageClass, $xMessageClass[0]);
+
+        $bodyRaw = $result['body'];
+        $this->assertIsString($bodyRaw);
+        $body = json_decode($bodyRaw, true);
         $this->assertIsArray($body);
 
         return [
@@ -562,14 +585,16 @@ abstract class FunctionalTestCase extends KernelTestCase
             return 0;
         }
 
-        return (int) $connection->fetchOne("SELECT COUNT(*) FROM {$table}");
+        /** @var numeric-string $count */
+        $count = $connection->fetchOne("SELECT COUNT(*) FROM {$table}");
+
+        return (int) $count;
     }
 
     /**
      * Publish a malformed AMQP message for testing error handling.
      *
-     * @param string $queue Queue name
-     * @param array $options Options: 'missingType', 'missingMessageId', 'invalidUuid', 'invalidJson'
+     * @param array<string> $options Options: 'missingType', 'missingMessageId', 'invalidUuid', 'invalidJson'
      */
     protected function publishMalformedAmqpMessage(string $queue, array $options = []): void
     {
@@ -579,19 +604,19 @@ abstract class FunctionalTestCase extends KernelTestCase
         $body = '{"id": "01234567-89ab-cdef-0123-456789abcdef", "name": "test", "timestamp": "2026-01-30T12:00:00+00:00"}';
 
         // Apply malformation options
-        if (!in_array('missingType', $options)) {
+        if (!in_array('missingType', $options, true)) {
             $headers['type'] = 'test.event.sent';
         }
 
-        if (!in_array('missingMessageId', $options)) {
-            if (in_array('invalidUuid', $options)) {
+        if (!in_array('missingMessageId', $options, true)) {
+            if (in_array('invalidUuid', $options, true)) {
                 $headers['X-Message-Id'] = 'not-a-uuid';
             } else {
                 $headers['X-Message-Id'] = '01234567-89ab-cdef-0123-456789abcdef';
             }
         }
 
-        if (in_array('invalidJson', $options)) {
+        if (in_array('invalidJson', $options, true)) {
             $body = '{invalid json';
         }
 

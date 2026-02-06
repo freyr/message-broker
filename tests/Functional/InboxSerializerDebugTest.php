@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
+use Freyr\MessageBroker\Serializer\InboxSerializer;
 use Freyr\MessageBroker\Stamp\MessageIdStamp;
 
 /**
@@ -32,6 +33,7 @@ final class InboxSerializerDebugTest extends FunctionalTestCase
         ];
 
         // When: We decode it with InboxSerializer
+        /** @var InboxSerializer $serializer */
         $serializer = $this->getContainer()
             ->get('Freyr\MessageBroker\Serializer\InboxSerializer');
         $envelope = $serializer->decode($encodedEnvelope);

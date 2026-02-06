@@ -128,25 +128,23 @@ final class TransportSerializerTest extends TestCase
         // Then: Outbox message should have semantic name
         $outboxSerialized = $context->outboxTransport->getLastSerialized();
         $this->assertNotNull($outboxSerialized);
+        $outboxHeaders = $outboxSerialized['headers'];
         $this->assertEquals(
             'test.message.sent',
-            $outboxSerialized['headers']['type'],
+            $outboxHeaders['type'],
             'Outbox message should have semantic name'
         );
 
         // And: AMQP message should have FQN
         $amqpSerialized = $context->amqpTransport->getLastSerialized();
         $this->assertNotNull($amqpSerialized);
-        $this->assertEquals(
-            AmqpTestMessage::class,
-            $amqpSerialized['headers']['type'],
-            'AMQP message should have FQN'
-        );
+        $amqpHeaders = $amqpSerialized['headers'];
+        $this->assertEquals(AmqpTestMessage::class, $amqpHeaders['type'], 'AMQP message should have FQN');
 
         // Verify they are different
         $this->assertNotEquals(
-            $outboxSerialized['headers']['type'],
-            $amqpSerialized['headers']['type'],
+            $outboxHeaders['type'],
+            $amqpHeaders['type'],
             'Different transports should use different serialization formats'
         );
     }
@@ -179,10 +177,12 @@ final class TransportSerializerTest extends TestCase
 
         // Then: Outbox respects #[MessageName] attribute
         $outboxSerialized = $context->outboxTransport->getLastSerialized();
+        $this->assertNotNull($outboxSerialized);
         $this->assertEquals('test.message.sent', $outboxSerialized['headers']['type']);
 
         // And: AMQP ignores #[MessageName] attribute (uses FQN)
         $amqpSerialized = $context->amqpTransport->getLastSerialized();
+        $this->assertNotNull($amqpSerialized);
         $this->assertEquals(AmqpTestMessage::class, $amqpSerialized['headers']['type']);
     }
 }

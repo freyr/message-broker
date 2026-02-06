@@ -64,7 +64,7 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
 
         // And: Handler received correct message data (verify payload integrity)
         $lastMessage = ThrowingTestEventHandler::getLastMessage();
-        $this->assertNotNull($lastMessage);
+        $this->assertInstanceOf(TestEvent::class, $lastMessage);
         $this->assertSame('will-fail', $lastMessage->name);
 
         // And: NO deduplication entry exists (transaction rolled back)
@@ -135,6 +135,7 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
 
         // And: Last message processed has correct data (verify second attempt)
         $lastMessage = ThrowingTestEventHandler::getLastMessage();
+        $this->assertInstanceOf(TestEvent::class, $lastMessage);
         $this->assertSame('retry-success', $lastMessage->name);
 
         // And: Deduplication entry NOW exists (committed with successful handler execution)
@@ -204,6 +205,7 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
 
         // And: Last message processed correctly (verify data integrity)
         $lastMessage = ThrowingTestEventHandler::getLastMessage();
+        $this->assertInstanceOf(TestEvent::class, $lastMessage);
         $this->assertSame('multiple-retries', $lastMessage->name);
 
         // And: Deduplication entry exists after success

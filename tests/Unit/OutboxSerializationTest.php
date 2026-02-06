@@ -56,7 +56,6 @@ final class OutboxSerializationTest extends TestCase
         $this->assertNotNull($serialized, 'Should have serialized representation');
 
         // Check headers
-        $this->assertArrayHasKey('headers', $serialized);
         $headers = $serialized['headers'];
 
         // Type header should contain semantic name (not FQN)
@@ -65,9 +64,7 @@ final class OutboxSerializationTest extends TestCase
         $this->assertNotEquals(TestMessage::class, $headers['type'], 'Type header should NOT contain FQN');
 
         // Check body
-        $this->assertArrayHasKey('body', $serialized);
         $body = $serialized['body'];
-        $this->assertIsString($body, 'Body should be a string');
 
         // Body should be valid JSON
         $decodedBody = json_decode($body, true);
@@ -176,6 +173,7 @@ final class OutboxSerializationTest extends TestCase
         );
 
         $amqpBody = json_decode($amqpSerialized['body'], true);
+        $this->assertIsArray($amqpBody);
         $this->assertArrayHasKey('eventId', $amqpBody);
         $this->assertArrayHasKey('payload', $amqpBody);
         $this->assertArrayHasKey('sentAt', $amqpBody);

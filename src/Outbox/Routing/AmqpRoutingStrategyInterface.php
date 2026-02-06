@@ -15,5 +15,6 @@ interface AmqpRoutingStrategyInterface
 
     public function getRoutingKey(object $event, string $messageName): string;
 
+    /** @return array<string, string> */
     public function getHeaders(string $messageName): array;
 }

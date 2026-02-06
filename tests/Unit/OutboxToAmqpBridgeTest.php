@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Tests\Unit;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
+use Freyr\MessageBroker\Outbox\EventBridge\OutboxMessage;
 use Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge;
 use Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy;
 use Freyr\MessageBroker\Stamp\MessageIdStamp;
@@ -141,7 +142,7 @@ final class OutboxToAmqpBridgeTest extends TestCase
         $outboxEnvelopes = $context->outboxTransport->get();
         foreach ($outboxEnvelopes as $envelope) {
             $originalMessage = $envelope->getMessage();
-            // Bridge processes the message
+            $this->assertInstanceOf(OutboxMessage::class, $originalMessage);
             $bridge->__invoke($originalMessage);
         }
 

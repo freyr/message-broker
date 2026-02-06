@@ -5,3 +5,4 @@ parameters:
         - tests/
     excludePaths:
         - tests/Application/var/*
+        - tests/Functional/Scripts/*

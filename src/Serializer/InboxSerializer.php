@@ -26,7 +26,7 @@ use Symfony\Component\Serializer\SerializerInterface;
  */
 final class InboxSerializer extends Serializer
 {
-    private const MESSAGE_ID_HEADER = 'X-Message-Id';
+    private const string MESSAGE_ID_HEADER = 'X-Message-Id';
 
     /**
      * @param SerializerInterface $serializer Symfony's native @serializer service
@@ -43,9 +43,9 @@ final class InboxSerializer extends Serializer
      * Decode: Translate semantic name to FQN.
      *
      * Flow:
-     * 1. Read semantic name from 'type' header (e.g., 'order.placed')
+     * 1. Read semantic name from the 'type' header (e.g., 'order.placed')
      * 2. Look up FQN in messageTypes mapping
-     * 3. Replace 'type' header with FQN for parent decoder
+     * 3. Replace the 'type' header with FQN for parent decoder
      * 4. Store semantic name in MessageNameStamp for encode()
      * 5. Read X-Message-Id header and attach MessageIdStamp
      *
@@ -75,18 +75,21 @@ final class InboxSerializer extends Serializer
             ));
         }
 
-        // Replace 'type' header with FQN for parent decode
-        $encodedEnvelope['headers']['type'] = $fqn;
+        // Replace the 'type' header with FQN for parent decode
+        $headers['type'] = $fqn;
 
-        // Extract message ID from semantic header
+        // Extract message ID from a semantic header
         $messageId = isset($headers[self::MESSAGE_ID_HEADER]) && is_string($headers[self::MESSAGE_ID_HEADER])
             ? $headers[self::MESSAGE_ID_HEADER]
             : null;
 
-        // Strip auto-generated stamp header so parent doesn't try to deserialise it
-        unset($encodedEnvelope['headers']['X-Message-Stamp-'.MessageIdStamp::class]);
+        // Strip auto-generated stamp header so the parent doesn't try to deserialize it
+        unset($headers['X-Message-Stamp-'.MessageIdStamp::class]);
 
-        // Decode with FQN
+        // Write modified headers back
+        $encodedEnvelope['headers'] = $headers;
+
+        /** @var array{body: string, headers?: array<string, string>} $encodedEnvelope */
         $envelope = parent::decode($encodedEnvelope);
 
         // Attach semantic name stamp (avoid duplicates on retry)
@@ -108,26 +111,26 @@ final class InboxSerializer extends Serializer
      *
      * Flow:
      * 1. Let parent encode (produces FQN in 'type' header)
-     * 2. Check for MessageNameStamp (added during decode)
-     * 3. Replace 'type' header with semantic name
+     * 2. Check for MessageNameStamp (added during decoding)
+     * 3. Replace the 'type' header with a semantic name
      * 4. Replace auto-generated X-Message-Stamp-MessageIdStamp with X-Message-Id
      *
      * @return array<string, mixed>
      */
     public function encode(Envelope $envelope): array
     {
-        // Parent encode produces FQN in 'type' header
+        // Parent encode produces FQN in the 'type' header
         $encoded = parent::encode($envelope);
 
         $headers = $encoded['headers'] ?? [];
 
-        // Retrieve semantic name from stamp
+        // Retrieve semantic name from a stamp
         $messageNameStamp = $envelope->last(MessageNameStamp::class);
         if ($messageNameStamp instanceof MessageNameStamp) {
             $headers['type'] = $messageNameStamp->messageName;
         }
 
-        // Replace auto-generated stamp header with semantic X-Message-Id
+        // Replace the auto-generated stamp header with semantic X-Message-Id
         $messageIdStamp = $envelope->last(MessageIdStamp::class);
         if ($messageIdStamp instanceof MessageIdStamp) {
             $headers[self::MESSAGE_ID_HEADER] = $messageIdStamp->messageId;

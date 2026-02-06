@@ -44,7 +44,7 @@ final class EventBusFactory
      * - Optional handlers for consumption testing
      *
      * @param array<string, class-string> $messageTypes Message name to class mapping for deserialization
-     * @param array<class-string, array<string>> $routing FQN to transport names mapping (e.g., [TestMessage::class => ['outbox']])
+     * @param array<string, list<string>> $routing FQN to transport names mapping (e.g., [TestMessage::class => ['outbox']])
      * @param array<class-string, array<callable>> $handlers Message class to handler mapping (e.g., [TestMessage::class => [callable]])
      */
     public static function createForOutboxTesting(
@@ -138,7 +138,7 @@ final class EventBusFactory
      *
      * @param array<string, class-string> $messageTypes Message name to class mapping
      * @param array<class-string, array<callable>> $handlers Message class to handler mapping
-     * @param array<class-string, array<string>> $routing FQN to transport names mapping
+     * @param array<string, list<string>> $routing FQN to transport names mapping
      */
     public static function createForInboxFlowTesting(
         array $messageTypes = [],
