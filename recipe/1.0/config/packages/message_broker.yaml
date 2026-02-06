@@ -1,7 +1,7 @@
 message_broker:
     inbox:
         # Message type mapping: message_name => PHP class
-        # Used by MessageNameSerializer to translate semantic names to FQN during deserialization
+        # Used by InboxSerializer to translate semantic names to FQN during deserialisation
         message_types:
             # Examples:
             # 'order.placed': 'App\Message\OrderPlaced'

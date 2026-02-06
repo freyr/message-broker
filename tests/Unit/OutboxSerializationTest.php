@@ -172,7 +172,7 @@ final class OutboxSerializationTest extends TestCase
         $this->assertEquals(
             AmqpTestMessage::class,
             $amqpSerialized['headers']['type'],
-            'AMQP message should have FQN (standard serializer, not MessageNameSerializer)'
+            'AMQP message should have FQN (standard serialiser, not OutboxSerializer)'
         );
 
         $amqpBody = json_decode($amqpSerialized['body'], true);
