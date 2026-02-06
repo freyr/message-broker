@@ -11,7 +11,7 @@ use Symfony\Component\Messenger\Middleware\MiddlewareInterface;
 use Symfony\Component\Messenger\Middleware\StackInterface;
 use Symfony\Component\Messenger\Stamp\ReceivedStamp;
 
-readonly class DeduplicationMiddleware implements MiddlewareInterface
+final readonly class DeduplicationMiddleware implements MiddlewareInterface
 {
     public function __construct(
         private DeduplicationStore $store,

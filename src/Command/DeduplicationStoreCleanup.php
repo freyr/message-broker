@@ -12,7 +12,7 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
 #[AsCommand(name: 'message-broker:deduplication-cleanup', description: 'Remove old idempotency records')]
-class DeduplicationStoreCleanup extends Command
+final class DeduplicationStoreCleanup extends Command
 {
     public function __construct(
         private Connection $connection,
