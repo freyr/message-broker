@@ -127,15 +127,6 @@ services:
         resource: '../../../src/Serializer/Normalizer/'
         tags: ['serializer.normalizer']
 
-    # Custom ObjectNormalizer with property promotion support
-    Freyr\MessageBroker\Serializer\Normalizer\PropertyPromotionObjectNormalizer:
-        autowire: true
-        class: Symfony\Component\Serializer\Normalizer\ObjectNormalizer
-        arguments:
-            $propertyTypeExtractor: '@property_info'
-        tags:
-            - { name: 'serializer.normalizer', priority: -1000 }
-
     # Inbox Serializer
     Freyr\MessageBroker\Serializer\InboxSerializer:
         arguments:

@@ -14,17 +14,6 @@ services:
         resource: '../src/Serializer/Normalizer/'
         tags: ['serializer.normalizer']
 
-    # Custom ObjectNormalizer with property promotion support
-    # This overrides Symfony's default ObjectNormalizer with propertyTypeExtractor
-    # Lower priority (-1000) ensures it runs as fallback after specialized normalizers
-    Freyr\MessageBroker\Serializer\Normalizer\PropertyPromotionObjectNormalizer:
-        autowire: true
-        class: Symfony\Component\Serializer\Normalizer\ObjectNormalizer
-        arguments:
-            $propertyTypeExtractor: '@property_info'
-        tags:
-            - { name: 'serializer.normalizer', priority: -1000 }
-
     # Inbox Serializer (for AMQP consumption transports)
     # - decode(): Translates semantic name to FQN (e.g., 'order.placed' → 'App\Message\OrderPlaced')
     # - encode(): Preserves semantic name via MessageNameStamp (for retry/failed scenarios)
