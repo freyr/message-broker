@@ -1,6 +1,10 @@
 framework:
     secret: 'test-secret'
     test: true
+    http_method_override: false
+    handle_all_throwables: true
+    php_errors:
+        log: true
     messenger:
         failure_transport: failed
 
