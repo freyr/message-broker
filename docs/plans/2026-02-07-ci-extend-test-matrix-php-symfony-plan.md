@@ -99,7 +99,7 @@ ECS and PHPStan jobs are unchanged (PHP 8.4 only).
 - [ ] `freyr/identity` 0.4.0 released with PHP >=8.2 support
 - [x] `composer.json` constraints widened (see table above)
 - [x] CI matrix covers PHP 8.2, 8.3, 8.4 × Symfony 6.4, 7.x + prefer-lowest
-- [ ] All 7 matrix combinations pass
+- [x] All 7 matrix combinations pass
 - [x] `extra.symfony.require` not committed to `composer.json`
 
 ## Out of Scope
