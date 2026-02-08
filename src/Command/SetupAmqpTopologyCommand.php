@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Command;
 
+use Freyr\MessageBroker\Amqp\AmqpConnectionFactory;
 use Freyr\MessageBroker\Amqp\DefinitionsFormatter;
 use Freyr\MessageBroker\Amqp\TopologyManager;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -28,6 +29,7 @@ final class SetupAmqpTopologyCommand extends Command
     public function __construct(
         private readonly TopologyManager $topologyManager,
         private readonly DefinitionsFormatter $definitionsFormatter,
+        private readonly AmqpConnectionFactory $connectionFactory,
         private readonly ?string $defaultDsn = null,
     ) {
         parent::__construct();
@@ -131,7 +133,7 @@ final class SetupAmqpTopologyCommand extends Command
         }
 
         try {
-            $connection = $this->createConnection($dsn);
+            $connection = $this->connectionFactory->createConnection($dsn);
             $connection->connect();
             $channel = new \AMQPChannel($connection);
         } catch (\AMQPConnectionException) {
@@ -198,58 +200,9 @@ final class SetupAmqpTopologyCommand extends Command
 
         $dsn = $this->resolveDsn($input);
         if ($dsn !== null) {
-            return (string) $this->parseDsn($dsn)['vhost'];
+            return $this->connectionFactory->extractVhost($dsn);
         }
 
         return '/';
-    }
-
-    /**
-     * Parse an AMQP DSN into connection credentials.
-     *
-     * @return array<string, string|int>
-     */
-    private function parseDsn(string $dsn): array
-    {
-        $parsed = parse_url($dsn);
-        if ($parsed === false) {
-            throw new \InvalidArgumentException(sprintf('Invalid AMQP DSN: "%s"', $this->sanitiseDsn($dsn)));
-        }
-
-        $credentials = [];
-
-        if (isset($parsed['host'])) {
-            $credentials['host'] = $parsed['host'];
-        }
-        if (isset($parsed['port'])) {
-            $credentials['port'] = $parsed['port'];
-        }
-        if (isset($parsed['user'])) {
-            $credentials['login'] = urldecode($parsed['user']);
-        }
-        if (isset($parsed['pass'])) {
-            $credentials['password'] = urldecode($parsed['pass']);
-        }
-
-        $vhost = '/';
-        if (isset($parsed['path'])) {
-            $path = urldecode(ltrim($parsed['path'], '/'));
-            $vhost = $path !== '' ? $path : '/';
-        }
-        $credentials['vhost'] = $vhost;
-        $credentials['connect_timeout'] = 10;
-        $credentials['read_timeout'] = 10;
-
-        return $credentials;
-    }
-
-    private function createConnection(string $dsn): \AMQPConnection
-    {
-        return new \AMQPConnection($this->parseDsn($dsn));
-    }
-
-    private function sanitiseDsn(string $dsn): string
-    {
-        return preg_replace('#://[^@]+@#', '://***:***@', $dsn) ?? $dsn;
     }
 }

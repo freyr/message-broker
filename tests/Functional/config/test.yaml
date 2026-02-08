@@ -193,12 +193,16 @@ services:
         arguments:
             $topology: '%message_broker.amqp.topology%'
 
+    # AMQP Connection Factory
+    Freyr\MessageBroker\Amqp\AmqpConnectionFactory: ~
+
     # AMQP Topology Setup Command (public for functional tests)
     Freyr\MessageBroker\Command\SetupAmqpTopologyCommand:
         public: true
         arguments:
             $topologyManager: '@Freyr\MessageBroker\Amqp\TopologyManager'
             $definitionsFormatter: '@Freyr\MessageBroker\Amqp\DefinitionsFormatter'
+            $connectionFactory: '@Freyr\MessageBroker\Amqp\AmqpConnectionFactory'
             $defaultDsn: '%env(MESSENGER_AMQP_DSN)%'
         tags: ['console.command']
 

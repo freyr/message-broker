@@ -10,8 +10,8 @@ use PHPUnit\Framework\TestCase;
 /**
  * Unit tests for TopologyManager.
  *
- * Tests dependency resolution, dry-run output, and edge cases
- * without requiring a live RabbitMQ connection.
+ * Tests dry-run output and edge cases without requiring
+ * a live RabbitMQ connection.
  */
 final class TopologyManagerTest extends TestCase
 {
