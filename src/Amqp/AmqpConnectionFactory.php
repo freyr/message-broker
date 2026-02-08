@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Amqp;
 
+use AMQPConnection;
+use InvalidArgumentException;
+
 /**
  * Creates ext-amqp connections from DSN strings.
  *
@@ -12,9 +15,9 @@ namespace Freyr\MessageBroker\Amqp;
  */
 final readonly class AmqpConnectionFactory
 {
-    public function createConnection(string $dsn): \AMQPConnection
+    public function createConnection(string $dsn): AMQPConnection
     {
-        return new \AMQPConnection($this->parseDsn($dsn));
+        return new AMQPConnection($this->parseDsn($dsn));
     }
 
     /**
@@ -53,7 +56,7 @@ final readonly class AmqpConnectionFactory
     {
         $parsed = parse_url($dsn);
         if ($parsed === false) {
-            throw new \InvalidArgumentException(sprintf('Invalid AMQP DSN: "%s"', $this->sanitiseDsn($dsn)));
+            throw new InvalidArgumentException(sprintf('Invalid AMQP DSN: "%s"', $this->sanitiseDsn($dsn)));
         }
 
         $credentials = [];

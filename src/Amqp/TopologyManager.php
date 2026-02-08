@@ -6,7 +6,9 @@ namespace Freyr\MessageBroker\Amqp;
 
 use AMQPChannel;
 use AMQPExchange;
+use AMQPExchangeException;
 use AMQPQueue;
+use AMQPQueueException;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -37,7 +39,20 @@ final readonly class TopologyManager
     ];
 
     /**
-     * @param array{exchanges: array<string, array{type: string, durable: bool, arguments: array<string, mixed>}>, queues: array<string, array{durable: bool, arguments: array<string, mixed>}>, bindings: array<int, array{exchange: string, queue: string, binding_key: string, arguments: array<string, mixed>}>} $topology
+     * @param array{
+     *     exchanges: array<string, array{
+     *      type: string,
+     *      durable: bool,
+     *      arguments: array<string, mixed>}>,
+     *     queues: array<string, array{
+     *      durable: bool,
+     *      arguments: array<string, mixed>}>,
+     *     bindings: array<int, array{
+     *      exchange: string,
+     *      queue: string,
+     *      binding_key: string,
+     *      arguments: array<string, mixed>}>
+     * } $topology
      */
     public function __construct(
         private array $topology,
@@ -47,7 +62,11 @@ final readonly class TopologyManager
     /**
      * Declare the full topology against a live RabbitMQ instance.
      *
-     * @return array<int, array{type: string, name: string, status: string, detail: string}>
+     * @return array<int, array{
+     *     type: string,
+     *     name: string,
+     *     status: string,
+     *     detail: string}>
      */
     public function declare(AMQPChannel $channel): array
     {
@@ -124,9 +143,16 @@ final readonly class TopologyManager
     }
 
     /**
-     * @param array{type: string, durable: bool, arguments: array<string, mixed>} $config
+     * @param array{
+     *     type: string,
+     *     durable: bool,
+     *     arguments: array<string, mixed>} $config
      *
-     * @return array{type: string, name: string, status: string, detail: string}
+     * @return array{
+     *     type: string,
+     *     name: string,
+     *     status: string,
+     *     detail: string}
      */
     private function declareExchange(AMQPChannel $channel, string $name, array $config): array
     {
@@ -155,7 +181,7 @@ final readonly class TopologyManager
                 'status' => 'created',
                 'detail' => $config['type'],
             ];
-        } catch (\AMQPExchangeException $e) {
+        } catch (AMQPExchangeException $e) {
             $this->logger?->warning('Failed to declare exchange', [
                 'name' => $name,
                 'error' => $e->getMessage(),
@@ -171,9 +197,15 @@ final readonly class TopologyManager
     }
 
     /**
-     * @param array{durable: bool, arguments: array<string, mixed>} $config
+     * @param array{
+     *     durable: bool,
+     *     arguments: array<string, mixed>} $config
      *
-     * @return array{type: string, name: string, status: string, detail: string}
+     * @return array{
+     *     type: string,
+     *     name: string,
+     *     status: string,
+     *     detail: string}
      */
     private function declareQueue(AMQPChannel $channel, string $name, array $config): array
     {
@@ -201,7 +233,7 @@ final readonly class TopologyManager
                 'status' => 'created',
                 'detail' => '',
             ];
-        } catch (\AMQPQueueException $e) {
+        } catch (AMQPQueueException $e) {
             $this->logger?->warning('Failed to declare queue', [
                 'name' => $name,
                 'error' => $e->getMessage(),
@@ -217,9 +249,17 @@ final readonly class TopologyManager
     }
 
     /**
-     * @param array{exchange: string, queue: string, binding_key: string, arguments: array<string, mixed>} $binding
+     * @param array{
+     *     exchange: string,
+     *     queue: string,
+     *     binding_key: string,
+     *     arguments: array<string, mixed>} $binding
      *
-     * @return array{type: string, name: string, status: string, detail: string}
+     * @return array{
+     *     type: string,
+     *     name: string,
+     *     status: string,
+     *     detail: string}
      */
     private function declareBinding(AMQPChannel $channel, array $binding): array
     {
@@ -243,7 +283,7 @@ final readonly class TopologyManager
                 'status' => 'created',
                 'detail' => $binding['binding_key'],
             ];
-        } catch (\AMQPQueueException $e) {
+        } catch (AMQPQueueException $e) {
             $this->logger?->warning('Failed to create binding', [
                 'binding' => $label,
                 'error' => $e->getMessage(),

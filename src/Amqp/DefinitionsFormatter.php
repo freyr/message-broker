@@ -25,7 +25,20 @@ final readonly class DefinitionsFormatter
     ];
 
     /**
-     * @param array{exchanges: array<string, array{type: string, durable: bool, arguments: array<string, mixed>}>, queues: array<string, array{durable: bool, arguments: array<string, mixed>}>, bindings: array<int, array{exchange: string, queue: string, binding_key: string, arguments: array<string, mixed>}>} $topology
+     * @param array{
+     *     exchanges: array<string, array{
+     *      type: string,
+     *      durable: bool,
+     *      arguments: array<string, mixed>}>,
+     *     queues: array<string, array{
+     *      durable: bool,
+     *      arguments: array<string, mixed>}>,
+     *     bindings: array<int, array{
+     *      exchange: string,
+     *      queue: string,
+     *      binding_key: string,
+     *      arguments: array<string, mixed>}>
+     *  } $topology
      */
     public function __construct(
         private array $topology,
@@ -34,7 +47,11 @@ final readonly class DefinitionsFormatter
     /**
      * Format topology as RabbitMQ definitions structure.
      *
-     * @return array{exchanges: array<int, array<string, mixed>>, queues: array<int, array<string, mixed>>, bindings: array<int, array<string, mixed>>}
+     * @return array{
+     *     exchanges: array<int, array<string, mixed>>,
+     *     queues: array<int, array<string, mixed>>,
+     *     bindings: array<int, array<string, mixed>>
+     * }
      */
     public function format(string $vhost = '/'): array
     {
