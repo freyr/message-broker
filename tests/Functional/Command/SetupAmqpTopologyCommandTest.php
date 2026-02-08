@@ -100,6 +100,8 @@ final class SetupAmqpTopologyCommandTest extends FunctionalTestCase
 
         $decoded = json_decode($output, true);
         $this->assertIsArray($decoded);
+
+        /** @var array{exchanges: list<array<string, mixed>>, queues: list<array<string, mixed>>, bindings: list<array<string, mixed>>} $decoded */
         $this->assertArrayHasKey('exchanges', $decoded);
         $this->assertArrayHasKey('queues', $decoded);
         $this->assertArrayHasKey('bindings', $decoded);
@@ -151,6 +153,7 @@ final class SetupAmqpTopologyCommandTest extends FunctionalTestCase
         $output = $this->commandTester->getDisplay();
         $this->assertSame(Command::SUCCESS, $exitCode);
 
+        /** @var array{exchanges: list<array<string, mixed>>, queues: list<array<string, mixed>>, bindings: list<array<string, mixed>>} $decoded */
         $decoded = json_decode($output, true);
         $this->assertSame('my-vhost', $decoded['exchanges'][0]['vhost']);
         $this->assertSame('my-vhost', $decoded['queues'][0]['vhost']);
@@ -172,6 +175,7 @@ final class SetupAmqpTopologyCommandTest extends FunctionalTestCase
 
     private function getAmqpDsn(): string
     {
+        /** @var string */
         return $_ENV['MESSENGER_AMQP_DSN'] ?? 'amqp://guest:guest@127.0.0.1:5673/%2f';
     }
 

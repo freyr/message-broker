@@ -120,7 +120,7 @@ final readonly class DefinitionsFormatter
     private function normaliseArguments(array $arguments): array
     {
         foreach (self::INTEGER_ARGUMENTS as $key) {
-            if (isset($arguments[$key])) {
+            if (isset($arguments[$key]) && is_numeric($arguments[$key])) {
                 $arguments[$key] = (int) $arguments[$key];
             }
         }

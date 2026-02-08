@@ -269,12 +269,13 @@ final class ConfigurationTest extends TestCase
     /**
      * @param array<string, mixed> $config
      *
-     * @return array<string, mixed>
+     * @return array{inbox: array{message_types: array<string, string>, deduplication_table_name: string}, amqp: array{topology: array{exchanges: array<string, array{type: string, durable: bool, arguments: array<string, mixed>}>, queues: array<string, array{durable: bool, arguments: array<string, mixed>}>, bindings: array<int, array{exchange: string, queue: string, binding_key: string, arguments: array<string, mixed>}>}}}
      */
     private function processConfig(array $config): array
     {
         $processor = new Processor();
 
+        /** @var array{inbox: array{message_types: array<string, string>, deduplication_table_name: string}, amqp: array{topology: array{exchanges: array<string, array{type: string, durable: bool, arguments: array<string, mixed>}>, queues: array<string, array{durable: bool, arguments: array<string, mixed>}>, bindings: array<int, array{exchange: string, queue: string, binding_key: string, arguments: array<string, mixed>}>}}} */
         return $processor->processConfiguration(new Configuration(), [$config]);
     }
 }

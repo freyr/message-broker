@@ -105,7 +105,7 @@ final class SetupAmqpTopologyCommand extends Command
 
         $outputPath = $input->getOption('output');
         if (is_string($outputPath) && $outputPath !== '') {
-            $result = file_put_contents($outputPath, $json . "\n");
+            $result = file_put_contents($outputPath, $json."\n");
             if ($result === false) {
                 $io->error(sprintf('Failed to write definitions to %s', $outputPath));
 
@@ -154,6 +154,7 @@ final class SetupAmqpTopologyCommand extends Command
             $label = match ($result['status']) {
                 'created' => '<fg=green>[OK]</>',
                 'error' => '<fg=red>[ERROR]</>',
+                default => throw new \LogicException(sprintf('Unknown topology result status: %s', $result['status'])),
             };
 
             $detail = $result['detail'] !== '' ? sprintf(' (%s)', $result['detail']) : '';
@@ -197,7 +198,7 @@ final class SetupAmqpTopologyCommand extends Command
 
         $dsn = $this->resolveDsn($input);
         if ($dsn !== null) {
-            return $this->parseDsn($dsn)['vhost'];
+            return (string) $this->parseDsn($dsn)['vhost'];
         }
 
         return '/';

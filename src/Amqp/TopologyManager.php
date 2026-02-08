@@ -129,6 +129,7 @@ final readonly class TopologyManager
         }
 
         // Build dependency graph: exchange → list of exchanges it depends on
+        /** @var array<string, array<int, string>> $dependencies */
         $dependencies = [];
         foreach ($exchanges as $name) {
             $dependencies[$name] = [];
@@ -138,7 +139,7 @@ final readonly class TopologyManager
         foreach ($this->topology['exchanges'] as $name => $config) {
             if (isset($config['arguments']['alternate-exchange'])) {
                 $dep = $config['arguments']['alternate-exchange'];
-                if (isset($dependencies[$dep])) {
+                if (is_string($dep) && isset($dependencies[$dep])) {
                     $dependencies[$name][] = $dep;
                 }
             }
@@ -158,7 +159,7 @@ final readonly class TopologyManager
     private function normaliseArguments(array $arguments): array
     {
         foreach (self::INTEGER_ARGUMENTS as $key) {
-            if (isset($arguments[$key])) {
+            if (isset($arguments[$key]) && is_numeric($arguments[$key])) {
                 $arguments[$key] = (int) $arguments[$key];
             }
         }
@@ -180,7 +181,9 @@ final readonly class TopologyManager
             $exchange->setFlags($config['durable'] ? AMQP_DURABLE : AMQP_NOPARAM);
 
             if ($config['arguments'] !== []) {
-                $exchange->setArguments($config['arguments']);
+                /** @var array<string, bool|float|int|string|null> $exchangeArgs */
+                $exchangeArgs = $config['arguments'];
+                $exchange->setArguments($exchangeArgs);
             }
 
             $exchange->declareExchange();
@@ -225,7 +228,9 @@ final readonly class TopologyManager
 
             $arguments = $this->normaliseArguments($config['arguments']);
             if ($arguments !== []) {
-                $queue->setArguments($arguments);
+                /** @var array<string, bool|float|int|string|null> $queueArgs */
+                $queueArgs = $arguments;
+                $queue->setArguments($queueArgs);
             }
 
             $queue->declareQueue();
@@ -307,7 +312,9 @@ final readonly class TopologyManager
     private function topologicalSort(array $dependencies): array
     {
         // Build in-degree count and adjacency list
+        /** @var array<string, int> $inDegree */
         $inDegree = [];
+        /** @var array<string, array<int, string>> $adjacency */
         $adjacency = [];
 
         foreach ($dependencies as $node => $deps) {
@@ -315,14 +322,15 @@ final readonly class TopologyManager
             $adjacency[$node] ??= [];
 
             foreach ($deps as $dep) {
+                $adjacency[$dep] ??= [];
                 $adjacency[$dep][] = $node;
                 ++$inDegree[$node];
                 $inDegree[$dep] ??= 0;
-                $adjacency[$dep] ??= [];
             }
         }
 
         // Start with nodes that have no dependencies
+        /** @var \SplQueue<string> $queue */
         $queue = new \SplQueue();
         foreach ($inDegree as $node => $degree) {
             if ($degree === 0) {
@@ -330,8 +338,10 @@ final readonly class TopologyManager
             }
         }
 
+        /** @var array<int, string> $sorted */
         $sorted = [];
         while (!$queue->isEmpty()) {
+            /** @var string $node */
             $node = $queue->dequeue();
             $sorted[] = $node;
 
