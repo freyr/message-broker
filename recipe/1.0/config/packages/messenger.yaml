@@ -1,79 +1,83 @@
+# Freyr Message Broker — Messenger Transport Configuration
+#
+# Transports:
+#   outbox          — Stores domain events in DB (Doctrine, auto-managed)
+#   amqp            — Publishes outbox events to RabbitMQ (OutboxSerializer)
+#   amqp_your_inbox — Consumes from a RabbitMQ queue (InboxSerializer)
+#   failed          — Stores failed messages for retry/inspection (Doctrine, auto-managed)
+#
+# Replace all 'your_' placeholders with values matching your application and infrastructure.
+# See: vendor/freyr/message-broker/docs/database-schema.md
+
 framework:
     messenger:
-        # Failure transport for handling failed messages
         failure_transport: failed
-
-        # Middleware configuration
-        # DeduplicationMiddleware runs AFTER doctrine_transaction (priority -10)
-        # This ensures deduplication INSERT is within the transaction
-        default_middleware:
-            enabled: true
-            allow_no_handlers: false
 
         buses:
             messenger.bus.default:
+                default_middleware:
+                    enabled: true
+                    allow_no_handlers: false
                 middleware:
-                    - doctrine_transaction  # Priority 0 (starts transaction)
-                    # DeduplicationMiddleware (priority -10) registered via service tag
-                    # Runs after transaction starts, before handlers
+                    - doctrine_transaction
+                    # DeduplicationMiddleware is registered via service tag (priority -10)
+                    # and runs automatically after doctrine_transaction
 
         transports:
-            # Outbox transport - AUTO-MANAGED (auto_setup: true)
-            # No custom serialiser needed — messages are native PHP objects
-            # OutboxToAmqpBridge consumes from this transport
+            # Outbox: stores domain events in the database within your business transaction.
+            # Consumed by OutboxToAmqpBridge, which publishes them to AMQP.
             outbox:
                 dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
                 options:
                     auto_setup: true
-                retry_strategy:
-                  max_retries: 3
-                  delay: 1000
-                  multiplier: 2
+                # retry_strategy:
+                #     max_retries: 3
+                #     delay: 1000
+                #     multiplier: 2
 
-            # AMQP publish transport - MANUAL MANAGEMENT (auto_setup: false)
-            # OutboxToAmqpBridge publishes here
-            # Uses OutboxSerializer to translate FQN → semantic name in 'type' header
+            # AMQP publish: OutboxToAmqpBridge publishes events here.
+            # Uses OutboxSerializer to translate PHP class names to semantic message names.
+            # TODO: Configure the exchange to match your RabbitMQ setup
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
                 serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
                 options:
                     auto_setup: false
-                retry_strategy:
-                  max_retries: 3
-                  delay: 1000
-                  multiplier: 2
+                    # exchange:
+                    #     name: your_app_events
+                    #     type: topic
 
-            # AMQP consumption transport - MANUAL MANAGEMENT (auto_setup: false)
-            # Uses InboxSerializer to translate semantic name → FQN
-            # Duplicate and rename for each queue your application consumes from
-            amqp_orders:
+            # AMQP consume: receives events from a RabbitMQ queue.
+            # Uses InboxSerializer to translate semantic message names to PHP classes.
+            # TODO: Rename this transport and configure the queue for your application
+            # Duplicate this block for each queue your application consumes from.
+            # Run: php bin/console messenger:consume amqp_your_inbox -vv
+            amqp_your_inbox:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
                 serializer: 'Freyr\MessageBroker\Serializer\InboxSerializer'
                 options:
                     auto_setup: false
-                    queue:
-                        name: 'orders_queue'
-                retry_strategy:
-                  max_retries: 3
-                  delay: 1000
-                  multiplier: 2
+                    # exchange:
+                    #     name: your_app_events
+                    #     type: topic
+                    # queues:
+                    #     your_app_inbox: ~
 
-            # Failed transport - AUTO-MANAGED (auto_setup: true)
+            # Example: additional inbox transport for a second queue
+            # amqp_your_other_inbox:
+            #     dsn: '%env(MESSENGER_AMQP_DSN)%'
+            #     serializer: 'Freyr\MessageBroker\Serializer\InboxSerializer'
+            #     options:
+            #         auto_setup: false
+            #         queues:
+            #             your_other_queue: ~
+
+            # Failed: stores messages that exceeded retry attempts for inspection and manual retry.
             failed:
                 dsn: 'doctrine://default?queue_name=failed'
                 options:
                     auto_setup: true
 
         routing:
-            # Outbox messages - route domain events to outbox transport
-            # Example:
-            # 'App\Domain\Event\OrderPlaced': outbox
-            # 'App\Domain\Event\UserRegistered': outbox
-
-            # Inbox messages (consumed from AMQP transports)
-            # Messages are deserialised by InboxSerializer into typed objects
-            # DeduplicationMiddleware automatically prevents duplicate processing
-            # Handlers execute synchronously (no routing needed — AMQP transport handles delivery)
-            # Example handlers:
-            # #[AsMessageHandler]
-            # class OrderPlacedHandler { public function __invoke(OrderPlaced $message) {} }
+            # TODO: Route your domain events to the outbox transport
+            # 'App\YourDomain\Event\YourEvent': outbox
