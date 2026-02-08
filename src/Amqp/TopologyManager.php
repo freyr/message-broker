@@ -13,8 +13,7 @@ use Psr\Log\LoggerInterface;
  * Manages AMQP topology declaration from configuration.
  *
  * Declares exchanges, queues, and bindings against a live RabbitMQ
- * instance using the ext-amqp PHP extension. Resolves exchange
- * dependencies automatically via topological sort.
+ * instance using the ext-amqp PHP extension.
  */
 final readonly class TopologyManager
 {
@@ -54,11 +53,7 @@ final readonly class TopologyManager
     {
         $results = [];
 
-        // Declare exchanges in dependency order
-        $orderedExchanges = $this->resolveExchangeOrder();
-
-        foreach ($orderedExchanges as $name) {
-            $config = $this->topology['exchanges'][$name];
+        foreach ($this->topology['exchanges'] as $name => $config) {
             $results[] = $this->declareExchange($channel, $name, $config);
         }
 
@@ -84,10 +79,7 @@ final readonly class TopologyManager
     {
         $actions = [];
 
-        $orderedExchanges = $this->resolveExchangeOrder();
-
-        foreach ($orderedExchanges as $name) {
-            $config = $this->topology['exchanges'][$name];
+        foreach ($this->topology['exchanges'] as $name => $config) {
             $actions[] = sprintf(
                 'Declare exchange "%s" (type: %s, durable: %s)',
                 $name,
@@ -111,42 +103,6 @@ final readonly class TopologyManager
         }
 
         return $actions;
-    }
-
-    /**
-     * Resolve exchange declaration order via topological sort.
-     *
-     * Exchanges referenced in arguments (alternate-exchange) are declared first.
-     *
-     * @return array<int, string>
-     */
-    private function resolveExchangeOrder(): array
-    {
-        $exchanges = array_keys($this->topology['exchanges']);
-
-        if ($exchanges === []) {
-            return [];
-        }
-
-        // Build dependency graph: exchange → list of exchanges it depends on
-        /** @var array<string, array<int, string>> $dependencies */
-        $dependencies = [];
-        foreach ($exchanges as $name) {
-            $dependencies[$name] = [];
-        }
-
-        // Scan exchange arguments for alternate-exchange references
-        foreach ($this->topology['exchanges'] as $name => $config) {
-            if (isset($config['arguments']['alternate-exchange'])) {
-                $dep = $config['arguments']['alternate-exchange'];
-                if (is_string($dep) && isset($dependencies[$dep])) {
-                    $dependencies[$name][] = $dep;
-                }
-            }
-        }
-
-        // DLX references in queue arguments don't create inter-exchange dependencies
-        return $this->topologicalSort($dependencies);
     }
 
     /**
@@ -300,63 +256,5 @@ final readonly class TopologyManager
                 'detail' => $e->getMessage(),
             ];
         }
-    }
-
-    /**
-     * Kahn's algorithm for topological sort.
-     *
-     * @param array<string, array<int, string>> $dependencies node → list of nodes it depends on
-     *
-     * @return array<int, string>
-     */
-    private function topologicalSort(array $dependencies): array
-    {
-        // Build in-degree count and adjacency list
-        /** @var array<string, int> $inDegree */
-        $inDegree = [];
-        /** @var array<string, array<int, string>> $adjacency */
-        $adjacency = [];
-
-        foreach ($dependencies as $node => $deps) {
-            $inDegree[$node] ??= 0;
-            $adjacency[$node] ??= [];
-
-            foreach ($deps as $dep) {
-                $adjacency[$dep] ??= [];
-                $adjacency[$dep][] = $node;
-                ++$inDegree[$node];
-                $inDegree[$dep] ??= 0;
-            }
-        }
-
-        // Start with nodes that have no dependencies
-        /** @var \SplQueue<string> $queue */
-        $queue = new \SplQueue();
-        foreach ($inDegree as $node => $degree) {
-            if ($degree === 0) {
-                $queue->enqueue($node);
-            }
-        }
-
-        /** @var array<int, string> $sorted */
-        $sorted = [];
-        while (!$queue->isEmpty()) {
-            /** @var string $node */
-            $node = $queue->dequeue();
-            $sorted[] = $node;
-
-            foreach ($adjacency[$node] as $dependent) {
-                --$inDegree[$dependent];
-                if ($inDegree[$dependent] === 0) {
-                    $queue->enqueue($dependent);
-                }
-            }
-        }
-
-        if (count($sorted) !== count($dependencies)) {
-            throw new \RuntimeException('Cycle detected in exchange dependency graph');
-        }
-
-        return $sorted;
     }
 }

@@ -298,12 +298,8 @@ message_broker:
                 commerce:
                     type: topic          # required: direct, fanout, topic, headers
                     durable: true        # default: true
-                    arguments:
-                        alternate-exchange: unrouted
                 dlx:
                     type: direct
-                unrouted:
-                    type: fanout
 
             queues:
                 orders_queue:
@@ -314,7 +310,6 @@ message_broker:
                         x-queue-type: quorum
                         x-delivery-limit: 5
                 dlq.orders: {}
-                unrouted_queue: {}
 
             bindings:
                 - exchange: commerce
@@ -323,13 +318,9 @@ message_broker:
                 - exchange: dlx
                   queue: dlq.orders
                   binding_key: 'dlq.orders'
-                - exchange: unrouted
-                  queue: unrouted_queue
 ```
 
-Exchange dependencies (e.g. `alternate-exchange`) are resolved automatically via topological sort — referenced exchanges are declared first.
-
-Integer queue arguments (`x-message-ttl`, `x-max-length`, `x-delivery-limit`, etc.) are normalised to integers automatically.
+Exchanges are declared in configuration order. Integer queue arguments (`x-message-ttl`, `x-max-length`, `x-delivery-limit`, etc.) are normalised to integers automatically.
 
 #### Command Usage
 

@@ -21,8 +21,6 @@ message_broker:
     #             your_app_events:
     #                 type: topic        # required: direct, fanout, topic, headers
     #                 durable: true      # default: true
-    #                 # arguments:
-    #                 #     alternate-exchange: unrouted
     #
     #         queues:
     #             your_app_inbox:
