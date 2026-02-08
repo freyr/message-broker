@@ -19,7 +19,13 @@ final class DefinitionsFormatterTest extends TestCase
     {
         $formatter = new DefinitionsFormatter([
             'exchanges' => [
-                'commerce' => ['type' => 'topic', 'durable' => true, 'arguments' => ['alternate-exchange' => 'unrouted']],
+                'commerce' => [
+                    'type' => 'topic',
+                    'durable' => true,
+                    'arguments' => [
+                        'alternate-exchange' => 'unrouted',
+                    ],
+                ],
             ],
             'queues' => [],
             'bindings' => [],
@@ -35,7 +41,9 @@ final class DefinitionsFormatterTest extends TestCase
         $this->assertTrue($exchange['durable']);
         $this->assertFalse($exchange['auto_delete']);
         $this->assertFalse($exchange['internal']);
-        $this->assertEquals((object) ['alternate-exchange' => 'unrouted'], $exchange['arguments']);
+        $this->assertEquals((object) [
+            'alternate-exchange' => 'unrouted',
+        ], $exchange['arguments']);
     }
 
     public function testFormatQueues(): void
@@ -76,7 +84,12 @@ final class DefinitionsFormatterTest extends TestCase
             'exchanges' => [],
             'queues' => [],
             'bindings' => [
-                ['exchange' => 'commerce', 'queue' => 'orders_queue', 'binding_key' => 'order.*', 'arguments' => []],
+                [
+                    'exchange' => 'commerce',
+                    'queue' => 'orders_queue',
+                    'binding_key' => 'order.*',
+                    'arguments' => [],
+                ],
             ],
         ]);
 
@@ -96,13 +109,25 @@ final class DefinitionsFormatterTest extends TestCase
     {
         $formatter = new DefinitionsFormatter([
             'exchanges' => [
-                'ex' => ['type' => 'direct', 'durable' => true, 'arguments' => []],
+                'ex' => [
+                    'type' => 'direct',
+                    'durable' => true,
+                    'arguments' => [],
+                ],
             ],
             'queues' => [
-                'q' => ['durable' => true, 'arguments' => []],
+                'q' => [
+                    'durable' => true,
+                    'arguments' => [],
+                ],
             ],
             'bindings' => [
-                ['exchange' => 'ex', 'queue' => 'q', 'binding_key' => '', 'arguments' => []],
+                [
+                    'exchange' => 'ex',
+                    'queue' => 'q',
+                    'binding_key' => '',
+                    'arguments' => [],
+                ],
             ],
         ]);
 
@@ -128,7 +153,7 @@ final class DefinitionsFormatterTest extends TestCase
         $this->assertSame([], $result['bindings']);
     }
 
-    public function testFormatPreservesIntegerArguments(): void
+    public function testFormatNormalisesAllKnownIntegerArguments(): void
     {
         $formatter = new DefinitionsFormatter([
             'exchanges' => [],
@@ -137,7 +162,13 @@ final class DefinitionsFormatterTest extends TestCase
                     'durable' => true,
                     'arguments' => [
                         'x-message-ttl' => '86400000',
+                        'x-max-length' => '100000',
+                        'x-max-length-bytes' => '104857600',
+                        'x-max-priority' => '10',
+                        'x-expires' => '604800000',
                         'x-delivery-limit' => '5',
+                        'x-queue-type' => 'quorum',
+                        'x-dead-letter-exchange' => 'dlx',
                     ],
                 ],
             ],
@@ -147,22 +178,67 @@ final class DefinitionsFormatterTest extends TestCase
         $result = $formatter->format('/');
         $args = (array) $result['queues'][0]['arguments'];
 
-        // Integer arguments should be normalised
+        // Known integer arguments should be cast from strings
         $this->assertSame(86400000, $args['x-message-ttl']);
+        $this->assertSame(100000, $args['x-max-length']);
+        $this->assertSame(104857600, $args['x-max-length-bytes']);
+        $this->assertSame(10, $args['x-max-priority']);
+        $this->assertSame(604800000, $args['x-expires']);
         $this->assertSame(5, $args['x-delivery-limit']);
+
+        // Non-integer arguments should remain as strings
+        $this->assertSame('quorum', $args['x-queue-type']);
+        $this->assertSame('dlx', $args['x-dead-letter-exchange']);
+    }
+
+    public function testFormatPreservesAlreadyIntegerArguments(): void
+    {
+        $formatter = new DefinitionsFormatter([
+            'exchanges' => [],
+            'queues' => [
+                'q' => [
+                    'durable' => true,
+                    'arguments' => [
+                        'x-delivery-limit' => 5,
+                        'x-message-ttl' => 60000,
+                    ],
+                ],
+            ],
+            'bindings' => [],
+        ]);
+
+        $result = $formatter->format('/');
+        $args = (array) $result['queues'][0]['arguments'];
+
+        $this->assertSame(5, $args['x-delivery-limit']);
+        $this->assertSame(60000, $args['x-message-ttl']);
     }
 
     public function testFormatProducesValidJson(): void
     {
         $formatter = new DefinitionsFormatter([
             'exchanges' => [
-                'commerce' => ['type' => 'topic', 'durable' => true, 'arguments' => []],
+                'commerce' => [
+                    'type' => 'topic',
+                    'durable' => true,
+                    'arguments' => [],
+                ],
             ],
             'queues' => [
-                'orders' => ['durable' => true, 'arguments' => ['x-queue-type' => 'quorum']],
+                'orders' => [
+                    'durable' => true,
+                    'arguments' => [
+                        'x-queue-type' => 'quorum',
+                    ],
+                ],
             ],
             'bindings' => [
-                ['exchange' => 'commerce', 'queue' => 'orders', 'binding_key' => 'order.*', 'arguments' => []],
+                [
+                    'exchange' => 'commerce',
+                    'queue' => 'orders',
+                    'binding_key' => 'order.*',
+                    'arguments' => [],
+                ],
             ],
         ]);
 
@@ -181,7 +257,11 @@ final class DefinitionsFormatterTest extends TestCase
     {
         $formatter = new DefinitionsFormatter([
             'exchanges' => [
-                'simple' => ['type' => 'fanout', 'durable' => false, 'arguments' => []],
+                'simple' => [
+                    'type' => 'fanout',
+                    'durable' => false,
+                    'arguments' => [],
+                ],
             ],
             'queues' => [],
             'bindings' => [],

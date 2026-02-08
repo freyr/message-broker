@@ -13,6 +13,18 @@ namespace Freyr\MessageBroker\Amqp;
 final readonly class DefinitionsFormatter
 {
     /**
+     * Queue arguments that must be integers for RabbitMQ.
+     */
+    private const INTEGER_ARGUMENTS = [
+        'x-message-ttl',
+        'x-max-length',
+        'x-max-length-bytes',
+        'x-max-priority',
+        'x-expires',
+        'x-delivery-limit',
+    ];
+
+    /**
      * @param array{exchanges: array<string, array{type: string, durable: bool, arguments: array<string, mixed>}>, queues: array<string, array{durable: bool, arguments: array<string, mixed>}>, bindings: array<int, array{exchange: string, queue: string, binding_key: string, arguments: array<string, mixed>}>} $topology
      */
     public function __construct(
@@ -63,7 +75,7 @@ final readonly class DefinitionsFormatter
         $queues = [];
 
         foreach ($this->topology['queues'] as $name => $config) {
-            $arguments = TopologyManager::normaliseArguments($config['arguments']);
+            $arguments = $this->normaliseArguments($config['arguments']);
 
             $queues[] = [
                 'name' => $name,
@@ -96,5 +108,23 @@ final readonly class DefinitionsFormatter
         }
 
         return $bindings;
+    }
+
+    /**
+     * Normalise queue arguments to ensure correct types for RabbitMQ.
+     *
+     * @param array<string, mixed> $arguments
+     *
+     * @return array<string, mixed>
+     */
+    private function normaliseArguments(array $arguments): array
+    {
+        foreach (self::INTEGER_ARGUMENTS as $key) {
+            if (isset($arguments[$key])) {
+                $arguments[$key] = (int) $arguments[$key];
+            }
+        }
+
+        return $arguments;
     }
 }

@@ -10,76 +10,123 @@ use PHPUnit\Framework\TestCase;
 /**
  * Unit tests for TopologyManager.
  *
- * Tests dependency resolution, dry-run output, argument normalisation,
- * and edge cases without requiring a live RabbitMQ connection.
+ * Tests dependency resolution, dry-run output, and edge cases
+ * without requiring a live RabbitMQ connection.
  */
 final class TopologyManagerTest extends TestCase
 {
-    public function testResolveExchangeOrderWithNoDependencies(): void
+    public function testDryRunWithIndependentExchanges(): void
     {
         $topology = $this->createTopology(
             exchanges: [
-                'alpha' => ['type' => 'topic', 'durable' => true, 'arguments' => []],
-                'beta' => ['type' => 'direct', 'durable' => true, 'arguments' => []],
+                'alpha' => [
+                    'type' => 'topic',
+                    'durable' => true,
+                    'arguments' => [],
+                ],
+                'beta' => [
+                    'type' => 'direct',
+                    'durable' => true,
+                    'arguments' => [],
+                ],
             ],
         );
 
         $manager = new TopologyManager($topology);
-        $order = $manager->resolveExchangeOrder();
+        $actions = $manager->dryRun();
 
-        // Both should be present (order is deterministic but not guaranteed alphabetical)
-        $this->assertCount(2, $order);
-        $this->assertContains('alpha', $order);
-        $this->assertContains('beta', $order);
+        // Both exchanges should be declared
+        $this->assertCount(2, $actions);
+        $combined = implode("\n", $actions);
+        $this->assertStringContainsString('"alpha"', $combined);
+        $this->assertStringContainsString('"beta"', $combined);
     }
 
-    public function testResolveExchangeOrderWithAlternateExchangeDependency(): void
+    public function testDryRunRespectsAlternateExchangeDependencyOrder(): void
     {
         $topology = $this->createTopology(
             exchanges: [
-                'commerce' => ['type' => 'topic', 'durable' => true, 'arguments' => ['alternate-exchange' => 'unrouted']],
-                'unrouted' => ['type' => 'fanout', 'durable' => true, 'arguments' => []],
+                'commerce' => [
+                    'type' => 'topic',
+                    'durable' => true,
+                    'arguments' => [
+                        'alternate-exchange' => 'unrouted',
+                    ],
+                ],
+                'unrouted' => [
+                    'type' => 'fanout',
+                    'durable' => true,
+                    'arguments' => [],
+                ],
             ],
         );
 
         $manager = new TopologyManager($topology);
-        $order = $manager->resolveExchangeOrder();
+        $actions = $manager->dryRun();
 
-        // "unrouted" must come before "commerce"
-        $this->assertCount(2, $order);
-        $unroutedIndex = array_search('unrouted', $order, true);
-        $commerceIndex = array_search('commerce', $order, true);
+        // "unrouted" must be declared before "commerce"
+        $this->assertCount(2, $actions);
+        $unroutedIndex = $this->findActionIndex($actions, '"unrouted"');
+        $commerceIndex = $this->findActionIndex($actions, '"commerce"');
         $this->assertLessThan($commerceIndex, $unroutedIndex);
     }
 
-    public function testResolveExchangeOrderWithChainedDependencies(): void
+    public function testDryRunRespectsChainedDependencyOrder(): void
     {
         $topology = $this->createTopology(
             exchanges: [
-                'a' => ['type' => 'topic', 'durable' => true, 'arguments' => ['alternate-exchange' => 'b']],
-                'b' => ['type' => 'fanout', 'durable' => true, 'arguments' => ['alternate-exchange' => 'c']],
-                'c' => ['type' => 'fanout', 'durable' => true, 'arguments' => []],
+                'a' => [
+                    'type' => 'topic',
+                    'durable' => true,
+                    'arguments' => [
+                        'alternate-exchange' => 'b',
+                    ],
+                ],
+                'b' => [
+                    'type' => 'fanout',
+                    'durable' => true,
+                    'arguments' => [
+                        'alternate-exchange' => 'c',
+                    ],
+                ],
+                'c' => [
+                    'type' => 'fanout',
+                    'durable' => true,
+                    'arguments' => [],
+                ],
             ],
         );
 
         $manager = new TopologyManager($topology);
-        $order = $manager->resolveExchangeOrder();
+        $actions = $manager->dryRun();
 
         // c → b → a
-        $this->assertCount(3, $order);
-        $cIndex = array_search('c', $order, true);
-        $bIndex = array_search('b', $order, true);
-        $aIndex = array_search('a', $order, true);
+        $this->assertCount(3, $actions);
+        $cIndex = $this->findActionIndex($actions, '"c"');
+        $bIndex = $this->findActionIndex($actions, '"b"');
+        $aIndex = $this->findActionIndex($actions, '"a"');
         $this->assertLessThan($bIndex, $cIndex);
         $this->assertLessThan($aIndex, $bIndex);
     }
 
-    public function testResolveExchangeOrderDetectsCycle(): void
+    public function testDryRunDetectsCycleInDependencies(): void
     {
         $topology = $this->createTopology(
             exchanges: [
-                'a' => ['type' => 'topic', 'durable' => true, 'arguments' => ['alternate-exchange' => 'b']],
-                'b' => ['type' => 'fanout', 'durable' => true, 'arguments' => ['alternate-exchange' => 'a']],
+                'a' => [
+                    'type' => 'topic',
+                    'durable' => true,
+                    'arguments' => [
+                        'alternate-exchange' => 'b',
+                    ],
+                ],
+                'b' => [
+                    'type' => 'fanout',
+                    'durable' => true,
+                    'arguments' => [
+                        'alternate-exchange' => 'a',
+                    ],
+                ],
             ],
         );
 
@@ -87,44 +134,61 @@ final class TopologyManagerTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Cycle detected');
-        $manager->resolveExchangeOrder();
+        $manager->dryRun();
     }
 
-    public function testResolveExchangeOrderIgnoresExternalReferences(): void
+    public function testDryRunIgnoresExternalExchangeReferences(): void
     {
         // alternate-exchange references an exchange not in the topology — ignored
         $topology = $this->createTopology(
             exchanges: [
-                'commerce' => ['type' => 'topic', 'durable' => true, 'arguments' => ['alternate-exchange' => 'external']],
+                'commerce' => [
+                    'type' => 'topic',
+                    'durable' => true,
+                    'arguments' => [
+                        'alternate-exchange' => 'external',
+                    ],
+                ],
             ],
         );
 
         $manager = new TopologyManager($topology);
-        $order = $manager->resolveExchangeOrder();
+        $actions = $manager->dryRun();
 
-        $this->assertSame(['commerce'], $order);
-    }
-
-    public function testResolveExchangeOrderWithEmptyExchanges(): void
-    {
-        $topology = $this->createTopology(exchanges: []);
-        $manager = new TopologyManager($topology);
-
-        $this->assertSame([], $manager->resolveExchangeOrder());
+        $this->assertCount(1, $actions);
+        $this->assertStringContainsString('"commerce"', $actions[0]);
     }
 
     public function testDryRunWithFullTopology(): void
     {
         $topology = $this->createTopology(
             exchanges: [
-                'commerce' => ['type' => 'topic', 'durable' => true, 'arguments' => []],
-                'dlx' => ['type' => 'direct', 'durable' => true, 'arguments' => []],
+                'commerce' => [
+                    'type' => 'topic',
+                    'durable' => true,
+                    'arguments' => [],
+                ],
+                'dlx' => [
+                    'type' => 'direct',
+                    'durable' => true,
+                    'arguments' => [],
+                ],
             ],
             queues: [
-                'orders_queue' => ['durable' => true, 'arguments' => ['x-dead-letter-exchange' => 'dlx']],
+                'orders_queue' => [
+                    'durable' => true,
+                    'arguments' => [
+                        'x-dead-letter-exchange' => 'dlx',
+                    ],
+                ],
             ],
             bindings: [
-                ['exchange' => 'commerce', 'queue' => 'orders_queue', 'binding_key' => 'order.*', 'arguments' => []],
+                [
+                    'exchange' => 'commerce',
+                    'queue' => 'orders_queue',
+                    'binding_key' => 'order.*',
+                    'arguments' => [],
+                ],
             ],
         );
 
@@ -160,13 +224,25 @@ final class TopologyManagerTest extends TestCase
     {
         $topology = $this->createTopology(
             exchanges: [
-                'events' => ['type' => 'fanout', 'durable' => true, 'arguments' => []],
+                'events' => [
+                    'type' => 'fanout',
+                    'durable' => true,
+                    'arguments' => [],
+                ],
             ],
             queues: [
-                'all_events' => ['durable' => true, 'arguments' => []],
+                'all_events' => [
+                    'durable' => true,
+                    'arguments' => [],
+                ],
             ],
             bindings: [
-                ['exchange' => 'events', 'queue' => 'all_events', 'binding_key' => '', 'arguments' => []],
+                [
+                    'exchange' => 'events',
+                    'queue' => 'all_events',
+                    'binding_key' => '',
+                    'arguments' => [],
+                ],
             ],
         );
 
@@ -177,47 +253,20 @@ final class TopologyManagerTest extends TestCase
         $this->assertStringContainsString('(empty)', $bindingAction);
     }
 
-    public function testNormaliseArgumentsCastsIntegerKeys(): void
+    /**
+     * Find the index of the first action containing the given substring.
+     *
+     * @param array<int, string> $actions
+     */
+    private function findActionIndex(array $actions, string $needle): int
     {
-        $arguments = [
-            'x-message-ttl' => '86400000',
-            'x-max-length' => '100000',
-            'x-max-length-bytes' => '104857600',
-            'x-max-priority' => '10',
-            'x-expires' => '604800000',
-            'x-delivery-limit' => '5',
-            'x-queue-type' => 'quorum',    // should NOT be cast
-            'x-dead-letter-exchange' => 'dlx', // should NOT be cast
-        ];
+        foreach ($actions as $index => $action) {
+            if (str_contains($action, $needle)) {
+                return $index;
+            }
+        }
 
-        $normalised = TopologyManager::normaliseArguments($arguments);
-
-        $this->assertSame(86400000, $normalised['x-message-ttl']);
-        $this->assertSame(100000, $normalised['x-max-length']);
-        $this->assertSame(104857600, $normalised['x-max-length-bytes']);
-        $this->assertSame(10, $normalised['x-max-priority']);
-        $this->assertSame(604800000, $normalised['x-expires']);
-        $this->assertSame(5, $normalised['x-delivery-limit']);
-        $this->assertSame('quorum', $normalised['x-queue-type']);
-        $this->assertSame('dlx', $normalised['x-dead-letter-exchange']);
-    }
-
-    public function testNormaliseArgumentsWithAlreadyIntegerValues(): void
-    {
-        $arguments = [
-            'x-delivery-limit' => 5,
-            'x-message-ttl' => 60000,
-        ];
-
-        $normalised = TopologyManager::normaliseArguments($arguments);
-
-        $this->assertSame(5, $normalised['x-delivery-limit']);
-        $this->assertSame(60000, $normalised['x-message-ttl']);
-    }
-
-    public function testNormaliseArgumentsWithEmptyArray(): void
-    {
-        $this->assertSame([], TopologyManager::normaliseArguments([]));
+        $this->fail(sprintf('No action found containing "%s"', $needle));
     }
 
     /**

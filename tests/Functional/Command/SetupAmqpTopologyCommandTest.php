@@ -24,7 +24,8 @@ final class SetupAmqpTopologyCommandTest extends FunctionalTestCase
         parent::setUp();
 
         /** @var SetupAmqpTopologyCommand $command */
-        $command = $this->getContainer()->get(SetupAmqpTopologyCommand::class);
+        $command = $this->getContainer()
+            ->get(SetupAmqpTopologyCommand::class);
         $this->commandTester = new CommandTester($command);
     }
 
@@ -35,11 +36,13 @@ final class SetupAmqpTopologyCommandTest extends FunctionalTestCase
 
         // When: run the command with DSN
         $dsn = $this->getAmqpDsn();
-        $exitCode = $this->commandTester->execute(['--dsn' => $dsn]);
+        $exitCode = $this->commandTester->execute([
+            '--dsn' => $dsn,
+        ]);
 
         // Then: command succeeds
         $output = $this->commandTester->getDisplay();
-        $this->assertSame(Command::SUCCESS, $exitCode, 'Command should succeed. Output: ' . $output);
+        $this->assertSame(Command::SUCCESS, $exitCode, 'Command should succeed. Output: '.$output);
         $this->assertStringContainsString('[OK]', $output);
         $this->assertStringContainsString('topology_test_exchange', $output);
         $this->assertStringContainsString('topology_test_queue', $output);
@@ -53,10 +56,14 @@ final class SetupAmqpTopologyCommandTest extends FunctionalTestCase
     {
         // Given: topology already declared
         $dsn = $this->getAmqpDsn();
-        $this->commandTester->execute(['--dsn' => $dsn]);
+        $this->commandTester->execute([
+            '--dsn' => $dsn,
+        ]);
 
         // When: run again
-        $exitCode = $this->commandTester->execute(['--dsn' => $dsn]);
+        $exitCode = $this->commandTester->execute([
+            '--dsn' => $dsn,
+        ]);
 
         // Then: still succeeds (idempotent)
         $this->assertSame(Command::SUCCESS, $exitCode);
@@ -67,7 +74,9 @@ final class SetupAmqpTopologyCommandTest extends FunctionalTestCase
     public function testDryRunDoesNotConnect(): void
     {
         // When: run with --dry-run
-        $exitCode = $this->commandTester->execute(['--dry-run' => true]);
+        $exitCode = $this->commandTester->execute([
+            '--dry-run' => true,
+        ]);
 
         // Then: shows planned actions, succeeds
         $output = $this->commandTester->getDisplay();
@@ -81,7 +90,9 @@ final class SetupAmqpTopologyCommandTest extends FunctionalTestCase
     public function testDumpOutputsValidJson(): void
     {
         // When: run with --dump
-        $exitCode = $this->commandTester->execute(['--dump' => true]);
+        $exitCode = $this->commandTester->execute([
+            '--dump' => true,
+        ]);
 
         // Then: output is valid JSON with correct structure
         $output = $this->commandTester->getDisplay();
@@ -101,7 +112,7 @@ final class SetupAmqpTopologyCommandTest extends FunctionalTestCase
 
     public function testDumpToFile(): void
     {
-        $outputFile = sys_get_temp_dir() . '/rabbitmq-definitions-test.json';
+        $outputFile = sys_get_temp_dir().'/rabbitmq-definitions-test.json';
 
         // Clean up from previous runs
         if (file_exists($outputFile)) {

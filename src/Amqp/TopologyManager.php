@@ -97,11 +97,7 @@ final readonly class TopologyManager
         }
 
         foreach ($this->topology['queues'] as $name => $config) {
-            $actions[] = sprintf(
-                'Declare queue "%s" (durable: %s)',
-                $name,
-                $config['durable'] ? 'yes' : 'no',
-            );
+            $actions[] = sprintf('Declare queue "%s" (durable: %s)', $name, $config['durable'] ? 'yes' : 'no');
         }
 
         foreach ($this->topology['bindings'] as $binding) {
@@ -120,12 +116,11 @@ final readonly class TopologyManager
     /**
      * Resolve exchange declaration order via topological sort.
      *
-     * Exchanges referenced in arguments (alternate-exchange) or
-     * queue arguments (x-dead-letter-exchange) are declared first.
+     * Exchanges referenced in arguments (alternate-exchange) are declared first.
      *
      * @return array<int, string>
      */
-    public function resolveExchangeOrder(): array
+    private function resolveExchangeOrder(): array
     {
         $exchanges = array_keys($this->topology['exchanges']);
 
@@ -149,15 +144,7 @@ final readonly class TopologyManager
             }
         }
 
-        // Scan queue arguments for x-dead-letter-exchange references
-        // These exchanges need to exist before queues are declared
-        foreach ($this->topology['queues'] as $queueConfig) {
-            if (isset($queueConfig['arguments']['x-dead-letter-exchange'])) {
-                // No dependency between exchanges — DLX just needs to be in the list
-                // The topological sort handles this if exchanges reference each other
-            }
-        }
-
+        // DLX references in queue arguments don't create inter-exchange dependencies
         return $this->topologicalSort($dependencies);
     }
 
@@ -168,7 +155,7 @@ final readonly class TopologyManager
      *
      * @return array<string, mixed>
      */
-    public static function normaliseArguments(array $arguments): array
+    private function normaliseArguments(array $arguments): array
     {
         foreach (self::INTEGER_ARGUMENTS as $key) {
             if (isset($arguments[$key])) {
@@ -198,13 +185,29 @@ final readonly class TopologyManager
 
             $exchange->declareExchange();
 
-            $this->logger?->info('Declared exchange', ['name' => $name, 'type' => $config['type']]);
+            $this->logger?->info('Declared exchange', [
+                'name' => $name,
+                'type' => $config['type'],
+            ]);
 
-            return ['type' => 'exchange', 'name' => $name, 'status' => 'created', 'detail' => $config['type']];
+            return [
+                'type' => 'exchange',
+                'name' => $name,
+                'status' => 'created',
+                'detail' => $config['type'],
+            ];
         } catch (\AMQPExchangeException $e) {
-            $this->logger?->warning('Failed to declare exchange', ['name' => $name, 'error' => $e->getMessage()]);
+            $this->logger?->warning('Failed to declare exchange', [
+                'name' => $name,
+                'error' => $e->getMessage(),
+            ]);
 
-            return ['type' => 'exchange', 'name' => $name, 'status' => 'error', 'detail' => $e->getMessage()];
+            return [
+                'type' => 'exchange',
+                'name' => $name,
+                'status' => 'error',
+                'detail' => $e->getMessage(),
+            ];
         }
     }
 
@@ -220,20 +223,35 @@ final readonly class TopologyManager
             $queue->setName($name);
             $queue->setFlags($config['durable'] ? AMQP_DURABLE : AMQP_NOPARAM);
 
-            $arguments = self::normaliseArguments($config['arguments']);
+            $arguments = $this->normaliseArguments($config['arguments']);
             if ($arguments !== []) {
                 $queue->setArguments($arguments);
             }
 
             $queue->declareQueue();
 
-            $this->logger?->info('Declared queue', ['name' => $name]);
+            $this->logger?->info('Declared queue', [
+                'name' => $name,
+            ]);
 
-            return ['type' => 'queue', 'name' => $name, 'status' => 'created', 'detail' => ''];
+            return [
+                'type' => 'queue',
+                'name' => $name,
+                'status' => 'created',
+                'detail' => '',
+            ];
         } catch (\AMQPQueueException $e) {
-            $this->logger?->warning('Failed to declare queue', ['name' => $name, 'error' => $e->getMessage()]);
+            $this->logger?->warning('Failed to declare queue', [
+                'name' => $name,
+                'error' => $e->getMessage(),
+            ]);
 
-            return ['type' => 'queue', 'name' => $name, 'status' => 'error', 'detail' => $e->getMessage()];
+            return [
+                'type' => 'queue',
+                'name' => $name,
+                'status' => 'error',
+                'detail' => $e->getMessage(),
+            ];
         }
     }
 
@@ -250,8 +268,7 @@ final readonly class TopologyManager
             $queue = new AMQPQueue($channel);
             $queue->setName($binding['queue']);
 
-            $arguments = $binding['arguments'] !== [] ? $binding['arguments'] : [];
-            $queue->bind($binding['exchange'], $binding['binding_key'], $arguments);
+            $queue->bind($binding['exchange'], $binding['binding_key'], $binding['arguments']);
 
             $this->logger?->info('Created binding', [
                 'exchange' => $binding['exchange'],
@@ -259,11 +276,24 @@ final readonly class TopologyManager
                 'binding_key' => $binding['binding_key'],
             ]);
 
-            return ['type' => 'binding', 'name' => $label, 'status' => 'created', 'detail' => $binding['binding_key']];
+            return [
+                'type' => 'binding',
+                'name' => $label,
+                'status' => 'created',
+                'detail' => $binding['binding_key'],
+            ];
         } catch (\AMQPQueueException $e) {
-            $this->logger?->warning('Failed to create binding', ['binding' => $label, 'error' => $e->getMessage()]);
+            $this->logger?->warning('Failed to create binding', [
+                'binding' => $label,
+                'error' => $e->getMessage(),
+            ]);
 
-            return ['type' => 'binding', 'name' => $label, 'status' => 'error', 'detail' => $e->getMessage()];
+            return [
+                'type' => 'binding',
+                'name' => $label,
+                'status' => 'error',
+                'detail' => $e->getMessage(),
+            ];
         }
     }
 
@@ -273,8 +303,6 @@ final readonly class TopologyManager
      * @param array<string, array<int, string>> $dependencies node → list of nodes it depends on
      *
      * @return array<int, string>
-     *
-     * @throws \RuntimeException if a cycle is detected
      */
     private function topologicalSort(array $dependencies): array
     {
@@ -288,29 +316,29 @@ final readonly class TopologyManager
 
             foreach ($deps as $dep) {
                 $adjacency[$dep][] = $node;
-                $inDegree[$node]++;
+                ++$inDegree[$node];
                 $inDegree[$dep] ??= 0;
                 $adjacency[$dep] ??= [];
             }
         }
 
         // Start with nodes that have no dependencies
-        $queue = [];
+        $queue = new \SplQueue();
         foreach ($inDegree as $node => $degree) {
             if ($degree === 0) {
-                $queue[] = $node;
+                $queue->enqueue($node);
             }
         }
 
         $sorted = [];
-        while ($queue !== []) {
-            $node = array_shift($queue);
+        while (!$queue->isEmpty()) {
+            $node = $queue->dequeue();
             $sorted[] = $node;
 
             foreach ($adjacency[$node] as $dependent) {
-                $inDegree[$dependent]--;
+                --$inDegree[$dependent];
                 if ($inDegree[$dependent] === 0) {
-                    $queue[] = $dependent;
+                    $queue->enqueue($dependent);
                 }
             }
         }

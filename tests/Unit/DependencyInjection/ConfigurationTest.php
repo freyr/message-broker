@@ -86,7 +86,9 @@ final class ConfigurationTest extends TestCase
                 'amqp' => [
                     'topology' => [
                         'exchanges' => [
-                            'test' => ['type' => $type],
+                            'test' => [
+                                'type' => $type,
+                            ],
                         ],
                     ],
                 ],
@@ -143,7 +145,10 @@ final class ConfigurationTest extends TestCase
             'amqp' => [
                 'topology' => [
                     'bindings' => [
-                        ['exchange' => 'commerce', 'queue' => 'orders_queue'],
+                        [
+                            'exchange' => 'commerce',
+                            'queue' => 'orders_queue',
+                        ],
                     ],
                 ],
             ],
@@ -166,7 +171,9 @@ final class ConfigurationTest extends TestCase
                             'exchange' => 'commerce',
                             'queue' => 'orders_queue',
                             'binding_key' => 'order.*',
-                            'arguments' => ['x-match' => 'any'],
+                            'arguments' => [
+                                'x-match' => 'any',
+                            ],
                         ],
                     ],
                 ],
@@ -175,7 +182,9 @@ final class ConfigurationTest extends TestCase
 
         $binding = $config['amqp']['topology']['bindings'][0];
         $this->assertSame('order.*', $binding['binding_key']);
-        $this->assertSame(['x-match' => 'any'], $binding['arguments']);
+        $this->assertSame([
+            'x-match' => 'any',
+        ], $binding['arguments']);
     }
 
     public function testFullTopologyConfiguration(): void
@@ -184,17 +193,39 @@ final class ConfigurationTest extends TestCase
             'amqp' => [
                 'topology' => [
                     'exchanges' => [
-                        'commerce' => ['type' => 'topic', 'arguments' => ['alternate-exchange' => 'unrouted']],
-                        'dlx' => ['type' => 'direct'],
-                        'unrouted' => ['type' => 'fanout'],
+                        'commerce' => [
+                            'type' => 'topic',
+                            'arguments' => [
+                                'alternate-exchange' => 'unrouted',
+                            ],
+                        ],
+                        'dlx' => [
+                            'type' => 'direct',
+                        ],
+                        'unrouted' => [
+                            'type' => 'fanout',
+                        ],
                     ],
                     'queues' => [
-                        'orders_queue' => ['arguments' => ['x-dead-letter-exchange' => 'dlx', 'x-queue-type' => 'quorum']],
+                        'orders_queue' => [
+                            'arguments' => [
+                                'x-dead-letter-exchange' => 'dlx',
+                                'x-queue-type' => 'quorum',
+                            ],
+                        ],
                         'dlq.orders' => [],
                     ],
                     'bindings' => [
-                        ['exchange' => 'commerce', 'queue' => 'orders_queue', 'binding_key' => 'order.*'],
-                        ['exchange' => 'dlx', 'queue' => 'dlq.orders', 'binding_key' => 'dlq.orders'],
+                        [
+                            'exchange' => 'commerce',
+                            'queue' => 'orders_queue',
+                            'binding_key' => 'order.*',
+                        ],
+                        [
+                            'exchange' => 'dlx',
+                            'queue' => 'dlq.orders',
+                            'binding_key' => 'dlq.orders',
+                        ],
                     ],
                 ],
             ],
@@ -217,14 +248,18 @@ final class ConfigurationTest extends TestCase
             'amqp' => [
                 'topology' => [
                     'exchanges' => [
-                        'commerce' => ['type' => 'topic'],
+                        'commerce' => [
+                            'type' => 'topic',
+                        ],
                     ],
                 ],
             ],
         ]);
 
         // Inbox config should still work
-        $this->assertSame(['order.placed' => 'App\\Message\\OrderPlaced'], $config['inbox']['message_types']);
+        $this->assertSame([
+            'order.placed' => 'App\\Message\\OrderPlaced',
+        ], $config['inbox']['message_types']);
         $this->assertSame('custom_dedup', $config['inbox']['deduplication_table_name']);
 
         // AMQP config should work alongside

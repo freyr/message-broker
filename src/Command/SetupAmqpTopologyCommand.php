@@ -13,6 +13,12 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
+/**
+ * Declares AMQP topology (exchanges, queues, bindings) from bundle configuration.
+ *
+ * Supports three execution modes: live declaration against RabbitMQ,
+ * dry-run preview, and RabbitMQ definitions JSON export.
+ */
 #[AsCommand(
     name: 'message-broker:setup-amqp',
     description: 'Declare AMQP topology (exchanges, queues, bindings) from configuration',
@@ -30,11 +36,21 @@ final class SetupAmqpTopologyCommand extends Command
     protected function configure(): void
     {
         $this
-            ->addOption('dsn', null, InputOption::VALUE_REQUIRED, 'AMQP connection DSN (default: MESSENGER_AMQP_DSN env)')
+            ->addOption(
+                'dsn',
+                null,
+                InputOption::VALUE_REQUIRED,
+                'AMQP connection DSN (default: MESSENGER_AMQP_DSN env)'
+            )
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Show planned actions without executing')
             ->addOption('dump', null, InputOption::VALUE_NONE, 'Output RabbitMQ definitions JSON instead of executing')
             ->addOption('output', 'o', InputOption::VALUE_REQUIRED, 'File path for --dump output (default: stdout)')
-            ->addOption('vhost', null, InputOption::VALUE_REQUIRED, 'Override vhost for --dump (default: extracted from DSN)');
+            ->addOption(
+                'vhost',
+                null,
+                InputOption::VALUE_REQUIRED,
+                'Override vhost for --dump (default: extracted from DSN)'
+            );
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -89,7 +105,12 @@ final class SetupAmqpTopologyCommand extends Command
 
         $outputPath = $input->getOption('output');
         if (is_string($outputPath) && $outputPath !== '') {
-            file_put_contents($outputPath, $json . "\n");
+            $result = file_put_contents($outputPath, $json . "\n");
+            if ($result === false) {
+                $io->error(sprintf('Failed to write definitions to %s', $outputPath));
+
+                return Command::FAILURE;
+            }
             $io->success(sprintf('RabbitMQ definitions written to %s', $outputPath));
         } else {
             $output->writeln($json);
@@ -113,8 +134,8 @@ final class SetupAmqpTopologyCommand extends Command
             $connection = $this->createConnection($dsn);
             $connection->connect();
             $channel = new \AMQPChannel($connection);
-        } catch (\AMQPConnectionException $e) {
-            $io->error(sprintf('Failed to connect to RabbitMQ: %s', $e->getMessage()));
+        } catch (\AMQPConnectionException) {
+            $io->error('Failed to connect to RabbitMQ. Check DSN and network connectivity.');
 
             return Command::FAILURE;
         }
@@ -133,7 +154,6 @@ final class SetupAmqpTopologyCommand extends Command
             $label = match ($result['status']) {
                 'created' => '<fg=green>[OK]</>',
                 'error' => '<fg=red>[ERROR]</>',
-                default => '<fg=yellow>[SKIP]</>',
             };
 
             $detail = $result['detail'] !== '' ? sprintf(' (%s)', $result['detail']) : '';
@@ -175,25 +195,24 @@ final class SetupAmqpTopologyCommand extends Command
             return $vhost;
         }
 
-        // Try to extract vhost from DSN
         $dsn = $this->resolveDsn($input);
         if ($dsn !== null) {
-            $parsed = parse_url($dsn);
-            if (is_array($parsed) && isset($parsed['path'])) {
-                $path = urldecode(ltrim($parsed['path'], '/'));
-
-                return $path !== '' ? $path : '/';
-            }
+            return $this->parseDsn($dsn)['vhost'];
         }
 
         return '/';
     }
 
-    private function createConnection(string $dsn): \AMQPConnection
+    /**
+     * Parse an AMQP DSN into connection credentials.
+     *
+     * @return array<string, string|int>
+     */
+    private function parseDsn(string $dsn): array
     {
         $parsed = parse_url($dsn);
         if ($parsed === false) {
-            throw new \InvalidArgumentException(sprintf('Invalid AMQP DSN: "%s"', $dsn));
+            throw new \InvalidArgumentException(sprintf('Invalid AMQP DSN: "%s"', $this->sanitiseDsn($dsn)));
         }
 
         $credentials = [];
@@ -210,11 +229,26 @@ final class SetupAmqpTopologyCommand extends Command
         if (isset($parsed['pass'])) {
             $credentials['password'] = urldecode($parsed['pass']);
         }
-        if (isset($parsed['path'])) {
-            $vhost = urldecode(ltrim($parsed['path'], '/'));
-            $credentials['vhost'] = $vhost !== '' ? $vhost : '/';
-        }
 
-        return new \AMQPConnection($credentials);
+        $vhost = '/';
+        if (isset($parsed['path'])) {
+            $path = urldecode(ltrim($parsed['path'], '/'));
+            $vhost = $path !== '' ? $path : '/';
+        }
+        $credentials['vhost'] = $vhost;
+        $credentials['connect_timeout'] = 10;
+        $credentials['read_timeout'] = 10;
+
+        return $credentials;
+    }
+
+    private function createConnection(string $dsn): \AMQPConnection
+    {
+        return new \AMQPConnection($this->parseDsn($dsn));
+    }
+
+    private function sanitiseDsn(string $dsn): string
+    {
+        return preg_replace('#://[^@]+@#', '://***:***@', $dsn) ?? $dsn;
     }
 }
