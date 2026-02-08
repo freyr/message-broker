@@ -108,6 +108,19 @@ message_broker:
         message_types:
             'test.event.sent': 'Freyr\MessageBroker\Tests\Functional\Fixtures\TestEvent'
             'test.order.placed': 'Freyr\MessageBroker\Tests\Functional\Fixtures\OrderPlaced'
+    amqp:
+        topology:
+            exchanges:
+                topology_test_exchange:
+                    type: topic
+                    durable: true
+            queues:
+                topology_test_queue:
+                    durable: true
+            bindings:
+                - exchange: topology_test_exchange
+                  queue: topology_test_queue
+                  binding_key: 'test.#'
 
 services:
     _defaults:
@@ -168,6 +181,26 @@ services:
             $eventBus: '@messenger.default_bus'
             $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
             $logger: '@logger'
+
+    # AMQP Topology Manager
+    Freyr\MessageBroker\Amqp\TopologyManager:
+        arguments:
+            $topology: '%message_broker.amqp.topology%'
+            $logger: '@logger'
+
+    # AMQP Definitions Formatter
+    Freyr\MessageBroker\Amqp\DefinitionsFormatter:
+        arguments:
+            $topology: '%message_broker.amqp.topology%'
+
+    # AMQP Topology Setup Command (public for functional tests)
+    Freyr\MessageBroker\Command\SetupAmqpTopologyCommand:
+        public: true
+        arguments:
+            $topologyManager: '@Freyr\MessageBroker\Amqp\TopologyManager'
+            $definitionsFormatter: '@Freyr\MessageBroker\Amqp\DefinitionsFormatter'
+            $defaultDsn: '%env(MESSENGER_AMQP_DSN)%'
+        tags: ['console.command']
 
     # Test Handlers (for inbox flow tests)
     Freyr\MessageBroker\Tests\Functional\Fixtures\TestEventHandler:
