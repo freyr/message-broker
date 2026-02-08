@@ -40,6 +40,102 @@ final class Configuration implements ConfigurationInterface
             ->end()
             ->end();
 
+        $this->addAmqpTopologySection($rootNode);
+
         return $treeBuilder;
+    }
+
+    private function addAmqpTopologySection(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+            ->arrayNode('amqp')
+            ->addDefaultsIfNotSet()
+            ->children()
+            ->arrayNode('topology')
+            ->addDefaultsIfNotSet()
+            ->children()
+
+            // Exchanges
+            ->arrayNode('exchanges')
+            ->info('AMQP exchanges to declare (keyed by name)')
+            ->useAttributeAsKey('name')
+            ->defaultValue([])
+            ->arrayPrototype()
+            ->children()
+            ->enumNode('type')
+            ->info('Exchange type: direct, fanout, topic, or headers')
+            ->values(['direct', 'fanout', 'topic', 'headers'])
+            ->isRequired()
+            ->end()
+            ->booleanNode('durable')
+            ->info('Whether the exchange survives broker restart')
+            ->defaultTrue()
+            ->end()
+            ->arrayNode('arguments')
+            ->info('Optional exchange arguments (e.g., alternate-exchange)')
+            ->defaultValue([])
+            ->variablePrototype()
+            ->end()
+            ->end()
+            ->end()
+            ->end()
+            ->end()
+
+            // Queues
+            ->arrayNode('queues')
+            ->info('AMQP queues to declare (keyed by name)')
+            ->useAttributeAsKey('name')
+            ->defaultValue([])
+            ->arrayPrototype()
+            ->children()
+            ->booleanNode('durable')
+            ->info('Whether the queue survives broker restart')
+            ->defaultTrue()
+            ->end()
+            ->arrayNode('arguments')
+            ->info('Optional queue arguments (e.g., x-dead-letter-exchange, x-queue-type)')
+            ->defaultValue([])
+            ->variablePrototype()
+            ->end()
+            ->end()
+            ->end()
+            ->end()
+            ->end()
+
+            // Bindings
+            ->arrayNode('bindings')
+            ->info('Queue-to-exchange bindings')
+            ->defaultValue([])
+            ->arrayPrototype()
+            ->children()
+            ->scalarNode('exchange')
+            ->info('Source exchange name')
+            ->isRequired()
+            ->cannotBeEmpty()
+            ->end()
+            ->scalarNode('queue')
+            ->info('Destination queue name')
+            ->isRequired()
+            ->cannotBeEmpty()
+            ->end()
+            ->scalarNode('binding_key')
+            ->info('Binding key pattern (e.g., "order.*")')
+            ->defaultValue('')
+            ->end()
+            ->arrayNode('arguments')
+            ->info('Optional binding arguments')
+            ->defaultValue([])
+            ->variablePrototype()
+            ->end()
+            ->end()
+            ->end()
+            ->end()
+            ->end()
+
+            ->end()
+            ->end()
+            ->end()
+            ->end();
     }
 }
