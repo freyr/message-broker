@@ -108,7 +108,7 @@ or use a GitHub repository. See `recipe/TESTING.md` for full details.
 - This is the ONLY required configuration for the bundle
 
 **config/packages/messenger.yaml:**
-- Multiple transports: `outbox`, `amqp` (publish), `amqp_orders` (consume example), `failed`
+- Multiple transports: `outbox`, `amqp` (publish), `amqp_your_inbox` (consume template), `failed`
 - Middleware configuration (DeduplicationMiddleware)
 - Comments showing where to add domain event routing
 - Example handler documentation
@@ -153,7 +153,7 @@ After running `composer require freyr/message-broker`, users need to:
 3. Run migrations: `php bin/console doctrine:migrations:migrate`
 4. Start workers:
    - `php bin/console messenger:consume outbox -vv` (publish to AMQP)
-   - `php bin/console messenger:consume amqp_orders -vv` (consume from AMQP)
+   - `php bin/console messenger:consume amqp_your_inbox -vv` (consume from AMQP)
 
 ## Customisation
 
