@@ -9,3 +9,28 @@ message_broker:
 
         # Table name for deduplication tracking (must match migration)
         # deduplication_table_name: 'message_broker_deduplication'
+
+    # AMQP topology: declare exchanges, queues, and bindings from configuration.
+    # Run: php bin/console message-broker:setup-amqp
+    # Preview: php bin/console message-broker:setup-amqp --dry-run
+    # Export: php bin/console message-broker:setup-amqp --dump --output=definitions.json
+    #
+    # amqp:
+    #     topology:
+    #         exchanges:
+    #             your_app_events:
+    #                 type: topic        # required: direct, fanout, topic, headers
+    #                 durable: true      # default: true
+    #
+    #         queues:
+    #             your_app_inbox:
+    #                 durable: true      # default: true
+    #                 # arguments:
+    #                 #     x-dead-letter-exchange: dlx
+    #                 #     x-queue-type: quorum
+    #                 #     x-delivery-limit: 5
+    #
+    #         bindings:
+    #             - exchange: your_app_events
+    #               queue: your_app_inbox
+    #               binding_key: 'your_app.*'

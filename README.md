@@ -12,6 +12,7 @@ A Symfony bundle providing reliable event publishing and consumption with transa
 - ✅ **Automatic Deduplication at the Inbox** - Binary UUID v7 primary key prevents duplicate processing
 - ✅ **Typed Message Handlers** - Type-safe event consumption with IDE autocomplete
 - ✅ **Horizontal Scaling** - Multiple workers with database-level SKIP LOCKED
+- ✅ **AMQP Topology Management** - Declare exchanges, queues, and bindings from YAML configuration
 
 ## Restrictions
 - **Zero Configuration** - (in progress) Symfony Flex recipe automates installation
@@ -277,6 +278,76 @@ Messages are automatically:
 1. Deserialised by InboxSerialiser into typed PHP objects
 2. Deduplicated by DeduplicationMiddleware
 3. Routed to handlers based on PHP class
+
+### AMQP Topology Setup
+
+Declare RabbitMQ exchanges, queues, and bindings from a YAML configuration checked into your codebase.
+
+#### Configuration
+
+Add topology under `message_broker.amqp.topology` in `config/packages/message_broker.yaml`:
+
+```yaml
+message_broker:
+    inbox:
+        message_types:
+            'order.placed': 'App\Message\OrderPlaced'
+    amqp:
+        topology:
+            exchanges:
+                commerce:
+                    type: topic          # required: direct, fanout, topic, headers
+                    durable: true        # default: true
+                dlx:
+                    type: direct
+
+            queues:
+                orders_queue:
+                    durable: true        # default: true
+                    arguments:
+                        x-dead-letter-exchange: dlx
+                        x-dead-letter-routing-key: dlq.orders
+                        x-queue-type: quorum
+                        x-delivery-limit: 5
+                dlq.orders: {}
+
+            bindings:
+                - exchange: commerce
+                  queue: orders_queue
+                  binding_key: 'order.*'
+                - exchange: dlx
+                  queue: dlq.orders
+                  binding_key: 'dlq.orders'
+```
+
+Exchanges are declared in configuration order. Integer queue arguments (`x-message-ttl`, `x-max-length`, `x-delivery-limit`, etc.) are normalised to integers automatically.
+
+#### Command Usage
+
+```bash
+# Declare topology against live RabbitMQ
+php bin/console message-broker:setup-amqp --dsn=amqp://guest:guest@localhost:5672/%2f
+
+# Preview planned actions without connecting
+php bin/console message-broker:setup-amqp --dry-run
+
+# Export RabbitMQ definitions JSON to stdout
+php bin/console message-broker:setup-amqp --dump
+
+# Export definitions to file (importable via rabbitmqctl)
+php bin/console message-broker:setup-amqp --dump --output=definitions.json
+
+# Override vhost in exported definitions
+php bin/console message-broker:setup-amqp --dump --vhost=/production
+```
+
+The `--dump` output follows the [RabbitMQ definitions format](https://www.rabbitmq.com/docs/definitions) and can be imported with:
+
+```bash
+rabbitmqctl import_definitions definitions.json
+```
+
+The command is idempotent — running it multiple times produces the same result. If the DSN is not provided via `--dsn`, it falls back to the `MESSENGER_AMQP_DSN` environment variable.
 
 ### Message Format
 

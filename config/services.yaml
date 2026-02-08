@@ -62,6 +62,33 @@ services:
             $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
             $logger: '@logger'
 
+    # AMQP Topology Manager
+    # Declares exchanges, queues, and bindings against RabbitMQ
+    Freyr\MessageBroker\Amqp\TopologyManager:
+        arguments:
+            $topology: '%message_broker.amqp.topology%'
+            $logger: '@logger'
+
+    # AMQP Definitions Formatter
+    # Generates RabbitMQ-compatible definitions JSON
+    Freyr\MessageBroker\Amqp\DefinitionsFormatter:
+        arguments:
+            $topology: '%message_broker.amqp.topology%'
+
+    # AMQP Connection Factory
+    # Creates ext-amqp connections from DSN strings
+    Freyr\MessageBroker\Amqp\AmqpConnectionFactory: ~
+
+    # AMQP Topology Setup Command
+    # Declares AMQP topology from configuration
+    Freyr\MessageBroker\Command\SetupAmqpTopologyCommand:
+        arguments:
+            $topologyManager: '@Freyr\MessageBroker\Amqp\TopologyManager'
+            $definitionsFormatter: '@Freyr\MessageBroker\Amqp\DefinitionsFormatter'
+            $connectionFactory: '@Freyr\MessageBroker\Amqp\AmqpConnectionFactory'
+            $defaultDsn: '%env(default::MESSENGER_AMQP_DSN)%'
+        tags: ['console.command']
+
     # Deduplication Store Cleanup Command
     # Removes old deduplication records
     Freyr\MessageBroker\Command\DeduplicationStoreCleanup:
