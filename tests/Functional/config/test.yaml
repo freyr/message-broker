@@ -10,16 +10,13 @@ framework:
 
         buses:
             messenger.bus.default:
-                # Note: DeduplicationMiddleware is listed explicitly here because
-                # the test kernel's service definitions duplicate bundle config.
-                # In production, the bundle's services.yaml registers it via
-                # messenger.middleware tag (priority -10). Both approaches produce
-                # the same middleware ordering.
                 default_middleware:
                     enabled: true
                     allow_no_handlers: false
                 middleware:
+                    - 'Freyr\MessageBroker\Outbox\MessageIdStampMiddleware'
                     - doctrine_transaction
+                    - 'Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge'
                     - 'Freyr\MessageBroker\Inbox\DeduplicationMiddleware'
 
         transports:
@@ -174,11 +171,13 @@ services:
     Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface:
         class: Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy
 
-    # Outbox Bridge
+    # MessageIdStamp Middleware
+    Freyr\MessageBroker\Outbox\MessageIdStampMiddleware: ~
+
+    # Outbox Bridge (middleware)
     Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
-        autoconfigure: true
         arguments:
-            $eventBus: '@messenger.default_bus'
+            $amqpSender: '@messenger.transport.amqp'
             $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
             $logger: '@logger'
 

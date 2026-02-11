@@ -4,65 +4,86 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Outbox\EventBridge;
 
-use Freyr\Identity\Id;
 use Freyr\MessageBroker\Outbox\MessageName;
 use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface;
 use Freyr\MessageBroker\Stamp\MessageIdStamp;
 use Psr\Log\LoggerInterface;
 use RuntimeException;
-use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
 use Symfony\Component\Messenger\Envelope;
-use Symfony\Component\Messenger\MessageBusInterface;
-use Symfony\Component\Messenger\Stamp\TransportNamesStamp;
+use Symfony\Component\Messenger\Middleware\MiddlewareInterface;
+use Symfony\Component\Messenger\Middleware\StackInterface;
+use Symfony\Component\Messenger\Stamp\ReceivedStamp;
+use Symfony\Component\Messenger\Transport\Sender\SenderInterface;
 
 /**
- * Outbox to AMQP Bridge.
+ * Outbox to AMQP Bridge (middleware).
  *
- * Adds various additional headers to the outgoing message
- * Ensure application of custom behavior.
- *  - custom transport
- *  - custom routing key
+ * Intercepts OutboxMessage envelopes consumed from the outbox transport and
+ * publishes them to AMQP via direct SenderInterface injection. Reads the
+ * existing MessageIdStamp (added at dispatch time by MessageIdStampMiddleware)
+ * to guarantee stable message IDs across redelivery.
+ *
+ * Short-circuits after sending: HandleMessageMiddleware has no handler for
+ * OutboxMessage, so calling $stack->next() would throw NoHandlerForMessageException.
  */
-final readonly class OutboxToAmqpBridge
+final readonly class OutboxToAmqpBridge implements MiddlewareInterface
 {
     public function __construct(
-        private MessageBusInterface $eventBus,
+        private SenderInterface $amqpSender,
         private AmqpRoutingStrategyInterface $routingStrategy,
         private LoggerInterface $logger,
+        private string $outboxTransportName = 'outbox',
     ) {}
 
-    #[AsMessageHandler(fromTransport: 'outbox')]
-    public function __invoke(OutboxMessage $event): void
+    public function handle(Envelope $envelope, StackInterface $stack): Envelope
     {
-        // Extract message name (cached per class)
+        if (!$envelope->getMessage() instanceof OutboxMessage) {
+            return $stack->next()->handle($envelope, $stack);
+        }
+
+        $receivedStamp = $envelope->last(ReceivedStamp::class);
+        if (!$receivedStamp instanceof ReceivedStamp
+            || $receivedStamp->getTransportName() !== $this->outboxTransportName) {
+            return $stack->next()->handle($envelope, $stack);
+        }
+
+        $event = $envelope->getMessage();
+
         $messageName = MessageName::fromClass($event)
-            ?? throw new RuntimeException(sprintf('Event %s must have #[MessageName] attribute', $event::class));
+            ?? throw new RuntimeException(sprintf(
+                'Event %s must have #[MessageName] attribute',
+                $event::class,
+            ));
 
-        // Generate messageId for this publishing (UUID v7 for ordering)
-        $messageId = Id::new();
+        $messageIdStamp = $envelope->last(MessageIdStamp::class)
+            ?? throw new RuntimeException(sprintf(
+                'OutboxMessage %s consumed from outbox transport without MessageIdStamp. '
+                . 'Ensure MessageIdStampMiddleware runs before outbox transport storage, '
+                . 'or drain the outbox of legacy messages before deployment.',
+                $event::class,
+            ));
 
-        // Get AMQP routing
-        $transport = $this->routingStrategy->getTransport($event);
         $routingKey = $this->routingStrategy->getRoutingKey($event, $messageName);
         $headers = $this->routingStrategy->getHeaders($messageName);
 
-        // Create the envelope with stamps
-        // MessageIdStamp will be automatically serialized to X-Message-Stamp-MessageIdStamp header
-        $envelope = new Envelope($event, [
-            new MessageIdStamp((string) $messageId),
+        $amqpEnvelope = new Envelope($event, [
+            $messageIdStamp,
             new AmqpStamp($routingKey, AMQP_NOPARAM, $headers),
-            new TransportNamesStamp([$transport]),
         ]);
 
         $this->logger->info('Publishing event to AMQP', [
             'message_name' => $messageName,
-            'message_id' => (string) $messageId,
+            'message_id' => $messageIdStamp->messageId,
             'event_class' => $event::class,
-            'exchange' => $transport,
             'routing_key' => $routingKey,
         ]);
 
-        $this->eventBus->dispatch($envelope);
+        $this->amqpSender->send($amqpEnvelope);
+
+        // Short-circuit: OutboxMessage is fully handled by this middleware.
+        // HandleMessageMiddleware has no handler for OutboxMessage — calling
+        // $stack->next() would throw NoHandlerForMessageException.
+        return $envelope;
     }
 }

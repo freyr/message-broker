@@ -52,15 +52,21 @@ services:
     Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface:
         class: Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy
 
-    # Outbox Bridge (publishes outbox events to AMQP)
-    # Note: Handler is auto-configured via #[AsMessageHandler(fromTransport: 'outbox')] attribute
-    # Adds MessageIdStamp to envelope - stamps automatically serialized to X-Message-Stamp-* headers
+    # MessageIdStamp Middleware
+    # Stamps OutboxMessage envelopes with MessageIdStamp at dispatch time
+    Freyr\MessageBroker\Outbox\MessageIdStampMiddleware:
+        tags:
+            - { name: 'messenger.middleware' }
+
+    # Outbox Bridge (middleware — publishes outbox events to AMQP)
+    # Reads existing MessageIdStamp from envelope and publishes via direct SenderInterface
     Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
-        autoconfigure: true
         arguments:
-            $eventBus: '@messenger.default_bus'
+            $amqpSender: '@messenger.transport.amqp'
             $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
             $logger: '@logger'
+        tags:
+            - { name: 'messenger.middleware' }
 
     # AMQP Topology Manager
     # Declares exchanges, queues, and bindings against RabbitMQ

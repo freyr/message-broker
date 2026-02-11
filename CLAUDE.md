@@ -315,18 +315,21 @@ This is the **Freyr Message Broker** package - a standalone Symfony bundle provi
 ## Architecture
 
 ### Outbox Pattern (Publishing Events)
-Events are stored in a database table within the same transaction as business data, then asynchronously published using a **strategy-based architecture**:
+Events are stored in a database table within the same transaction as business data, then asynchronously published using a **middleware-based architecture**:
 
 ```
-Domain Event → Event Bus (Messenger) → Outbox Transport (doctrine://)
-→ messenger_messages table (transactional) → messenger:consume outbox
-→ OutboxToAmqpBridge → AMQP (with routing strategy)
+Domain Event → Event Bus (Messenger)
+→ MessageIdStampMiddleware (adds MessageIdStamp at dispatch time)
+→ Outbox Transport (doctrine://) → messenger_outbox table (transactional)
+→ messenger:consume outbox → OutboxToAmqpBridge middleware (reads existing stamp)
+→ AMQP (with routing strategy, via direct SenderInterface)
 ```
 
 **Key Features:**
-- **Generic Handler:** Single `__invoke()` method handles all events
+- **Stable Message ID:** `MessageIdStampMiddleware` generates UUID v7 at dispatch time, ensuring deduplication survives redelivery
+- **Middleware Bridge:** `OutboxToAmqpBridge` reads existing `MessageIdStamp` from envelope (never generates new ones)
+- **Direct Sender:** Bridge publishes via `SenderInterface` (no nested bus dispatch, no nested savepoints)
 - **AMQP Routing Strategy:** Determines exchange, routing key, and headers
-- **Message ID Validation:** Enforces `messageId` (UUID v7) in all events
 - **Convention-Based Routing:** Automatic routing with attribute overrides
 
 ### Inbox Pattern (Consuming Events)
@@ -371,7 +374,8 @@ messenger/
 │   ├── Outbox/                     # Outbox Pattern Implementation
 │   │   ├── EventBridge/
 │   │   │   ├── OutboxMessage.php          # Marker interface for outbox events
-│   │   │   └── OutboxToAmqpBridge.php     # Bridge handler (adds MessageIdStamp)
+│   │   │   └── OutboxToAmqpBridge.php     # Bridge middleware (reads existing MessageIdStamp)
+│   │   ├── MessageIdStampMiddleware.php   # Stamps OutboxMessage with MessageIdStamp at dispatch
 │   │   ├── Routing/
 │   │   │   ├── AmqpRoutingKey.php         # Attribute for custom routing key
 │   │   │   ├── AmqpRoutingStrategyInterface.php
@@ -459,9 +463,6 @@ framework:
     # Failure transport for handling failed messages
     failure_transport: failed
 
-    # Middleware configuration
-    # DeduplicationMiddleware runs AFTER doctrine_transaction (priority -10)
-    # This ensures deduplication INSERT is within the transaction
     default_middleware:
       enabled: true
       allow_no_handlers: false
@@ -469,9 +470,10 @@ framework:
     buses:
       messenger.bus.default:
         middleware:
-          - doctrine_transaction  # Priority 0 (starts transaction)
-          # DeduplicationMiddleware (priority -10) registered via service tag
-          # Runs after transaction starts, before handlers
+          - 'Freyr\MessageBroker\Outbox\MessageIdStampMiddleware'  # Stamps OutboxMessage at dispatch
+          - doctrine_transaction                                     # Starts transaction
+          - 'Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge'  # Publishes outbox → AMQP
+          - 'Freyr\MessageBroker\Inbox\DeduplicationMiddleware'          # Inbox deduplication
 
     transports:
       # Outbox transport - AUTO-MANAGED (auto_setup: true)
@@ -626,15 +628,21 @@ services:
   Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface:
     class: Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy
 
-  # Outbox Bridge (publishes outbox events to AMQP)
-  # Note: Handler is auto-configured via #[AsMessageHandler(fromTransport: 'outbox')] attribute
-  # Adds MessageIdStamp to envelope - stamps automatically serialized to X-Message-Stamp-* headers
+  # MessageIdStamp Middleware
+  # Stamps OutboxMessage envelopes with MessageIdStamp at dispatch time
+  Freyr\MessageBroker\Outbox\MessageIdStampMiddleware:
+    tags:
+      - { name: 'messenger.middleware' }
+
+  # Outbox Bridge (middleware — publishes outbox events to AMQP)
+  # Reads existing MessageIdStamp from envelope and publishes via direct SenderInterface
   Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
-    autoconfigure: true
     arguments:
-      $eventBus: '@messenger.default_bus'
+      $amqpSender: '@messenger.transport.amqp'
       $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
       $logger: '@logger'
+    tags:
+      - { name: 'messenger.middleware' }
 
   # Deduplication Store Cleanup Command (optional maintenance)
   # Removes old idempotency records from the deduplication store
@@ -670,7 +678,7 @@ final readonly class OrderPlaced implements OutboxMessage
 **Critical Requirements:**
 1. Every outbox event MUST have `#[MessageName('domain.subdomain.action')]` attribute
 2. Every outbox event MUST implement `OutboxMessage` marker interface
-3. NO `messageId` property - it's auto-generated by OutboxToAmqpBridge as UUID v7
+3. NO `messageId` property - it's auto-generated by `MessageIdStampMiddleware` at dispatch time as UUID v7
 
 **AMQP Routing (Optional):**
 4. Use `#[MessengerTransport('name')]` to override default exchange (first 2 parts of message name)
@@ -867,98 +875,76 @@ final readonly class OrderPlaced
 - ✅ Single source of truth - one @serializer service for entire application
 - ✅ Normalizers work with any Symfony component that uses the serializer service
 
-### Outbox Bridge Pattern ✨ **SIMPLIFIED**
-The `OutboxToAmqpBridge` is a **generic handler** that publishes all outbox events to AMQP:
+### Outbox Bridge Pattern ✨ **MIDDLEWARE + DIRECT SENDER**
+
+The outbox pattern uses two middleware working together:
+
+1. **`MessageIdStampMiddleware`** — stamps `OutboxMessage` envelopes at dispatch time (before outbox storage)
+2. **`OutboxToAmqpBridge`** — intercepts outbox-consumed messages and publishes to AMQP via direct `SenderInterface`
 
 ```php
-// ✅ Single generic handler for ALL events
-<?php
-
-declare(strict_types=1);
-
-namespace Freyr\MessageBroker\Outbox\EventBridge;
-
-use Freyr\Identity\Id;
-use Freyr\MessageBroker\Inbox\MessageIdStamp;
-use Freyr\MessageBroker\Outbox\MessageName;
-use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface;
-use Psr\Log\LoggerInterface;
-use Symfony\Component\Messenger\Attribute\AsMessageHandler;
-use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
-use Symfony\Component\Messenger\Envelope;
-use Symfony\Component\Messenger\MessageBusInterface;
-use Symfony\Component\Messenger\Stamp\TransportNamesStamp;
-
-/**
- * Outbox to AMQP Bridge.
- *
- * Adds MessageIdStamp to envelope (serialized to headers automatically by Symfony).
- * Stamps are transported via X-Message-Stamp-* headers natively.
- */
-final readonly class OutboxToAmqpBridge
+// ✅ Middleware stamps OutboxMessage at dispatch time
+final readonly class MessageIdStampMiddleware implements MiddlewareInterface
 {
-    public function __construct(
-        private MessageBusInterface $eventBus,
-        private AmqpRoutingStrategyInterface $routingStrategy,
-        private LoggerInterface $logger,
-    ) {
-    }
-
-    #[AsMessageHandler(fromTransport: 'outbox')]
-    public function __invoke(OutboxMessage $event): void
+    public function handle(Envelope $envelope, StackInterface $stack): Envelope
     {
-        // Extract message name
-        $messageName = $this->extractMessageName($event);
-
-        // Generate messageId for this publishing (UUID v7 for ordering)
-        $messageId = Id::new();
-
-        // Get AMQP routing
-        $exchange = $this->routingStrategy->getTransport($event, $messageName);
-        $routingKey = $this->routingStrategy->getRoutingKey($event, $messageName);
-        $headers = $this->routingStrategy->getHeaders($messageName);
-
-        // Create envelope with stamps
-        // MessageIdStamp will be automatically serialized to X-Message-Stamp-MessageIdStamp header
-        $envelope = new Envelope($event, [
-            new MessageIdStamp($messageId->__toString()),
-            new AmqpStamp($routingKey, AMQP_NOPARAM, $headers),
-            new TransportNamesStamp(['amqp']),
-        ]);
-
-        $this->logger->info('Publishing event to AMQP', [
-            'message_name' => $messageName,
-            'message_id' => $messageId->__toString(),
-            'event_class' => $event::class,
-            'exchange' => $exchange,
-            'routing_key' => $routingKey,
-        ]);
-
-        $this->eventBus->dispatch($envelope);
-    }
-
-    private function extractMessageName(OutboxMessage $event): string
-    {
-        $reflection = new \ReflectionClass($event);
-        $attributes = $reflection->getAttributes(MessageName::class);
-
-        if (empty($attributes)) {
-            throw new \RuntimeException(sprintf('Event %s must have #[MessageName] attribute', $event::class));
+        if (!$envelope->getMessage() instanceof OutboxMessage) {
+            return $stack->next()->handle($envelope, $stack);
         }
-
-        /** @var MessageName $messageNameAttr */
-        $messageNameAttr = $attributes[0]->newInstance();
-
-        return $messageNameAttr->name;
+        if ($envelope->last(ReceivedStamp::class) !== null) {
+            return $stack->next()->handle($envelope, $stack);
+        }
+        if ($envelope->last(MessageIdStamp::class) === null) {
+            $envelope = $envelope->with(new MessageIdStamp((string) Id::new()));
+        }
+        return $stack->next()->handle($envelope, $stack);
     }
 }
+```
 
+```php
+// ✅ Bridge middleware reads existing stamp and publishes to AMQP
+final readonly class OutboxToAmqpBridge implements MiddlewareInterface
+{
+    public function __construct(
+        private SenderInterface $amqpSender,
+        private AmqpRoutingStrategyInterface $routingStrategy,
+        private LoggerInterface $logger,
+        private string $outboxTransportName = 'outbox',
+    ) {}
+
+    public function handle(Envelope $envelope, StackInterface $stack): Envelope
+    {
+        // Only process OutboxMessage consumed from outbox transport
+        if (!$envelope->getMessage() instanceof OutboxMessage) {
+            return $stack->next()->handle($envelope, $stack);
+        }
+        $receivedStamp = $envelope->last(ReceivedStamp::class);
+        if (!$receivedStamp instanceof ReceivedStamp
+            || $receivedStamp->getTransportName() !== $this->outboxTransportName) {
+            return $stack->next()->handle($envelope, $stack);
+        }
+
+        // Read existing MessageIdStamp (added at dispatch time)
+        $messageIdStamp = $envelope->last(MessageIdStamp::class)
+            ?? throw new RuntimeException('...');
+
+        // Publish directly to AMQP (no nested bus dispatch)
+        $this->amqpSender->send(new Envelope($event, [
+            $messageIdStamp,
+            new AmqpStamp($routingKey, AMQP_NOPARAM, $headers),
+        ]));
+
+        // Short-circuit: HandleMessageMiddleware has no handler for OutboxMessage
+        return $envelope;
+    }
+}
 ```
 
 **Benefits:**
+- Stable message IDs survive redelivery (deduplication guaranteed)
+- No nested bus dispatch (no nested savepoints, no double middleware traversal)
 - No code changes needed when adding new events
-- All events automatically published to AMQP
-- Stamps automatically transported via native Symfony mechanism
 - Convention-based routing with attribute overrides
 - Failed publishing handled by Messenger's retry/failed transport
 
@@ -1005,7 +991,7 @@ final readonly class OutboxToAmqpBridge
    ```
    Headers:
      type: order.placed  (semantic message name)
-     X-Message-Stamp-MessageIdStamp: [{"messageId":"01234567-89ab..."}]  (auto-generated by OutboxToAmqpBridge)
+     X-Message-Stamp-MessageIdStamp: [{"messageId":"01234567-89ab..."}]  (generated at dispatch time by MessageIdStampMiddleware)
 
    Body (only business data):
    {
@@ -1015,7 +1001,7 @@ final readonly class OutboxToAmqpBridge
    }
    ```
    - **type header**: Semantic message name (e.g., `order.placed`) - language-agnostic
-   - **X-Message-Stamp-*** headers: Symfony stamps (MessageIdStamp, etc.) - auto-generated by OutboxToAmqpBridge
+   - **X-Message-Stamp-*** headers: Symfony stamps (MessageIdStamp, etc.) - generated at dispatch time by MessageIdStampMiddleware
    - **Body**: Native Symfony serialization of the message object (business data only, no messageId)
    - **messageId**: NOT in payload - it's transport metadata in MessageIdStamp header
 

@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Unit\Factory;
 
 use Freyr\MessageBroker\Inbox\DeduplicationMiddleware;
+use Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge;
+use Freyr\MessageBroker\Outbox\MessageIdStampMiddleware;
+use Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy;
 use Freyr\MessageBroker\Serializer\InboxSerializer;
 use Freyr\MessageBroker\Serializer\Normalizer\CarbonImmutableNormalizer;
 use Freyr\MessageBroker\Serializer\Normalizer\IdNormalizer;
 use Freyr\MessageBroker\Serializer\OutboxSerializer;
 use Freyr\MessageBroker\Tests\Unit\Store\DeduplicationInMemoryStore;
 use Freyr\MessageBroker\Tests\Unit\Transport\InMemoryTransport;
+use Psr\Log\NullLogger;
 use Symfony\Component\Messenger\Handler\HandlersLocator;
 use Symfony\Component\Messenger\MessageBus;
 use Symfony\Component\Messenger\MessageBusInterface;
@@ -102,7 +106,11 @@ final class EventBusFactory
         $handlersLocator = new HandlersLocator($handlers);
 
         // Create middleware chain
-        $middleware = [new SendMessageMiddleware($senderLocator), new HandleMessageMiddleware($handlersLocator)];
+        $middleware = [
+            new MessageIdStampMiddleware(),
+            new SendMessageMiddleware($senderLocator),
+            new HandleMessageMiddleware($handlersLocator),
+        ];
 
         // Create message bus
         $bus = new MessageBus($middleware);
@@ -207,10 +215,18 @@ final class EventBusFactory
         // Create deduplication middleware with store
         $deduplicationMiddleware = new DeduplicationMiddleware($deduplicationStore);
 
-        // Create middleware chain
-        // DeduplicationMiddleware runs BEFORE handlers (like in production)
+        // Bridge uses the AMQP publish transport directly (no nested bus dispatch)
+        $bridgeMiddleware = new OutboxToAmqpBridge(
+            amqpSender: $amqpPublishTransport,
+            routingStrategy: new DefaultAmqpRoutingStrategy(),
+            logger: new NullLogger(),
+        );
+
+        // Create middleware chain matching production ordering
         $middleware = [
+            new MessageIdStampMiddleware(),
             new SendMessageMiddleware(new SendersLocator($routing, $transportContainer)),
+            $bridgeMiddleware,
             $deduplicationMiddleware,
             new HandleMessageMiddleware($handlersLocator),
         ];
