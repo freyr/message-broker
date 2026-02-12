@@ -8,12 +8,10 @@ use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Outbox\MessageIdStampMiddleware;
 use Freyr\MessageBroker\Stamp\MessageIdStamp;
+use Freyr\MessageBroker\Tests\Unit\Factory\MiddlewareStackFactory;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\TestMessage;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Messenger\Envelope;
-use Symfony\Component\Messenger\Middleware\MiddlewareInterface;
-use Symfony\Component\Messenger\Middleware\StackInterface;
-use Symfony\Component\Messenger\Middleware\StackMiddleware;
 use Symfony\Component\Messenger\Stamp\ReceivedStamp;
 
 /**
@@ -40,7 +38,7 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $envelope = new Envelope($message);
 
         $nextCalled = false;
-        $result = $this->middleware->handle($envelope, $this->createTrackingStack($nextCalled));
+        $result = $this->middleware->handle($envelope, MiddlewareStackFactory::createTracking($nextCalled));
 
         $stamp = $result->last(MessageIdStamp::class);
         $this->assertNotNull($stamp, 'OutboxMessage should receive MessageIdStamp');
@@ -58,7 +56,7 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $envelope = new Envelope($message);
 
         $nextCalled = false;
-        $result = $this->middleware->handle($envelope, $this->createTrackingStack($nextCalled));
+        $result = $this->middleware->handle($envelope, MiddlewareStackFactory::createTracking($nextCalled));
 
         $this->assertNull(
             $result->last(MessageIdStamp::class),
@@ -74,7 +72,7 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $envelope = new Envelope($message, [$existingStamp]);
 
         $nextCalled = false;
-        $result = $this->middleware->handle($envelope, $this->createTrackingStack($nextCalled));
+        $result = $this->middleware->handle($envelope, MiddlewareStackFactory::createTracking($nextCalled));
 
         $stamp = $result->last(MessageIdStamp::class);
         $this->assertNotNull($stamp);
@@ -92,30 +90,12 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $envelope = new Envelope($message, [new ReceivedStamp('outbox')]);
 
         $nextCalled = false;
-        $result = $this->middleware->handle($envelope, $this->createTrackingStack($nextCalled));
+        $result = $this->middleware->handle($envelope, MiddlewareStackFactory::createTracking($nextCalled));
 
         // ReceivedStamp means redelivery — stamp should already exist from original dispatch.
         // Middleware must not add a new one.
         $stamps = $result->all(MessageIdStamp::class);
         $this->assertEmpty($stamps, 'Redelivered message should not get a new MessageIdStamp');
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
-    }
-
-    private function createTrackingStack(bool &$nextCalled): StackInterface
-    {
-        $tracking = new class($nextCalled) implements MiddlewareInterface {
-            public function __construct(
-                private bool &$called, // @phpstan-ignore property.onlyWritten (read via reference in outer scope)
-            ) {}
-
-            public function handle(Envelope $envelope, StackInterface $stack): Envelope
-            {
-                $this->called = true;
-
-                return $envelope;
-            }
-        };
-
-        return new StackMiddleware($tracking);
     }
 }

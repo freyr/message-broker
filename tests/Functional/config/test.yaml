@@ -164,6 +164,7 @@ services:
     Freyr\MessageBroker\Inbox\DeduplicationMiddleware:
         arguments:
             $store: '@Freyr\MessageBroker\Inbox\DeduplicationStore'
+            $logger: '@logger'
         tags:
             - { name: 'messenger.middleware', priority: -10 }
 

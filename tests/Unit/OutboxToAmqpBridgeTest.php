@@ -9,6 +9,7 @@ use Freyr\Identity\Id;
 use Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge;
 use Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy;
 use Freyr\MessageBroker\Stamp\MessageIdStamp;
+use Freyr\MessageBroker\Tests\Unit\Factory\MiddlewareStackFactory;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\CommerceTestMessage;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\TestMessage;
 use Freyr\MessageBroker\Tests\Unit\Transport\InMemoryTransport;
@@ -18,9 +19,6 @@ use RuntimeException;
 use Symfony\Component\DependencyInjection\ServiceLocator;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
 use Symfony\Component\Messenger\Envelope;
-use Symfony\Component\Messenger\Middleware\MiddlewareInterface;
-use Symfony\Component\Messenger\Middleware\StackInterface;
-use Symfony\Component\Messenger\Middleware\StackMiddleware;
 use Symfony\Component\Messenger\Stamp\ReceivedStamp;
 use Symfony\Component\Messenger\Transport\Serialization\PhpSerializer;
 
@@ -58,7 +56,7 @@ final class OutboxToAmqpBridgeTest extends TestCase
         $message = new TestMessage(id: Id::new(), name: 'Test Bridge', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [new ReceivedStamp('outbox'), new MessageIdStamp($messageId)]);
 
-        $this->bridge->handle($envelope, $this->createPassThroughStack());
+        $this->bridge->handle($envelope, MiddlewareStackFactory::createPassThrough());
 
         // Sender should have received the envelope
         $this->assertEquals(1, $this->amqpSender->count());
@@ -85,7 +83,7 @@ final class OutboxToAmqpBridgeTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/without MessageIdStamp/');
 
-        $this->bridge->handle($envelope, $this->createPassThroughStack());
+        $this->bridge->handle($envelope, MiddlewareStackFactory::createPassThrough());
     }
 
     public function testNonOutboxMessagePassesThrough(): void
@@ -94,7 +92,7 @@ final class OutboxToAmqpBridgeTest extends TestCase
         $envelope = new Envelope($message, [new ReceivedStamp('outbox')]);
 
         $nextCalled = false;
-        $stack = $this->createTrackingStack($nextCalled);
+        $stack = MiddlewareStackFactory::createTracking($nextCalled);
 
         $this->bridge->handle($envelope, $stack);
 
@@ -108,7 +106,7 @@ final class OutboxToAmqpBridgeTest extends TestCase
         $envelope = new Envelope($message);
 
         $nextCalled = false;
-        $stack = $this->createTrackingStack($nextCalled);
+        $stack = MiddlewareStackFactory::createTracking($nextCalled);
 
         $this->bridge->handle($envelope, $stack);
 
@@ -122,7 +120,7 @@ final class OutboxToAmqpBridgeTest extends TestCase
         $envelope = new Envelope($message, [new ReceivedStamp('amqp_orders')]);
 
         $nextCalled = false;
-        $stack = $this->createTrackingStack($nextCalled);
+        $stack = MiddlewareStackFactory::createTracking($nextCalled);
 
         $this->bridge->handle($envelope, $stack);
 
@@ -139,7 +137,7 @@ final class OutboxToAmqpBridgeTest extends TestCase
         ]);
 
         $nextCalled = false;
-        $stack = $this->createTrackingStack($nextCalled);
+        $stack = MiddlewareStackFactory::createTracking($nextCalled);
 
         $this->bridge->handle($envelope, $stack);
 
@@ -166,7 +164,7 @@ final class OutboxToAmqpBridgeTest extends TestCase
             new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
         ]);
 
-        $bridge->handle($envelope, $this->createPassThroughStack());
+        $bridge->handle($envelope, MiddlewareStackFactory::createPassThrough());
 
         // Commerce sender should receive the envelope, not the default AMQP sender
         $this->assertEquals(0, $this->amqpSender->count(), 'Default AMQP sender should not receive the message');
@@ -192,36 +190,6 @@ final class OutboxToAmqpBridgeTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/No sender "commerce" configured/');
 
-        $this->bridge->handle($envelope, $this->createPassThroughStack());
-    }
-
-    private function createPassThroughStack(): StackInterface
-    {
-        $noOp = new class implements MiddlewareInterface {
-            public function handle(Envelope $envelope, StackInterface $stack): Envelope
-            {
-                return $envelope;
-            }
-        };
-
-        return new StackMiddleware($noOp);
-    }
-
-    private function createTrackingStack(bool &$nextCalled): StackInterface
-    {
-        $tracking = new class($nextCalled) implements MiddlewareInterface {
-            public function __construct(
-                private bool &$called, // @phpstan-ignore property.onlyWritten (read via reference in outer scope)
-            ) {}
-
-            public function handle(Envelope $envelope, StackInterface $stack): Envelope
-            {
-                $this->called = true;
-
-                return $envelope;
-            }
-        };
-
-        return new StackMiddleware($tracking);
+        $this->bridge->handle($envelope, MiddlewareStackFactory::createPassThrough());
     }
 }

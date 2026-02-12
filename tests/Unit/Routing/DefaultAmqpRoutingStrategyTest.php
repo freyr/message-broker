@@ -64,6 +64,8 @@ final class DefaultAmqpRoutingStrategyTest extends TestCase
 
         $headers = $strategy->getHeaders('order.placed');
 
-        $this->assertEquals(['x-message-name' => 'order.placed'], $headers);
+        $this->assertEquals([
+            'x-message-name' => 'order.placed',
+        ], $headers);
     }
 }
