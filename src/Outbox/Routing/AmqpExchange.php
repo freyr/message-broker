@@ -8,23 +8,26 @@ use Attribute;
 use Freyr\MessageBroker\Outbox\ResolvesFromClass;
 
 /**
- * Custom Symfony Messenger transport.
+ * AMQP Exchange Attribute.
  *
- * As a message is originally dispatched to an outbox doctrine transport,
- * there is a need to specify the transport to which it should be routed.
+ * Override the default AMQP exchange (Symfony transport) for a domain event.
  *
- * By default, all outbox messages are routed to the 'amqp' transport.
- * It can be overridden with this attribute.
+ * By default, all outbox messages are published via the 'amqp' transport.
+ * Use this attribute to publish to a different transport (each configured
+ * with its own AMQP exchange).
+ *
+ * The attribute value must match a transport name registered in the
+ * OutboxToAmqpBridge sender locator.
  *
  * Example:
  * ```php
  * #[MessageName('order.placed')]
- * #[MessengerTransport('commerce.events')]
- * final readonly class OrderPlaced { ... }
+ * #[AmqpExchange('commerce')]
+ * final readonly class OrderPlaced implements OutboxMessage { ... }
  * ```
  */
 #[Attribute(Attribute::TARGET_CLASS)]
-final class MessengerTransport
+final class AmqpExchange
 {
     use ResolvesFromClass;
 
@@ -36,7 +39,7 @@ final class MessengerTransport
     ) {}
 
     /**
-     * Extract the transport name from an object's #[MessengerTransport] attribute.
+     * Extract the exchange name from an object's #[AmqpExchange] attribute.
      *
      * Returns null if the attribute is not present (caller should use default).
      */

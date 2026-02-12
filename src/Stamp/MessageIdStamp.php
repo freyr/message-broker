@@ -10,7 +10,7 @@ use Symfony\Component\Messenger\Stamp\StampInterface;
  * Message ID Stamp.
  *
  * Tracks the message_id for deduplication and tracing.
- * Created by OutboxToAmqpBridge, consumed by DeduplicationMiddleware.
+ * Created by MessageIdStampMiddleware at dispatch time, consumed by DeduplicationMiddleware.
  */
 final readonly class MessageIdStamp implements StampInterface
 {

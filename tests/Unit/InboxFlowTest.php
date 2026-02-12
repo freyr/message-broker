@@ -6,27 +6,22 @@ namespace Freyr\MessageBroker\Tests\Unit;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Outbox\EventBridge\OutboxMessage;
-use Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge;
-use Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy;
 use Freyr\MessageBroker\Stamp\MessageIdStamp;
 use Freyr\MessageBroker\Tests\Unit\Factory\EventBusFactory;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\Consumer\OrderPlacedMessage;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\TestMessage;
 use PHPUnit\Framework\TestCase;
-use Psr\Log\NullLogger;
 use Symfony\Component\Messenger\Stamp\ReceivedStamp;
 
 /**
  * Unit test for complete inbox flow.
  *
- * Tests the full message flow:
- * 1. Publish to outbox transport
- * 2. OutboxToAmqpBridge consumes from outbox and republishes to AMQP
- * 3. Consume from AMQP with InboxSerializer (semantic name → FQN)
- * 4. DeduplicationMiddleware checks MessageIdStamp
- * 5. Handler receives typed message
- * 6. Duplicate messages are rejected
+ * Tests the full message flow using the middleware chain:
+ * 1. Dispatch: MessageIdStampMiddleware stamps → SendMessageMiddleware routes to outbox
+ * 2. Outbox consumption: Re-dispatch with ReceivedStamp('outbox') → OutboxToAmqpBridge
+ *    publishes to AMQP sender (short-circuit)
+ * 3. AMQP consumption: InboxSerializer translates semantic name → FQN
+ *    → DeduplicationMiddleware checks MessageIdStamp → Handler
  */
 final class InboxFlowTest extends TestCase
 {
@@ -53,59 +48,57 @@ final class InboxFlowTest extends TestCase
             ]
         );
 
-        // Create OutboxToAmqpBridge
-        $bridge = new OutboxToAmqpBridge(
-            eventBus: $context->bus,
-            routingStrategy: new DefaultAmqpRoutingStrategy(),
-            logger: new NullLogger(),
-        );
-
         $testId = Id::new();
         $testName = 'Test Order';
         $testTimestamp = CarbonImmutable::now();
 
         $message = new TestMessage(id: $testId, name: $testName, timestamp: $testTimestamp);
 
-        // Step 1: Publish message to outbox
+        // Step 1: Publish message to outbox (MessageIdStampMiddleware adds stamp)
         $context->bus->dispatch($message);
 
-        // Then: Message should be in outbox transport
+        // Then: Message should be in outbox transport with MessageIdStamp
         $this->assertEquals(1, $context->outboxTransport->count());
         $this->assertEquals(0, $context->amqpPublishTransport->count());
         $this->assertEquals(0, $handlerInvocationCount, 'Handler should not be invoked yet');
 
-        // Step 2: OutboxToAmqpBridge consumes from outbox and republishes to AMQP
+        // Verify outbox envelope has MessageIdStamp from dispatch
+        $outboxEnvelope = $context->outboxTransport->getLastEnvelope();
+        $this->assertNotNull($outboxEnvelope);
+        $dispatchStamp = $outboxEnvelope->last(MessageIdStamp::class);
+        $this->assertNotNull($dispatchStamp, 'Outbox envelope should have MessageIdStamp from dispatch');
+
+        // Step 2: Simulate outbox consumption — re-dispatch with ReceivedStamp
+        // The bridge middleware intercepts and publishes to AMQP sender
         $outboxEnvelopes = $context->outboxTransport->get();
         foreach ($outboxEnvelopes as $envelope) {
-            $originalMessage = $envelope->getMessage();
-            $this->assertInstanceOf(OutboxMessage::class, $originalMessage);
-            $bridge->__invoke($originalMessage);
+            $context->bus->dispatch($envelope->with(new ReceivedStamp('outbox')));
         }
 
         // Then: Message should be in AMQP publish transport
-        $this->assertEquals(1, $context->amqpPublishTransport->count(), 'Bridge should republish to AMQP');
+        $this->assertEquals(1, $context->amqpPublishTransport->count(), 'Bridge should publish to AMQP');
         $this->assertEquals(0, $handlerInvocationCount, 'Handler should not be invoked yet');
 
-        // Verify AMQP message has MessageIdStamp
+        // Verify AMQP message has the SAME MessageIdStamp
         $amqpEnvelope = $context->amqpPublishTransport->getLastEnvelope();
         $this->assertNotNull($amqpEnvelope);
-        $messageIdStamps = $amqpEnvelope->all(MessageIdStamp::class);
-        $this->assertNotEmpty($messageIdStamps, 'AMQP message should have MessageIdStamp from bridge');
+        $amqpStamp = $amqpEnvelope->last(MessageIdStamp::class);
+        $this->assertNotNull($amqpStamp, 'AMQP message should have MessageIdStamp');
+        $this->assertEquals(
+            $dispatchStamp->messageId,
+            $amqpStamp->messageId,
+            'AMQP message should have the SAME MessageIdStamp as outbox dispatch'
+        );
 
         // Step 3: Consume from AMQP (InboxSerializer deserializes)
-        // Get the serialized message from AMQP publish transport (already has semantic name from OutboxSerializer)
         $serialized = $context->amqpPublishTransport->getLastSerialized();
         $this->assertNotNull($serialized, 'AMQP should have serialized message');
 
         // Deserialize with InboxSerializer (translates semantic name → OrderPlacedMessage)
-        // Stamps (MessageIdStamp) are automatically restored from X-Message-Stamp-* headers
         $deserializedEnvelope = $context->inboxSerializer->decode($serialized);
-
-        // Add ReceivedStamp (simulates transport consumption)
         $deserializedEnvelope = $deserializedEnvelope->with(new ReceivedStamp('amqp'));
 
         // Dispatch through bus (DeduplicationMiddleware → Handler)
-        // DeduplicationMiddleware uses MessageIdStamp + getMessage()::class
         $context->bus->dispatch($deserializedEnvelope);
 
         // Then: Handler should have been invoked
@@ -144,37 +137,24 @@ final class InboxFlowTest extends TestCase
             ]
         );
 
-        $bridge = new OutboxToAmqpBridge(
-            eventBus: $context->bus,
-            routingStrategy: new DefaultAmqpRoutingStrategy(),
-            logger: new NullLogger(),
-        );
-
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
 
         // Step 1: Publish to outbox
         $context->bus->dispatch($message);
 
-        // Step 2: Bridge republishes to AMQP
+        // Step 2: Bridge publishes to AMQP via middleware chain
         $outboxEnvelopes = $context->outboxTransport->get();
         foreach ($outboxEnvelopes as $envelope) {
-            $message = $envelope->getMessage();
-            $this->assertInstanceOf(OutboxMessage::class, $message);
-            $bridge->__invoke($message);
+            $context->bus->dispatch($envelope->with(new ReceivedStamp('outbox')));
         }
 
-        // Get the AMQP envelope with MessageIdStamp
-        $amqpEnvelope = $context->amqpPublishTransport->getLastEnvelope();
-        $this->assertNotNull($amqpEnvelope);
-        $messageIdStamp = $amqpEnvelope->last(MessageIdStamp::class);
-        $this->assertNotNull($messageIdStamp);
-
-        // Step 3: Consume from AMQP (first time) - deserialize to get OrderPlacedMessage
+        // Get the AMQP serialised message
         $serialized = $context->amqpPublishTransport->getLastSerialized();
         $this->assertNotNull($serialized);
         $deserializedEnvelope = $context->inboxSerializer->decode($serialized);
         $deserializedEnvelope = $deserializedEnvelope->with(new ReceivedStamp('amqp'));
 
+        // Step 3: Consume from AMQP (first time)
         $context->bus->dispatch($deserializedEnvelope);
 
         // Then: Handler invoked once
@@ -216,23 +196,15 @@ final class InboxFlowTest extends TestCase
             ]
         );
 
-        $bridge = new OutboxToAmqpBridge(
-            eventBus: $context->bus,
-            routingStrategy: new DefaultAmqpRoutingStrategy(),
-            logger: new NullLogger(),
-        );
-
         $message = new TestMessage(id: Id::new(), name: 'Serialization Test', timestamp: CarbonImmutable::now());
 
         // When: Message published to outbox
         $context->bus->dispatch($message);
 
-        // And: Bridge republishes to AMQP
+        // And: Bridge publishes to AMQP via middleware chain
         $outboxEnvelopes = $context->outboxTransport->get();
         foreach ($outboxEnvelopes as $envelope) {
-            $message = $envelope->getMessage();
-            $this->assertInstanceOf(OutboxMessage::class, $message);
-            $bridge->__invoke($message);
+            $context->bus->dispatch($envelope->with(new ReceivedStamp('outbox')));
         }
 
         // Then: AMQP message should have semantic name in type header
@@ -245,11 +217,7 @@ final class InboxFlowTest extends TestCase
         );
 
         // When: Message consumed from AMQP and deserialized
-        $serialized = $context->amqpPublishTransport->getLastSerialized();
-        $this->assertNotNull($serialized);
-
-        // InboxSerializer translates 'test.message.sent' → OrderPlacedMessage::class
-        $deserializedEnvelope = $context->inboxSerializer->decode($serialized);
+        $deserializedEnvelope = $context->inboxSerializer->decode($amqpSerialized);
         $deserializedEnvelope = $deserializedEnvelope->with(new ReceivedStamp('amqp'));
 
         $context->bus->dispatch($deserializedEnvelope);

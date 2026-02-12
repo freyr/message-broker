@@ -21,7 +21,7 @@ AMQP routing determines which Symfony Messenger transport and routing keys are u
 **Custom Transport:**
 ```php
 #[MessageName('order.placed')]
-#[MessengerTransport('commerce')]  // Override transport
+#[AmqpExchange('commerce')]  // Override transport
 final class OrderPlaced implements OutboxMessage { }
 ```
 Result: transport: `commerce`, key: `order.placed`
@@ -37,7 +37,7 @@ Result: transport: `amqp`, key: `inventory.orders.placed`
 **Both Overrides:**
 ```php
 #[MessageName('order.placed')]
-#[MessengerTransport('commerce')]
+#[AmqpExchange('commerce')]
 #[AmqpRoutingKey('commerce.order.created')]
 final class OrderPlaced implements OutboxMessage { }
 ```
@@ -57,16 +57,16 @@ Result: transport: `commerce`, key: `commerce.order.created`
 
 ```
 [Event] → #[MessageName('order.placed')]
-            #[MessengerTransport('commerce')] (optional)
+            #[AmqpExchange('commerce')] (optional)
             #[AmqpRoutingKey('inventory.orders.placed')] (optional)
               ↓
     [AmqpRoutingStrategyInterface]
               ↓
     [DefaultAmqpRoutingStrategy]
               ↓
-    transport: 'commerce', routing_key: 'inventory.orders.placed', headers: {...}
+    sender: 'commerce', routing_key: 'inventory.orders.placed', headers: {...}
               ↓
-    [TransportNamesStamp] → routes to specified Messenger transport
+    [SenderLocator] → resolves SenderInterface by name
               ↓
         [AMQP Publish]
 ```
@@ -75,7 +75,7 @@ Result: transport: `commerce`, key: `commerce.order.created`
 
 - **AmqpRoutingStrategyInterface** - Contract for routing logic
 - **DefaultAmqpRoutingStrategy** - Convention-based implementation
-- **MessengerTransport attribute** - Override Symfony Messenger transport name
+- **AmqpExchange attribute** - Override Symfony Messenger transport name
 - **AmqpRoutingKey attribute** - Override routing key
 - **OutboxToAmqpBridge** - Applies routing during publishing
 
@@ -106,7 +106,7 @@ framework:
 ```
 
 **Publisher side:**
-- Uses `TransportNamesStamp` to route to specified transport
+- Bridge resolves sender via `SenderLocator` by transport name
 - Transport DSN defines the AMQP exchange
 - Routing key set dynamically via `AmqpStamp`
 
@@ -126,6 +126,6 @@ Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface:
 ```
 
 Implement interface:
-- `getTransport(object $event): string`
+- `getSenderName(object $event): string`
 - `getRoutingKey(object $event, string $messageName): string`
 - `getHeaders(string $messageName): array`

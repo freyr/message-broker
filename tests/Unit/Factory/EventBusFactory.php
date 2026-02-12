@@ -5,12 +5,17 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Unit\Factory;
 
 use Freyr\MessageBroker\Inbox\DeduplicationMiddleware;
+use Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge;
+use Freyr\MessageBroker\Outbox\MessageIdStampMiddleware;
+use Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy;
 use Freyr\MessageBroker\Serializer\InboxSerializer;
 use Freyr\MessageBroker\Serializer\Normalizer\CarbonImmutableNormalizer;
 use Freyr\MessageBroker\Serializer\Normalizer\IdNormalizer;
 use Freyr\MessageBroker\Serializer\OutboxSerializer;
 use Freyr\MessageBroker\Tests\Unit\Store\DeduplicationInMemoryStore;
 use Freyr\MessageBroker\Tests\Unit\Transport\InMemoryTransport;
+use Psr\Log\NullLogger;
+use Symfony\Component\DependencyInjection\ServiceLocator;
 use Symfony\Component\Messenger\Handler\HandlersLocator;
 use Symfony\Component\Messenger\MessageBus;
 use Symfony\Component\Messenger\MessageBusInterface;
@@ -52,39 +57,7 @@ final class EventBusFactory
         array $routing = [],
         array $handlers = [],
     ): EventBusTestContext {
-        // Create PropertyInfoExtractor for property promotion support (matches production config)
-        // Using ReflectionExtractor only - sufficient for constructor property promotion
-        $reflectionExtractor = new ReflectionExtractor();
-        $propertyTypeExtractor = new PropertyInfoExtractor(
-            [$reflectionExtractor],
-            [$reflectionExtractor],
-            [],
-            [$reflectionExtractor],
-            [$reflectionExtractor]
-        );
-
-        // Create Symfony serializer with custom normalizers for value objects and stamps
-        // Matches production configuration from config/services.yaml
-        $symfonySerializer = new Serializer(
-            [
-                new IdNormalizer(),
-                new CarbonImmutableNormalizer(),
-                new ArrayDenormalizer(), // Required for stamp deserialization
-                new ObjectNormalizer(
-                    null,
-                    null,
-                    null,
-                    $propertyTypeExtractor  // Enables property promotion support
-                ),
-            ],
-            [new JsonEncoder()]
-        );
-
-        // Create OutboxSerializer for outbox transport (FQN → semantic name)
-        $outboxSerializer = new OutboxSerializer($symfonySerializer);
-
-        // Create InboxSerializer for AMQP transport (semantic name → FQN)
-        $inboxSerializer = new InboxSerializer($symfonySerializer, $messageTypes);
+        [$outboxSerializer, $inboxSerializer] = self::createSerializers($messageTypes);
 
         // Create in-memory transports with different serializers
         $outboxTransport = new InMemoryTransport($outboxSerializer);
@@ -102,7 +75,11 @@ final class EventBusFactory
         $handlersLocator = new HandlersLocator($handlers);
 
         // Create middleware chain
-        $middleware = [new SendMessageMiddleware($senderLocator), new HandleMessageMiddleware($handlersLocator)];
+        $middleware = [
+            new MessageIdStampMiddleware(),
+            new SendMessageMiddleware($senderLocator),
+            new HandleMessageMiddleware($handlersLocator),
+        ];
 
         // Create message bus
         $bus = new MessageBus($middleware);
@@ -145,39 +122,7 @@ final class EventBusFactory
         array $handlers = [],
         array $routing = [],
     ): InboxFlowTestContext {
-        // Create PropertyInfoExtractor for property promotion support (matches production config)
-        // Using ReflectionExtractor only - sufficient for constructor property promotion
-        $reflectionExtractor = new ReflectionExtractor();
-        $propertyTypeExtractor = new PropertyInfoExtractor(
-            [$reflectionExtractor],
-            [$reflectionExtractor],
-            [],
-            [$reflectionExtractor],
-            [$reflectionExtractor]
-        );
-
-        // Create Symfony serializer with custom normalizers for value objects and stamps
-        // Matches production configuration from config/services.yaml
-        $symfonySerializer = new Serializer(
-            [
-                new IdNormalizer(),
-                new CarbonImmutableNormalizer(),
-                new ArrayDenormalizer(), // Required for stamp deserialization
-                new ObjectNormalizer(
-                    null,
-                    null,
-                    null,
-                    $propertyTypeExtractor  // Enables property promotion support
-                ),
-            ],
-            [new JsonEncoder()]
-        );
-
-        // Create OutboxSerializer for outbox storage and AMQP publishing (FQN → semantic name)
-        $outboxSerializer = new OutboxSerializer($symfonySerializer);
-
-        // Create InboxSerializer for AMQP consumption (semantic name → FQN)
-        $inboxSerializer = new InboxSerializer($symfonySerializer, $messageTypes);
+        [$outboxSerializer, $inboxSerializer] = self::createSerializers($messageTypes);
 
         // Create 3 separate transports to avoid mixing concerns:
         // 1. Outbox: Stores domain events (uses OutboxSerializer for encode/decode)
@@ -185,11 +130,6 @@ final class EventBusFactory
 
         // 2. AMQP Publish: Bridge publishes here (uses OutboxSerializer for encoding)
         $amqpPublishTransport = new InMemoryTransport($outboxSerializer);
-
-        // 3. AMQP Consume: External consumers read from here (uses InboxSerializer for decoding)
-        // Note: In tests, amqpPublishTransport and amqpConsumeTransport point to same data,
-        // but in production they would be separate queue configurations
-        $amqpConsumeTransport = $amqpPublishTransport; // Same physical transport, different serializer context
 
         // Create handlers locator
         $handlersLocator = new HandlersLocator($handlers);
@@ -207,10 +147,20 @@ final class EventBusFactory
         // Create deduplication middleware with store
         $deduplicationMiddleware = new DeduplicationMiddleware($deduplicationStore);
 
-        // Create middleware chain
-        // DeduplicationMiddleware runs BEFORE handlers (like in production)
+        // Bridge uses sender locator to resolve AMQP transport by name
+        $bridgeMiddleware = new OutboxToAmqpBridge(
+            senderLocator: new ServiceLocator([
+                'amqp' => fn () => $amqpPublishTransport,
+            ]),
+            routingStrategy: new DefaultAmqpRoutingStrategy(),
+            logger: new NullLogger(),
+        );
+
+        // Create middleware chain matching production ordering
         $middleware = [
+            new MessageIdStampMiddleware(),
             new SendMessageMiddleware(new SendersLocator($routing, $transportContainer)),
+            $bridgeMiddleware,
             $deduplicationMiddleware,
             new HandleMessageMiddleware($handlersLocator),
         ];
@@ -222,11 +172,46 @@ final class EventBusFactory
             bus: $bus,
             outboxTransport: $outboxTransport,
             amqpPublishTransport: $amqpPublishTransport,
-            amqpConsumeTransport: $amqpConsumeTransport,
             outboxSerializer: $outboxSerializer,
             inboxSerializer: $inboxSerializer,
             deduplicationStore: $deduplicationStore,
         );
+    }
+
+    /**
+     * Create OutboxSerializer and InboxSerializer with custom normalizers.
+     *
+     * Matches production configuration from config/services.yaml:
+     * - IdNormalizer for Freyr\Identity\Id
+     * - CarbonImmutableNormalizer for Carbon\CarbonImmutable
+     * - ObjectNormalizer with propertyTypeExtractor for constructor property promotion
+     *
+     * @param array<string, class-string> $messageTypes Message name to class mapping
+     *
+     * @return array{OutboxSerializer, InboxSerializer}
+     */
+    private static function createSerializers(array $messageTypes): array
+    {
+        $reflectionExtractor = new ReflectionExtractor();
+        $propertyTypeExtractor = new PropertyInfoExtractor(
+            [$reflectionExtractor],
+            [$reflectionExtractor],
+            [],
+            [$reflectionExtractor],
+            [$reflectionExtractor]
+        );
+
+        $symfonySerializer = new Serializer(
+            [
+                new IdNormalizer(),
+                new CarbonImmutableNormalizer(),
+                new ArrayDenormalizer(),
+                new ObjectNormalizer(null, null, null, $propertyTypeExtractor),
+            ],
+            [new JsonEncoder()]
+        );
+
+        return [new OutboxSerializer($symfonySerializer), new InboxSerializer($symfonySerializer, $messageTypes)];
     }
 }
 
@@ -253,7 +238,6 @@ final readonly class InboxFlowTestContext
         public MessageBusInterface $bus,
         public InMemoryTransport $outboxTransport,
         public InMemoryTransport $amqpPublishTransport,
-        public InMemoryTransport $amqpConsumeTransport,
         public OutboxSerializer $outboxSerializer,
         public InboxSerializer $inboxSerializer,
         public DeduplicationInMemoryStore $deduplicationStore,
