@@ -36,11 +36,7 @@ final class MessageIdStampMiddlewareTest extends TestCase
 
     public function testOutboxMessageGetsStampedWithMessageIdStamp(): void
     {
-        $message = new TestMessage(
-            id: Id::new(),
-            name: 'Test',
-            timestamp: CarbonImmutable::now(),
-        );
+        $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message);
 
         $result = $this->middleware->handle($envelope, $this->createPassThroughStack());
@@ -70,11 +66,7 @@ final class MessageIdStampMiddlewareTest extends TestCase
     public function testOutboxMessageWithExistingStampIsNotReStamped(): void
     {
         $existingStamp = new MessageIdStamp('01234567-89ab-7def-8000-000000000001');
-        $message = new TestMessage(
-            id: Id::new(),
-            name: 'Test',
-            timestamp: CarbonImmutable::now(),
-        );
+        $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [$existingStamp]);
 
         $result = $this->middleware->handle($envelope, $this->createPassThroughStack());
@@ -90,11 +82,7 @@ final class MessageIdStampMiddlewareTest extends TestCase
 
     public function testOutboxMessageWithReceivedStampIsNotStamped(): void
     {
-        $message = new TestMessage(
-            id: Id::new(),
-            name: 'Test',
-            timestamp: CarbonImmutable::now(),
-        );
+        $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [new ReceivedStamp('outbox')]);
 
         $result = $this->middleware->handle($envelope, $this->createPassThroughStack());

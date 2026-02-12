@@ -51,15 +51,8 @@ final class OutboxToAmqpBridgeTest extends TestCase
     public function testPublishesOutboxMessageWithCorrectStamps(): void
     {
         $messageId = '01234567-89ab-7def-8000-000000000001';
-        $message = new TestMessage(
-            id: Id::new(),
-            name: 'Test Bridge',
-            timestamp: CarbonImmutable::now(),
-        );
-        $envelope = new Envelope($message, [
-            new ReceivedStamp('outbox'),
-            new MessageIdStamp($messageId),
-        ]);
+        $message = new TestMessage(id: Id::new(), name: 'Test Bridge', timestamp: CarbonImmutable::now());
+        $envelope = new Envelope($message, [new ReceivedStamp('outbox'), new MessageIdStamp($messageId)]);
 
         $this->bridge->handle($envelope, $this->createPassThroughStack());
 
@@ -82,14 +75,8 @@ final class OutboxToAmqpBridgeTest extends TestCase
 
     public function testThrowsWhenMessageIdStampMissing(): void
     {
-        $message = new TestMessage(
-            id: Id::new(),
-            name: 'Test',
-            timestamp: CarbonImmutable::now(),
-        );
-        $envelope = new Envelope($message, [
-            new ReceivedStamp('outbox'),
-        ]);
+        $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
+        $envelope = new Envelope($message, [new ReceivedStamp('outbox')]);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/without MessageIdStamp/');
@@ -100,9 +87,7 @@ final class OutboxToAmqpBridgeTest extends TestCase
     public function testNonOutboxMessagePassesThrough(): void
     {
         $message = new \stdClass();
-        $envelope = new Envelope($message, [
-            new ReceivedStamp('outbox'),
-        ]);
+        $envelope = new Envelope($message, [new ReceivedStamp('outbox')]);
 
         $nextCalled = false;
         $stack = $this->createTrackingStack($nextCalled);
@@ -115,11 +100,7 @@ final class OutboxToAmqpBridgeTest extends TestCase
 
     public function testOutboxMessageWithoutReceivedStampPassesThrough(): void
     {
-        $message = new TestMessage(
-            id: Id::new(),
-            name: 'Test',
-            timestamp: CarbonImmutable::now(),
-        );
+        $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message);
 
         $nextCalled = false;
@@ -133,14 +114,8 @@ final class OutboxToAmqpBridgeTest extends TestCase
 
     public function testOutboxMessageFromWrongTransportPassesThrough(): void
     {
-        $message = new TestMessage(
-            id: Id::new(),
-            name: 'Test',
-            timestamp: CarbonImmutable::now(),
-        );
-        $envelope = new Envelope($message, [
-            new ReceivedStamp('amqp_orders'),
-        ]);
+        $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
+        $envelope = new Envelope($message, [new ReceivedStamp('amqp_orders')]);
 
         $nextCalled = false;
         $stack = $this->createTrackingStack($nextCalled);
@@ -153,11 +128,7 @@ final class OutboxToAmqpBridgeTest extends TestCase
 
     public function testShortCircuitsAfterPublishing(): void
     {
-        $message = new TestMessage(
-            id: Id::new(),
-            name: 'Test',
-            timestamp: CarbonImmutable::now(),
-        );
+        $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [
             new ReceivedStamp('outbox'),
             new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
@@ -186,12 +157,15 @@ final class OutboxToAmqpBridgeTest extends TestCase
 
     private function createTrackingStack(bool &$nextCalled): StackInterface
     {
-        $tracking = new class ($nextCalled) implements MiddlewareInterface {
-            public function __construct(private bool &$called) {}
+        $tracking = new class($nextCalled) implements MiddlewareInterface {
+            public function __construct(
+                private bool &$called, // @phpstan-ignore property.onlyWritten (read via reference in outer scope)
+            ) {}
 
             public function handle(Envelope $envelope, StackInterface $stack): Envelope
             {
                 $this->called = true;
+
                 return $envelope;
             }
         };

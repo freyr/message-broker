@@ -39,28 +39,25 @@ final readonly class OutboxToAmqpBridge implements MiddlewareInterface
     public function handle(Envelope $envelope, StackInterface $stack): Envelope
     {
         if (!$envelope->getMessage() instanceof OutboxMessage) {
-            return $stack->next()->handle($envelope, $stack);
+            return $stack->next()
+                ->handle($envelope, $stack);
         }
 
         $receivedStamp = $envelope->last(ReceivedStamp::class);
         if (!$receivedStamp instanceof ReceivedStamp
             || $receivedStamp->getTransportName() !== $this->outboxTransportName) {
-            return $stack->next()->handle($envelope, $stack);
+            return $stack->next()
+                ->handle($envelope, $stack);
         }
 
         $event = $envelope->getMessage();
 
         $messageName = MessageName::fromClass($event)
-            ?? throw new RuntimeException(sprintf(
-                'Event %s must have #[MessageName] attribute',
-                $event::class,
-            ));
+            ?? throw new RuntimeException(sprintf('Event %s must have #[MessageName] attribute', $event::class));
 
         $messageIdStamp = $envelope->last(MessageIdStamp::class)
             ?? throw new RuntimeException(sprintf(
-                'OutboxMessage %s consumed from outbox transport without MessageIdStamp. '
-                . 'Ensure MessageIdStampMiddleware runs before outbox transport storage, '
-                . 'or drain the outbox of legacy messages before deployment.',
+                'OutboxMessage %s consumed from outbox transport without MessageIdStamp. Ensure MessageIdStampMiddleware runs before outbox transport storage, or drain the outbox of legacy messages before deployment.',
                 $event::class,
             ));
 

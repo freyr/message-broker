@@ -23,17 +23,20 @@ final readonly class MessageIdStampMiddleware implements MiddlewareInterface
     public function handle(Envelope $envelope, StackInterface $stack): Envelope
     {
         if (!$envelope->getMessage() instanceof OutboxMessage) {
-            return $stack->next()->handle($envelope, $stack);
+            return $stack->next()
+                ->handle($envelope, $stack);
         }
 
         if ($envelope->last(ReceivedStamp::class) !== null) {
-            return $stack->next()->handle($envelope, $stack);
+            return $stack->next()
+                ->handle($envelope, $stack);
         }
 
         if ($envelope->last(MessageIdStamp::class) === null) {
             $envelope = $envelope->with(new MessageIdStamp((string) Id::new()));
         }
 
-        return $stack->next()->handle($envelope, $stack);
+        return $stack->next()
+            ->handle($envelope, $stack);
     }
 }
