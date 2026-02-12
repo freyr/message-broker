@@ -59,10 +59,12 @@ services:
             - { name: 'messenger.middleware' }
 
     # Outbox Bridge (middleware — publishes outbox events to AMQP)
-    # Reads existing MessageIdStamp from envelope and publishes via direct SenderInterface
+    # Uses sender locator to resolve transport by name (supports multiple exchanges).
+    # Default sender is 'amqp'. Add more transports to the locator for #[AmqpExchange] support.
     Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
         arguments:
-            $amqpSender: '@messenger.transport.amqp'
+            $senderLocator: !service_locator
+                amqp: '@messenger.transport.amqp'
             $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
             $logger: '@logger'
         tags:

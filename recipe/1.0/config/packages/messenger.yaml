@@ -19,7 +19,9 @@ framework:
                     enabled: true
                     allow_no_handlers: false
                 middleware:
+                    - 'Freyr\MessageBroker\Outbox\MessageIdStampMiddleware'
                     - doctrine_transaction
+                    - 'Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge'
                     # DeduplicationMiddleware is registered via service tag (priority -10)
                     # and runs automatically after doctrine_transaction
 

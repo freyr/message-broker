@@ -177,7 +177,8 @@ services:
     # Outbox Bridge (middleware)
     Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
         arguments:
-            $amqpSender: '@messenger.transport.amqp'
+            $senderLocator: !service_locator
+                amqp: '@messenger.transport.amqp'
             $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
             $logger: '@logger'
 
