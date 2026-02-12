@@ -9,11 +9,13 @@ use Freyr\Identity\Id;
 use Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge;
 use Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy;
 use Freyr\MessageBroker\Stamp\MessageIdStamp;
+use Freyr\MessageBroker\Tests\Unit\Fixtures\CommerceTestMessage;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\TestMessage;
 use Freyr\MessageBroker\Tests\Unit\Transport\InMemoryTransport;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 use RuntimeException;
+use Symfony\Component\DependencyInjection\ServiceLocator;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Middleware\MiddlewareInterface;
@@ -42,7 +44,9 @@ final class OutboxToAmqpBridgeTest extends TestCase
     {
         $this->amqpSender = new InMemoryTransport(new PhpSerializer());
         $this->bridge = new OutboxToAmqpBridge(
-            amqpSender: $this->amqpSender,
+            senderLocator: new ServiceLocator([
+                'amqp' => fn () => $this->amqpSender,
+            ]),
             routingStrategy: new DefaultAmqpRoutingStrategy(),
             logger: new NullLogger(),
         );
@@ -141,6 +145,54 @@ final class OutboxToAmqpBridgeTest extends TestCase
 
         $this->assertFalse($nextCalled, 'Bridge should short-circuit after publishing');
         $this->assertEquals(1, $this->amqpSender->count());
+    }
+
+    public function testRoutesToCustomExchangeViaSenderLocator(): void
+    {
+        $commerceSender = new InMemoryTransport(new PhpSerializer());
+
+        $bridge = new OutboxToAmqpBridge(
+            senderLocator: new ServiceLocator([
+                'amqp' => fn () => $this->amqpSender,
+                'commerce' => fn () => $commerceSender,
+            ]),
+            routingStrategy: new DefaultAmqpRoutingStrategy(),
+            logger: new NullLogger(),
+        );
+
+        $message = new CommerceTestMessage(orderId: Id::new(), amount: 99.99, placedAt: CarbonImmutable::now());
+        $envelope = new Envelope($message, [
+            new ReceivedStamp('outbox'),
+            new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
+        ]);
+
+        $bridge->handle($envelope, $this->createPassThroughStack());
+
+        // Commerce sender should receive the envelope, not the default AMQP sender
+        $this->assertEquals(0, $this->amqpSender->count(), 'Default AMQP sender should not receive the message');
+        $this->assertEquals(1, $commerceSender->count(), 'Commerce sender should receive the message');
+
+        // Verify routing key uses message name convention
+        $sentEnvelope = $commerceSender->getLastEnvelope();
+        $this->assertNotNull($sentEnvelope);
+        $amqpStamp = $sentEnvelope->last(AmqpStamp::class);
+        $this->assertNotNull($amqpStamp);
+        $this->assertEquals('commerce.order.placed', $amqpStamp->getRoutingKey());
+    }
+
+    public function testThrowsWhenSenderNotInLocator(): void
+    {
+        // Bridge only has 'amqp' sender — CommerceTestMessage requires 'commerce'
+        $message = new CommerceTestMessage(orderId: Id::new(), amount: 50.00, placedAt: CarbonImmutable::now());
+        $envelope = new Envelope($message, [
+            new ReceivedStamp('outbox'),
+            new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/No sender "commerce" configured/');
+
+        $this->bridge->handle($envelope, $this->createPassThroughStack());
     }
 
     private function createPassThroughStack(): StackInterface

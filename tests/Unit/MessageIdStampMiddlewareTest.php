@@ -39,7 +39,8 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message);
 
-        $result = $this->middleware->handle($envelope, $this->createPassThroughStack());
+        $nextCalled = false;
+        $result = $this->middleware->handle($envelope, $this->createTrackingStack($nextCalled));
 
         $stamp = $result->last(MessageIdStamp::class);
         $this->assertNotNull($stamp, 'OutboxMessage should receive MessageIdStamp');
@@ -48,6 +49,7 @@ final class MessageIdStampMiddlewareTest extends TestCase
             $stamp->messageId,
             'MessageId should be a valid UUID v7'
         );
+        $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
     }
 
     public function testNonOutboxMessagePassesThroughWithoutStamp(): void
@@ -55,12 +57,14 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $message = new \stdClass();
         $envelope = new Envelope($message);
 
-        $result = $this->middleware->handle($envelope, $this->createPassThroughStack());
+        $nextCalled = false;
+        $result = $this->middleware->handle($envelope, $this->createTrackingStack($nextCalled));
 
         $this->assertNull(
             $result->last(MessageIdStamp::class),
             'Non-OutboxMessage should not receive MessageIdStamp'
         );
+        $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
     }
 
     public function testOutboxMessageWithExistingStampIsNotReStamped(): void
@@ -69,7 +73,8 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [$existingStamp]);
 
-        $result = $this->middleware->handle($envelope, $this->createPassThroughStack());
+        $nextCalled = false;
+        $result = $this->middleware->handle($envelope, $this->createTrackingStack($nextCalled));
 
         $stamp = $result->last(MessageIdStamp::class);
         $this->assertNotNull($stamp);
@@ -78,6 +83,7 @@ final class MessageIdStampMiddlewareTest extends TestCase
             $stamp->messageId,
             'Existing MessageIdStamp should not be overwritten'
         );
+        $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
     }
 
     public function testOutboxMessageWithReceivedStampIsNotStamped(): void
@@ -85,23 +91,31 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [new ReceivedStamp('outbox')]);
 
-        $result = $this->middleware->handle($envelope, $this->createPassThroughStack());
+        $nextCalled = false;
+        $result = $this->middleware->handle($envelope, $this->createTrackingStack($nextCalled));
 
         // ReceivedStamp means redelivery — stamp should already exist from original dispatch.
         // Middleware must not add a new one.
         $stamps = $result->all(MessageIdStamp::class);
         $this->assertEmpty($stamps, 'Redelivered message should not get a new MessageIdStamp');
+        $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
     }
 
-    private function createPassThroughStack(): StackInterface
+    private function createTrackingStack(bool &$nextCalled): StackInterface
     {
-        $noOp = new class implements MiddlewareInterface {
+        $tracking = new class($nextCalled) implements MiddlewareInterface {
+            public function __construct(
+                private bool &$called, // @phpstan-ignore property.onlyWritten (read via reference in outer scope)
+            ) {}
+
             public function handle(Envelope $envelope, StackInterface $stack): Envelope
             {
+                $this->called = true;
+
                 return $envelope;
             }
         };
 
-        return new StackMiddleware($noOp);
+        return new StackMiddleware($tracking);
     }
 }
