@@ -2,37 +2,39 @@
 
 declare(strict_types=1);
 
-namespace Freyr\MessageBroker\Tests\Unit;
+namespace Freyr\MessageBroker\Tests\Unit\Outbox;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Outbox\MessageIdStampMiddleware;
-use Freyr\MessageBroker\Stamp\MessageIdStamp;
+use Freyr\MessageBroker\Outbox\MessageNameStampMiddleware;
+use Freyr\MessageBroker\Stamp\MessageNameStamp;
 use Freyr\MessageBroker\Tests\Unit\Factory\MiddlewareStackFactory;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\TestMessage;
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Stamp\ReceivedStamp;
 
 /**
- * Unit test for MessageIdStampMiddleware.
+ * Unit test for MessageNameStampMiddleware.
  *
  * Tests that the middleware:
- * - Stamps OutboxMessage envelopes with MessageIdStamp at dispatch time
+ * - Stamps OutboxMessage envelopes with MessageNameStamp at dispatch time
  * - Skips non-OutboxMessage envelopes
  * - Skips envelopes with ReceivedStamp (redelivery)
- * - Does not overwrite existing MessageIdStamp (idempotent)
+ * - Does not overwrite existing MessageNameStamp (idempotent)
+ * - Throws when #[MessageName] attribute is missing
  */
-final class MessageIdStampMiddlewareTest extends TestCase
+final class MessageNameStampMiddlewareTest extends TestCase
 {
-    private MessageIdStampMiddleware $middleware;
+    private MessageNameStampMiddleware $middleware;
 
     protected function setUp(): void
     {
-        $this->middleware = new MessageIdStampMiddleware();
+        $this->middleware = new MessageNameStampMiddleware();
     }
 
-    public function testOutboxMessageGetsStampedWithMessageIdStamp(): void
+    public function testOutboxMessageGetsStampedWithMessageNameStamp(): void
     {
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message);
@@ -40,13 +42,9 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $nextCalled = false;
         $result = $this->middleware->handle($envelope, MiddlewareStackFactory::createTracking($nextCalled));
 
-        $stamp = $result->last(MessageIdStamp::class);
-        $this->assertNotNull($stamp, 'OutboxMessage should receive MessageIdStamp');
-        $this->assertMatchesRegularExpression(
-            '/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
-            (string) $stamp->messageId,
-            'MessageId should be a valid UUID v7'
-        );
+        $stamp = $result->last(MessageNameStamp::class);
+        $this->assertNotNull($stamp, 'OutboxMessage should receive MessageNameStamp');
+        $this->assertSame('test.message.sent', $stamp->messageName);
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
     }
 
@@ -59,27 +57,27 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $result = $this->middleware->handle($envelope, MiddlewareStackFactory::createTracking($nextCalled));
 
         $this->assertNull(
-            $result->last(MessageIdStamp::class),
-            'Non-OutboxMessage should not receive MessageIdStamp'
+            $result->last(MessageNameStamp::class),
+            'Non-OutboxMessage should not receive MessageNameStamp'
         );
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
     }
 
     public function testOutboxMessageWithExistingStampIsNotReStamped(): void
     {
-        $existingStamp = new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001'));
+        $existingStamp = new MessageNameStamp('custom.name.override');
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [$existingStamp]);
 
         $nextCalled = false;
         $result = $this->middleware->handle($envelope, MiddlewareStackFactory::createTracking($nextCalled));
 
-        $stamp = $result->last(MessageIdStamp::class);
+        $stamp = $result->last(MessageNameStamp::class);
         $this->assertNotNull($stamp);
         $this->assertSame(
-            '01234567-89ab-7def-8000-000000000001',
-            (string) $stamp->messageId,
-            'Existing MessageIdStamp should not be overwritten'
+            'custom.name.override',
+            $stamp->messageName,
+            'Existing MessageNameStamp should not be overwritten'
         );
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
     }
@@ -92,10 +90,19 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $nextCalled = false;
         $result = $this->middleware->handle($envelope, MiddlewareStackFactory::createTracking($nextCalled));
 
-        // ReceivedStamp means redelivery — stamp should already exist from original dispatch.
-        // Middleware must not add a new one.
-        $stamps = $result->all(MessageIdStamp::class);
-        $this->assertEmpty($stamps, 'Redelivered message should not get a new MessageIdStamp');
+        $stamps = $result->all(MessageNameStamp::class);
+        $this->assertEmpty($stamps, 'Redelivered message should not get a new MessageNameStamp');
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
+    }
+
+    public function testThrowsWhenMessageNameAttributeMissing(): void
+    {
+        $message = new class implements \Freyr\MessageBroker\Outbox\OutboxMessage {};
+        $envelope = new Envelope($message);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/must have #\[MessageName\] attribute/');
+
+        $this->middleware->handle($envelope, MiddlewareStackFactory::createPassThrough());
     }
 }

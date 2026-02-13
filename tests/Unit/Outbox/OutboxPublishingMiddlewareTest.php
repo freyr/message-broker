@@ -89,7 +89,11 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         ]);
         $messageId = '01234567-89ab-7def-8000-000000000001';
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
-        $envelope = new Envelope($message, [new ReceivedStamp('outbox'), new MessageIdStamp($messageId)]);
+        $envelope = new Envelope($message, [
+            new ReceivedStamp('outbox'),
+            new MessageIdStamp(Id::fromString($messageId)),
+            new MessageNameStamp('test.message.sent'),
+        ]);
 
         $middleware->handle($envelope, MiddlewareStackFactory::createPassThrough());
 
@@ -104,29 +108,29 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         // Verify stamp values
         $idStamp = $publishedEnvelope->last(MessageIdStamp::class);
         $this->assertNotNull($idStamp);
-        $this->assertSame($messageId, $idStamp->messageId);
+        $this->assertSame($messageId, (string) $idStamp->messageId);
 
         $nameStamp = $publishedEnvelope->last(MessageNameStamp::class);
         $this->assertNotNull($nameStamp);
         $this->assertSame('test.message.sent', $nameStamp->messageName);
     }
 
-    public function testThrowsWhenMessageNameAttributeMissing(): void
+    public function testThrowsWhenMessageNameStampMissing(): void
     {
         $publisher = $this->createMockPublisher();
         $middleware = $this->createMiddleware([
             'outbox' => $publisher,
         ]);
 
-        // Create a message without #[MessageName] attribute
-        $message = new class implements \Freyr\MessageBroker\Outbox\OutboxMessage {};
+        $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [
             new ReceivedStamp('outbox'),
-            new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
+            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
+            // No MessageNameStamp — simulates missing middleware
         ]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/must have #\[MessageName\] attribute/');
+        $this->expectExceptionMessageMatches('/must contain MessageNameStamp/');
 
         $middleware->handle($envelope, MiddlewareStackFactory::createPassThrough());
     }
@@ -138,10 +142,14 @@ final class OutboxPublishingMiddlewareTest extends TestCase
             'outbox' => $publisher,
         ]);
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
-        $envelope = new Envelope($message, [new ReceivedStamp('outbox')]);
+        $envelope = new Envelope($message, [
+            new ReceivedStamp('outbox'),
+            new MessageNameStamp('test.message.sent'),
+            // No MessageIdStamp
+        ]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/without MessageIdStamp/');
+        $this->expectExceptionMessageMatches('/must contain MessageIdStamp/');
 
         $middleware->handle($envelope, MiddlewareStackFactory::createPassThrough());
     }
@@ -155,7 +163,8 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [
             new ReceivedStamp('outbox'),
-            new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
+            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
+            new MessageNameStamp('test.message.sent'),
         ]);
 
         $nextCalled = false;
@@ -175,7 +184,8 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [
             new ReceivedStamp('outbox'),
-            new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
+            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
+            new MessageNameStamp('test.message.sent'),
         ]);
 
         $result = $middleware->handle($envelope, MiddlewareStackFactory::createPassThrough());

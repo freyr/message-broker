@@ -15,15 +15,17 @@ framework:
                     allow_no_handlers: false
                 middleware:
                     - 'Freyr\MessageBroker\Outbox\MessageIdStampMiddleware'
+                    - 'Freyr\MessageBroker\Outbox\MessageNameStampMiddleware'
                     - doctrine_transaction
                     - 'Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware'
                     - 'Freyr\MessageBroker\Inbox\DeduplicationMiddleware'
 
         transports:
             # Outbox transport - AUTO-MANAGED (auto_setup: true)
+            # Uses Symfony's JSON serialiser (FQN in type header — internal storage)
             outbox:
                 dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
-                serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
+                serializer: messenger.transport.symfony_serializer
                 options:
                     auto_setup: true
                 retry_strategy:
@@ -34,7 +36,7 @@ framework:
             # AMQP publish transport - MANUAL MANAGEMENT (auto_setup: false)
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
-                serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
+                serializer: 'Freyr\MessageBroker\Serializer\WireFormatSerializer'
                 options:
                     auto_setup: false
                     exchange:
@@ -146,8 +148,8 @@ services:
             $serializer: '@serializer'
             $messageTypes: '%message_broker.inbox.message_types%'
 
-    # Outbox Serializer
-    Freyr\MessageBroker\Serializer\OutboxSerializer:
+    # Wire Format Serializer (for AMQP publishing)
+    Freyr\MessageBroker\Serializer\WireFormatSerializer:
         arguments:
             $serializer: '@serializer'
 
@@ -164,12 +166,14 @@ services:
     Freyr\MessageBroker\Inbox\DeduplicationMiddleware:
         arguments:
             $store: '@Freyr\MessageBroker\Inbox\DeduplicationStore'
-            $logger: '@logger'
         tags:
             - { name: 'messenger.middleware', priority: -10 }
 
     # MessageIdStamp Middleware
     Freyr\MessageBroker\Outbox\MessageIdStampMiddleware: ~
+
+    # MessageNameStamp Middleware
+    Freyr\MessageBroker\Outbox\MessageNameStampMiddleware: ~
 
     # Outbox Publishing Middleware (core — transport-agnostic)
     Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware:

@@ -23,13 +23,11 @@ final readonly class DeduplicationDbalStore implements DeduplicationStore
         private ?LoggerInterface $logger = null,
     ) {}
 
-    public function isDuplicate(string $messageId, string $messageName): bool
+    public function isDuplicate(Id $messageId, string $messageName): bool
     {
-        $binaryMessageId = Id::fromString($messageId)->toBinary();
-
         try {
             $this->connection->insert($this->tableName, [
-                'message_id' => $binaryMessageId,
+                'message_id' => $messageId->toBinary(),
                 'message_name' => $messageName,
                 'processed_at' => date('Y-m-d H:i:s'),
             ]);
@@ -39,7 +37,7 @@ final readonly class DeduplicationDbalStore implements DeduplicationStore
         } catch (UniqueConstraintViolationException $e) {
             // Insert failed due to unique constraint - message is a duplicate
             $this->logger?->info('Duplicate message detected by deduplication store', [
-                'message_id' => $messageId,
+                'message_id' => (string) $messageId,
                 'message_name' => $messageName,
             ]);
 

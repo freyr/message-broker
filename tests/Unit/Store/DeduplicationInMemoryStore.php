@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Unit\Store;
 
+use Freyr\Identity\Id;
 use Freyr\MessageBroker\Inbox\DeduplicationStore;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -25,13 +26,15 @@ final class DeduplicationInMemoryStore implements DeduplicationStore
         private readonly LoggerInterface $logger = new NullLogger(),
     ) {}
 
-    public function isDuplicate(string $messageId, string $messageName): bool
+    public function isDuplicate(Id $messageId, string $messageName): bool
     {
+        $key = (string) $messageId;
+
         // Check if already processed
-        if (isset($this->processedMessageIds[$messageId])) {
+        if (isset($this->processedMessageIds[$key])) {
             ++$this->duplicateCount;
             $this->logger->info('Duplicate message detected by deduplication store', [
-                'message_id' => $messageId,
+                'message_id' => $key,
                 'message_name' => $messageName,
             ]);
 
@@ -39,7 +42,7 @@ final class DeduplicationInMemoryStore implements DeduplicationStore
         }
 
         // Mark as processed
-        $this->processedMessageIds[$messageId] = true;
+        $this->processedMessageIds[$key] = true;
         ++$this->processedCount;
 
         return false;

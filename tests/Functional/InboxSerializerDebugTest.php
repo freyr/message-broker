@@ -10,13 +10,13 @@ use Freyr\MessageBroker\Serializer\InboxSerializer;
 use Freyr\MessageBroker\Stamp\MessageIdStamp;
 
 /**
- * Tests InboxSerializer X-Message-Id header handling.
+ * Tests InboxSerializer native stamp header handling.
  */
 final class InboxSerializerDebugTest extends FunctionalTestCase
 {
     public function testSemanticMessageIdHeaderIsDeserialisedCorrectly(): void
     {
-        // Given: An encoded envelope with the semantic header
+        // Given: An encoded envelope with native stamp header
         $messageId = Id::new()->__toString();
         $testId = Id::new();
 
@@ -28,7 +28,9 @@ final class InboxSerializerDebugTest extends FunctionalTestCase
             ]),
             'headers' => [
                 'type' => 'test.event.sent',
-                'X-Message-Id' => $messageId,
+                'X-Message-Stamp-'.MessageIdStamp::class => json_encode([[
+                    'messageId' => $messageId,
+                ]]),
             ],
         ];
 
@@ -38,10 +40,10 @@ final class InboxSerializerDebugTest extends FunctionalTestCase
             ->get('Freyr\MessageBroker\Serializer\InboxSerializer');
         $envelope = $serializer->decode($encodedEnvelope);
 
-        // Then: MessageIdStamp exists (created from X-Message-Id header)
+        // Then: MessageIdStamp exists (restored natively from X-Message-Stamp-* header)
         $messageIdStamp = $envelope->last(MessageIdStamp::class);
 
-        $this->assertNotNull($messageIdStamp, 'MessageIdStamp should be created from X-Message-Id header');
-        $this->assertEquals($messageId, $messageIdStamp->messageId);
+        $this->assertNotNull($messageIdStamp, 'MessageIdStamp should be restored from native stamp header');
+        $this->assertSame($messageId, (string) $messageIdStamp->messageId);
     }
 }

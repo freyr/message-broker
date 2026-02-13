@@ -84,9 +84,8 @@ final class InboxFlowTest extends TestCase
         $this->assertNotNull($amqpEnvelope);
         $amqpStamp = $amqpEnvelope->last(MessageIdStamp::class);
         $this->assertNotNull($amqpStamp, 'AMQP message should have MessageIdStamp');
-        $this->assertEquals(
-            $dispatchStamp->messageId,
-            $amqpStamp->messageId,
+        $this->assertTrue(
+            $dispatchStamp->messageId->sameAs($amqpStamp->messageId),
             'AMQP message should have the SAME MessageIdStamp as outbox dispatch'
         );
 
@@ -213,7 +212,7 @@ final class InboxFlowTest extends TestCase
         $this->assertEquals(
             'test.message.sent',
             $amqpSerialized['headers']['type'],
-            'AMQP transport should have semantic name (from OutboxSerializer)'
+            'AMQP transport should have semantic name (from WireFormatSerializer)'
         );
 
         // When: Message consumed from AMQP and deserialized

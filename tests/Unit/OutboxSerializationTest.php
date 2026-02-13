@@ -16,7 +16,7 @@ use PHPUnit\Framework\TestCase;
  *
  * Tests that messages are correctly:
  * - Routed to outbox transport
- * - Serialized with semantic message names (not FQN)
+ * - Serialized with FQN in type header (native serialiser — internal storage)
  * - Formatted as valid JSON
  * - Do not contain messageId in payload (it's transport metadata)
  */
@@ -58,10 +58,9 @@ final class OutboxSerializationTest extends TestCase
         // Check headers
         $headers = $serialized['headers'];
 
-        // Type header should contain semantic name (not FQN)
+        // Type header should contain FQN (native serialiser — internal storage)
         $this->assertArrayHasKey('type', $headers);
-        $this->assertEquals('test.message.sent', $headers['type'], 'Type header should contain semantic message name');
-        $this->assertNotEquals(TestMessage::class, $headers['type'], 'Type header should NOT contain FQN');
+        $this->assertEquals(TestMessage::class, $headers['type'], 'Type header should contain FQN (native serialiser)');
 
         // Check body
         $body = $serialized['body'];
@@ -163,13 +162,13 @@ final class OutboxSerializationTest extends TestCase
         $this->assertInstanceOf(AmqpTestMessage::class, $amqpEnvelope->getMessage());
 
         // Verify serialization format for AMQP message
-        // AMQP transport uses standard serializer (FQN in type header, NOT semantic name)
+        // AMQP transport uses InboxSerializer, which reads MessageNameStamp and produces semantic name
         $amqpSerialized = $context->amqpTransport->getLastSerialized();
         $this->assertNotNull($amqpSerialized);
         $this->assertEquals(
-            AmqpTestMessage::class,
+            'test.amqp.sent',
             $amqpSerialized['headers']['type'],
-            'AMQP message should have FQN (standard serialiser, not OutboxSerializer)'
+            'AMQP message should have semantic name (InboxSerializer reads MessageNameStamp)'
         );
 
         $amqpBody = json_decode($amqpSerialized['body'], true);

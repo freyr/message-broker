@@ -53,17 +53,17 @@ final class OutboxFlowTest extends FunctionalTestCase
 
         $this->assertIsArray($result);
 
-        // Body should be JSON (OutboxSerializer)
+        // Body should be JSON (native serialiser)
         $this->assertIsString($result['body']);
         $body = json_decode($result['body'], true);
         $this->assertIsArray($body, 'Body should be valid JSON');
         $this->assertEquals('integration-test-event', $body['name']);
 
-        // Headers should contain semantic name
+        // Headers should contain FQN (native serialiser stores class name internally)
         $this->assertIsString($result['headers']);
         $headers = json_decode($result['headers'], true);
         $this->assertIsArray($headers);
-        $this->assertEquals('test.event.sent', $headers['type']);
+        $this->assertEquals(TestEvent::class, $headers['type']);
     }
 
     public function testOutboxPublishesToAmqp(): void
@@ -88,14 +88,19 @@ final class OutboxFlowTest extends FunctionalTestCase
         $headers = $message['headers']->getNativeData();
         $this->assertEquals('test.event.sent', $headers['type']);
 
-        // And: Message has semantic X-Message-Id header (not FQN-based stamp header)
-        $this->assertArrayHasKey('X-Message-Id', $headers);
+        // And: Message has native MessageIdStamp header
+        $stampHeaderKey = 'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp';
+        $this->assertArrayHasKey($stampHeaderKey, $headers);
 
-        // And: X-Message-Id contains a valid UUID v7
-        $this->assertIsString($headers['X-Message-Id']);
+        // And: MessageIdStamp contains a valid UUID v7
+        $stampJson = $headers[$stampHeaderKey];
+        $this->assertIsString($stampJson);
+        $stampData = json_decode($stampJson, true);
+        $this->assertIsArray($stampData);
+        /** @var array<int, array{messageId: string}> $stampData */
         $this->assertMatchesRegularExpression(
             '/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
-            $headers['X-Message-Id']
+            $stampData[0]['messageId']
         );
 
         // And: Body contains event data (no messageId in payload)

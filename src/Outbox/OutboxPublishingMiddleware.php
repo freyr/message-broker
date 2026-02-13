@@ -59,17 +59,20 @@ final readonly class OutboxPublishingMiddleware implements MiddlewareInterface
 
         $event = $envelope->getMessage();
 
-        $messageName = MessageName::fromClass($event)
-            ?? throw new RuntimeException(sprintf('Event %s must have #[MessageName] attribute.', $event::class));
-
-        $messageIdStamp = $envelope->last(MessageIdStamp::class)
+        $messageNameStamp = $envelope->last(MessageNameStamp::class)
             ?? throw new RuntimeException(sprintf(
-                'OutboxMessage %s consumed without MessageIdStamp. Ensure MessageIdStampMiddleware runs at dispatch time.',
+                'Envelope for %s must contain MessageNameStamp. Ensure MessageNameStampMiddleware runs at dispatch time.',
                 $event::class,
             ));
 
-        // Build clean envelope for publisher (strip transport stamps)
-        $publishEnvelope = new Envelope($event, [$messageIdStamp, new MessageNameStamp($messageName)]);
+        $messageIdStamp = $envelope->last(MessageIdStamp::class)
+            ?? throw new RuntimeException(sprintf(
+                'Envelope for %s must contain MessageIdStamp. Ensure MessageIdStampMiddleware runs at dispatch time.',
+                $event::class,
+            ));
+
+        // Build a clean envelope for the publisher (strip transport stamps)
+        $publishEnvelope = new Envelope($event, [$messageIdStamp, $messageNameStamp]);
 
         /** @var OutboxPublisherInterface $publisher */
         $publisher = $this->publisherLocator->get($transportName);
