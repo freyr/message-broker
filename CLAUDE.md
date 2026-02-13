@@ -11,9 +11,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 For **ALL** new features, bug fixes, refactoring, or significant changes, you MUST follow this cycle:
 
 1. **Brainstorm Phase** - `/workflows:brainstorm`
+   - **First:** Create a GitHub issue with the preliminary question/problem statement
    - Explore requirements and approaches before planning
    - Understand constraints and trade-offs
    - Identify potential challenges
+   - **File naming:** `docs/brainstorms/YYYY-MM-DD-<issue-number>-<topic>-brainstorm.md`
+   - **After:** Summarise the brainstorm outcome and update the GitHub issue with the result
 
 2. **Planning Phase** - `/workflows:plan`
    - Create detailed implementation plans
