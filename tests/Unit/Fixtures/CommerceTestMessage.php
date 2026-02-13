@@ -8,7 +8,7 @@ use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Outbox\OutboxMessage;
 use Freyr\MessageBroker\Outbox\MessageName;
-use Freyr\MessageBroker\Outbox\Routing\AmqpExchange;
+use Freyr\MessageBroker\Amqp\Routing\AmqpExchange;
 
 /**
  * Test message routed to a custom AMQP exchange via #[AmqpExchange].

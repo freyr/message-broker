@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\MessageBroker\Outbox\Routing;
+namespace Freyr\MessageBroker\Amqp\Routing;
 
 use Attribute;
 use Freyr\MessageBroker\Attribute\ResolvesFromClass;
@@ -13,14 +13,15 @@ use Freyr\MessageBroker\Attribute\ResolvesFromClass;
  * Override the default AMQP routing key for a domain event.
  *
  * By default, the routing key is the full message name:
- * - order.placed → order.placed
- * - sla.calculation.started → sla.calculation.started
+ * - order.placed -> order.placed
+ * - sla.calculation.started -> sla.calculation.started
  *
  * Use this attribute to specify a custom routing key.
  *
  * Example:
  * ```php
  * #[MessageName('user.premium.custom')]
+ * #[AmqpRoutingKey('custom.routing.key')]
  * final readonly class UserPremiumUpgraded { ... }
  * ```
  */

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\MessageBroker\Outbox\Routing;
+namespace Freyr\MessageBroker\Amqp\Routing;
 
 use Attribute;
 use Freyr\MessageBroker\Attribute\ResolvesFromClass;
@@ -17,7 +17,7 @@ use Freyr\MessageBroker\Attribute\ResolvesFromClass;
  * with its own AMQP exchange).
  *
  * The attribute value must match a transport name registered in the
- * OutboxToAmqpBridge sender locator.
+ * AmqpOutboxPublisher sender locator.
  *
  * Example:
  * ```php

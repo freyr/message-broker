@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Unit\Factory;
 
+use Freyr\MessageBroker\Amqp\AmqpOutboxPublisher;
+use Freyr\MessageBroker\Amqp\Routing\DefaultAmqpRoutingStrategy;
 use Freyr\MessageBroker\Inbox\DeduplicationMiddleware;
-use Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge;
 use Freyr\MessageBroker\Outbox\MessageIdStampMiddleware;
-use Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy;
+use Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware;
 use Freyr\MessageBroker\Serializer\InboxSerializer;
 use Freyr\MessageBroker\Serializer\Normalizer\CarbonImmutableNormalizer;
 use Freyr\MessageBroker\Serializer\Normalizer\IdNormalizer;
@@ -98,20 +99,21 @@ final class EventBusFactory
      *
      * Transport Architecture (3 transports):
      * 1. Outbox transport (doctrine://outbox) - Stores domain events, consumed by bridge
-     * 2. AMQP publish transport (amqp://publish) - Bridge publishes here with OutboxSerializer
+     * 2. AMQP publish transport (amqp://publish) - Publisher publishes here with OutboxSerializer
      * 3. AMQP consume transport (amqp://consume) - Consumers read from here with InboxSerializer
      *
      * Configuration:
      * - Outbox transport with OutboxSerializer (for storage)
-     * - AMQP publish transport with OutboxSerializer (for bridge publishing)
+     * - AMQP publish transport with OutboxSerializer (for publisher publishing)
      * - AMQP consume transport with InboxSerializer (for consuming external messages)
      * - DeduplicationMiddleware (in-memory store)
      * - Routes messages to handlers
      *
      * Flow:
-     * 1. Domain event → routed to 'outbox' transport
-     * 2. OutboxToAmqpBridge consumes from 'outbox', publishes to 'amqp_publish'
-     * 3. Test simulates external consumer reading from 'amqp_publish' (using InboxSerializer)
+     * 1. Domain event -> routed to 'outbox' transport
+     * 2. OutboxPublishingMiddleware consumes from 'outbox', delegates to AmqpOutboxPublisher
+     * 3. AmqpOutboxPublisher publishes to 'amqp_publish'
+     * 4. Test simulates external consumer reading from 'amqp_publish' (using InboxSerializer)
      *
      * @param array<string, class-string> $messageTypes Message name to class mapping
      * @param array<class-string, array<callable>> $handlers Message class to handler mapping
@@ -128,17 +130,16 @@ final class EventBusFactory
         // 1. Outbox: Stores domain events (uses OutboxSerializer for encode/decode)
         $outboxTransport = new InMemoryTransport($outboxSerializer);
 
-        // 2. AMQP Publish: Bridge publishes here (uses OutboxSerializer for encoding)
+        // 2. AMQP Publish: Publisher publishes here (uses OutboxSerializer for encoding)
         $amqpPublishTransport = new InMemoryTransport($outboxSerializer);
 
         // Create handlers locator
         $handlersLocator = new HandlersLocator($handlers);
 
         // Create transport container
-        // Bridge uses 'amqp' for publishing (OutboxSerializer)
         $transportContainer = new SimpleContainer([
             'outbox' => $outboxTransport,
-            'amqp' => $amqpPublishTransport, // Bridge publishes here
+            'amqp' => $amqpPublishTransport,
         ]);
 
         // Create deduplication store (in-memory for testing)
@@ -147,8 +148,8 @@ final class EventBusFactory
         // Create deduplication middleware with store
         $deduplicationMiddleware = new DeduplicationMiddleware($deduplicationStore);
 
-        // Bridge uses sender locator to resolve AMQP transport by name
-        $bridgeMiddleware = new OutboxToAmqpBridge(
+        // Create AmqpOutboxPublisher with sender locator
+        $amqpPublisher = new AmqpOutboxPublisher(
             senderLocator: new ServiceLocator([
                 'amqp' => fn () => $amqpPublishTransport,
             ]),
@@ -156,11 +157,19 @@ final class EventBusFactory
             logger: new NullLogger(),
         );
 
+        // Create OutboxPublishingMiddleware with publisher locator
+        $publishingMiddleware = new OutboxPublishingMiddleware(
+            publisherLocator: new ServiceLocator([
+                'outbox' => fn () => $amqpPublisher,
+            ]),
+            logger: new NullLogger(),
+        );
+
         // Create middleware chain matching production ordering
         $middleware = [
             new MessageIdStampMiddleware(),
             new SendMessageMiddleware(new SendersLocator($routing, $transportContainer)),
-            $bridgeMiddleware,
+            $publishingMiddleware,
             $deduplicationMiddleware,
             new HandleMessageMiddleware($handlersLocator),
         ];

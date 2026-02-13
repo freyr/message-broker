@@ -6,7 +6,7 @@ namespace Freyr\MessageBroker\Outbox\EventBridge;
 
 use Freyr\MessageBroker\Outbox\MessageName;
 use Freyr\MessageBroker\Outbox\OutboxMessage;
-use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface;
+use Freyr\MessageBroker\Amqp\Routing\AmqpRoutingStrategyInterface;
 use Freyr\MessageBroker\Stamp\MessageIdStamp;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
@@ -68,7 +68,7 @@ final readonly class OutboxToAmqpBridge implements MiddlewareInterface
                 $event::class,
             ));
 
-        $senderName = $this->routingStrategy->getSenderName($event);
+        $senderName = $this->routingStrategy->getSenderName($event, $messageName);
 
         if (!$this->senderLocator->has($senderName)) {
             throw new RuntimeException(sprintf(
