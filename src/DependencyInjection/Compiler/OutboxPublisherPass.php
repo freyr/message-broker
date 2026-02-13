@@ -63,7 +63,10 @@ final class OutboxPublisherPass implements CompilerPassInterface
         }
 
         if ($publishers === []) {
-            $container->log($this, 'No outbox publishers registered. OutboxPublishingMiddleware will not publish any messages.');
+            $container->log(
+                $this,
+                'No outbox publishers registered. OutboxPublishingMiddleware will not publish any messages.'
+            );
         }
 
         $middleware = $container->getDefinition(OutboxPublishingMiddleware::class);

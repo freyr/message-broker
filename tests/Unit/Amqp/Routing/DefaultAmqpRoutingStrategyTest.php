@@ -73,7 +73,9 @@ final class DefaultAmqpRoutingStrategyTest extends TestCase
     public function testYamlOverrideSenderName(): void
     {
         $strategy = new DefaultAmqpRoutingStrategy(routingOverrides: [
-            'order.placed' => ['sender' => 'commerce'],
+            'order.placed' => [
+                'sender' => 'commerce',
+            ],
         ]);
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
 
@@ -83,7 +85,9 @@ final class DefaultAmqpRoutingStrategyTest extends TestCase
     public function testYamlOverrideRoutingKey(): void
     {
         $strategy = new DefaultAmqpRoutingStrategy(routingOverrides: [
-            'order.placed' => ['routing_key' => 'custom.routing.key'],
+            'order.placed' => [
+                'routing_key' => 'custom.routing.key',
+            ],
         ]);
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
 
@@ -93,7 +97,9 @@ final class DefaultAmqpRoutingStrategyTest extends TestCase
     public function testYamlOverrideTakesPrecedenceOverAttribute(): void
     {
         $strategy = new DefaultAmqpRoutingStrategy(routingOverrides: [
-            'commerce.order.placed' => ['sender' => 'override_sender'],
+            'commerce.order.placed' => [
+                'sender' => 'override_sender',
+            ],
         ]);
         $message = new CommerceTestMessage(orderId: Id::new(), amount: 99.99, placedAt: CarbonImmutable::now());
 

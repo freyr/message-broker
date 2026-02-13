@@ -49,7 +49,9 @@ final class OutboxPublishingMiddlewareTest extends TestCase
 
     public function testOutboxMessageWithoutReceivedStampPassesThrough(): void
     {
-        $middleware = $this->createMiddleware(['outbox' => $this->createMockPublisher()]);
+        $middleware = $this->createMiddleware([
+            'outbox' => $this->createMockPublisher(),
+        ]);
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message);
 
@@ -82,13 +84,12 @@ final class OutboxPublishingMiddlewareTest extends TestCase
             $publishedEnvelope = $envelope;
         });
 
-        $middleware = $this->createMiddleware(['outbox' => $publisher]);
+        $middleware = $this->createMiddleware([
+            'outbox' => $publisher,
+        ]);
         $messageId = '01234567-89ab-7def-8000-000000000001';
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
-        $envelope = new Envelope($message, [
-            new ReceivedStamp('outbox'),
-            new MessageIdStamp($messageId),
-        ]);
+        $envelope = new Envelope($message, [new ReceivedStamp('outbox'), new MessageIdStamp($messageId)]);
 
         $middleware->handle($envelope, MiddlewareStackFactory::createPassThrough());
 
@@ -113,7 +114,9 @@ final class OutboxPublishingMiddlewareTest extends TestCase
     public function testThrowsWhenMessageNameAttributeMissing(): void
     {
         $publisher = $this->createMockPublisher();
-        $middleware = $this->createMiddleware(['outbox' => $publisher]);
+        $middleware = $this->createMiddleware([
+            'outbox' => $publisher,
+        ]);
 
         // Create a message without #[MessageName] attribute
         $message = new class implements \Freyr\MessageBroker\Outbox\OutboxMessage {};
@@ -131,7 +134,9 @@ final class OutboxPublishingMiddlewareTest extends TestCase
     public function testThrowsWhenMessageIdStampMissing(): void
     {
         $publisher = $this->createMockPublisher();
-        $middleware = $this->createMiddleware(['outbox' => $publisher]);
+        $middleware = $this->createMiddleware([
+            'outbox' => $publisher,
+        ]);
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [new ReceivedStamp('outbox')]);
 
@@ -144,7 +149,9 @@ final class OutboxPublishingMiddlewareTest extends TestCase
     public function testShortCircuitsAfterPublishing(): void
     {
         $publisher = $this->createMockPublisher();
-        $middleware = $this->createMiddleware(['outbox' => $publisher]);
+        $middleware = $this->createMiddleware([
+            'outbox' => $publisher,
+        ]);
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [
             new ReceivedStamp('outbox'),
@@ -162,7 +169,9 @@ final class OutboxPublishingMiddlewareTest extends TestCase
     public function testReturnsOriginalEnvelopeAfterPublishing(): void
     {
         $publisher = $this->createMockPublisher();
-        $middleware = $this->createMiddleware(['outbox' => $publisher]);
+        $middleware = $this->createMiddleware([
+            'outbox' => $publisher,
+        ]);
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [
             new ReceivedStamp('outbox'),

@@ -6,8 +6,8 @@ namespace Freyr\MessageBroker\Tests\Functional\Fixtures;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Outbox\OutboxMessage;
 use Freyr\MessageBroker\Outbox\MessageName;
+use Freyr\MessageBroker\Outbox\OutboxMessage;
 
 /**
  * Test event for functional testing with multiple value objects.

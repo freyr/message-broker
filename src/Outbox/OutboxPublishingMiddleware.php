@@ -36,12 +36,14 @@ final readonly class OutboxPublishingMiddleware implements MiddlewareInterface
     public function handle(Envelope $envelope, StackInterface $stack): Envelope
     {
         if (!$envelope->getMessage() instanceof OutboxMessage) {
-            return $stack->next()->handle($envelope, $stack);
+            return $stack->next()
+                ->handle($envelope, $stack);
         }
 
         $receivedStamp = $envelope->last(ReceivedStamp::class);
         if (!$receivedStamp instanceof ReceivedStamp) {
-            return $stack->next()->handle($envelope, $stack);
+            return $stack->next()
+                ->handle($envelope, $stack);
         }
 
         $transportName = $receivedStamp->getTransportName();
@@ -51,29 +53,23 @@ final readonly class OutboxPublishingMiddleware implements MiddlewareInterface
                 'transport' => $transportName,
             ]);
 
-            return $stack->next()->handle($envelope, $stack);
+            return $stack->next()
+                ->handle($envelope, $stack);
         }
 
         $event = $envelope->getMessage();
 
         $messageName = MessageName::fromClass($event)
-            ?? throw new RuntimeException(sprintf(
-                'Event %s must have #[MessageName] attribute.',
-                $event::class,
-            ));
+            ?? throw new RuntimeException(sprintf('Event %s must have #[MessageName] attribute.', $event::class));
 
         $messageIdStamp = $envelope->last(MessageIdStamp::class)
             ?? throw new RuntimeException(sprintf(
-                'OutboxMessage %s consumed without MessageIdStamp. '
-                . 'Ensure MessageIdStampMiddleware runs at dispatch time.',
+                'OutboxMessage %s consumed without MessageIdStamp. Ensure MessageIdStampMiddleware runs at dispatch time.',
                 $event::class,
             ));
 
         // Build clean envelope for publisher (strip transport stamps)
-        $publishEnvelope = new Envelope($event, [
-            $messageIdStamp,
-            new MessageNameStamp($messageName),
-        ]);
+        $publishEnvelope = new Envelope($event, [$messageIdStamp, new MessageNameStamp($messageName)]);
 
         /** @var OutboxPublisherInterface $publisher */
         $publisher = $this->publisherLocator->get($transportName);

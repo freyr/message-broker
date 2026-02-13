@@ -9,7 +9,6 @@ use Freyr\MessageBroker\Outbox\OutboxPublisherInterface;
 use Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
-use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Reference;
@@ -30,7 +29,9 @@ final class OutboxPublisherPassTest extends TestCase
         $container->setDefinition(OutboxPublishingMiddleware::class, $middlewareDef);
 
         $publisherDef = new Definition(TestPublisher::class);
-        $publisherDef->addTag('message_broker.outbox_publisher', ['transport' => 'outbox']);
+        $publisherDef->addTag('message_broker.outbox_publisher', [
+            'transport' => 'outbox',
+        ]);
         $container->setDefinition('test.publisher', $publisherDef);
 
         $pass = new OutboxPublisherPass();
@@ -71,11 +72,15 @@ final class OutboxPublisherPassTest extends TestCase
         $container->setDefinition(OutboxPublishingMiddleware::class, $middlewareDef);
 
         $publisher1 = new Definition(TestPublisher::class);
-        $publisher1->addTag('message_broker.outbox_publisher', ['transport' => 'outbox']);
+        $publisher1->addTag('message_broker.outbox_publisher', [
+            'transport' => 'outbox',
+        ]);
         $container->setDefinition('test.publisher1', $publisher1);
 
         $publisher2 = new Definition(TestPublisher::class);
-        $publisher2->addTag('message_broker.outbox_publisher', ['transport' => 'outbox']);
+        $publisher2->addTag('message_broker.outbox_publisher', [
+            'transport' => 'outbox',
+        ]);
         $container->setDefinition('test.publisher2', $publisher2);
 
         $this->expectException(InvalidArgumentException::class);
@@ -95,7 +100,9 @@ final class OutboxPublisherPassTest extends TestCase
         $container->setDefinition(OutboxPublishingMiddleware::class, $middlewareDef);
 
         $publisherDef = new Definition(\stdClass::class);
-        $publisherDef->addTag('message_broker.outbox_publisher', ['transport' => 'outbox']);
+        $publisherDef->addTag('message_broker.outbox_publisher', [
+            'transport' => 'outbox',
+        ]);
         $container->setDefinition('test.bad_publisher', $publisherDef);
 
         $this->expectException(InvalidArgumentException::class);

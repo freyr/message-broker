@@ -39,8 +39,7 @@ final readonly class AmqpOutboxPublisher implements OutboxPublisherInterface
         $messageNameStamp = $envelope->last(MessageNameStamp::class);
         if (!$messageNameStamp instanceof MessageNameStamp) {
             throw new RuntimeException(sprintf(
-                'Envelope for %s missing MessageNameStamp. '
-                . 'Ensure OutboxPublishingMiddleware runs before the publisher.',
+                'Envelope for %s missing MessageNameStamp. Ensure OutboxPublishingMiddleware runs before the publisher.',
                 $event::class,
             ));
         }
@@ -48,18 +47,14 @@ final readonly class AmqpOutboxPublisher implements OutboxPublisherInterface
 
         $messageIdStamp = $envelope->last(MessageIdStamp::class);
         if (!$messageIdStamp instanceof MessageIdStamp) {
-            throw new RuntimeException(sprintf(
-                'Envelope for %s missing MessageIdStamp.',
-                $event::class,
-            ));
+            throw new RuntimeException(sprintf('Envelope for %s missing MessageIdStamp.', $event::class));
         }
 
         $senderName = $this->routingStrategy->getSenderName($event, $messageName);
 
         if (!$this->senderLocator->has($senderName)) {
             throw new RuntimeException(sprintf(
-                'No AMQP sender "%s" configured for %s. '
-                . 'Register the transport in the AmqpOutboxPublisher sender locator.',
+                'No AMQP sender "%s" configured for %s. Register the transport in the AmqpOutboxPublisher sender locator.',
                 $senderName,
                 $event::class,
             ));
@@ -69,9 +64,7 @@ final readonly class AmqpOutboxPublisher implements OutboxPublisherInterface
         $headers = $this->routingStrategy->getHeaders($messageName);
 
         // Forward all stamps from a publisher envelope, add an AMQP-specific stamp
-        $amqpEnvelope = $envelope->with(
-            new AmqpStamp($routingKey, AMQP_NOPARAM, $headers),
-        );
+        $amqpEnvelope = $envelope->with(new AmqpStamp($routingKey, AMQP_NOPARAM, $headers));
 
         $this->logger->debug('Publishing event to AMQP', [
             'message_name' => $messageName,

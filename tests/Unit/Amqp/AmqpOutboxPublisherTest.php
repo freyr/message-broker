@@ -139,9 +139,7 @@ final class AmqpOutboxPublisherTest extends TestCase
         $publisher = $this->createPublisher();
 
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
-        $envelope = new Envelope($message, [
-            new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
-        ]);
+        $envelope = new Envelope($message, [new MessageIdStamp('01234567-89ab-7def-8000-000000000001')]);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/missing MessageNameStamp/');
@@ -154,9 +152,7 @@ final class AmqpOutboxPublisherTest extends TestCase
         $publisher = $this->createPublisher();
 
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
-        $envelope = new Envelope($message, [
-            new MessageNameStamp('test.message.sent'),
-        ]);
+        $envelope = new Envelope($message, [new MessageNameStamp('test.message.sent')]);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/missing MessageIdStamp/');
@@ -194,16 +190,16 @@ final class AmqpOutboxPublisherTest extends TestCase
         array $routingOverrides = [],
         array $additionalSenders = [],
     ): AmqpOutboxPublisher {
-        $senders = ['amqp' => fn () => $this->amqpSender];
+        $senders = [
+            'amqp' => fn () => $this->amqpSender,
+        ];
         foreach ($additionalSenders as $name => $sender) {
             $senders[$name] = fn () => $sender;
         }
 
         return new AmqpOutboxPublisher(
             senderLocator: new ServiceLocator($senders),
-            routingStrategy: new DefaultAmqpRoutingStrategy(
-                routingOverrides: $routingOverrides,
-            ),
+            routingStrategy: new DefaultAmqpRoutingStrategy(routingOverrides: $routingOverrides),
             logger: new NullLogger(),
         );
     }

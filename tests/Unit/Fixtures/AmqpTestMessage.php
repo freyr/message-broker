@@ -6,8 +6,8 @@ namespace Freyr\MessageBroker\Tests\Unit\Fixtures;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Outbox\OutboxMessage;
 use Freyr\MessageBroker\Outbox\MessageName;
+use Freyr\MessageBroker\Outbox\OutboxMessage;
 
 /**
  * Test message for verifying AMQP transport routing.
