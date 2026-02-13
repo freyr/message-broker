@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
+use Freyr\MessageBroker\Stamp\MessageIdStamp;
 
 /**
  * Debug test to inspect actual AMQP message headers.
@@ -14,7 +15,7 @@ final class InboxHeaderDebugTest extends FunctionalTestCase
 {
     public function testInspectActualAmqpHeaders(): void
     {
-        // Given: Publish a message like the outbox does
+        // Given: Publish a message with native stamp header
         $messageId = Id::new()->__toString();
         $testId = Id::new();
 
@@ -22,7 +23,7 @@ final class InboxHeaderDebugTest extends FunctionalTestCase
             'test_inbox',
             [
                 'type' => 'test.event.sent',
-                'X-Message-Id' => $messageId,
+                'X-Message-Stamp-' . MessageIdStamp::class => json_encode([['messageId' => $messageId]]),
             ],
             [
                 'id' => $testId->__toString(),
@@ -37,10 +38,13 @@ final class InboxHeaderDebugTest extends FunctionalTestCase
         // Then: Verify the actual headers
         $headers = $message['headers']->getNativeData();
 
-        // Verify the X-Message-Id header exists
-        $this->assertArrayHasKey('X-Message-Id', $headers);
+        // Verify the native stamp header exists
+        $stampHeaderKey = 'X-Message-Stamp-' . MessageIdStamp::class;
+        $this->assertArrayHasKey($stampHeaderKey, $headers);
 
         // Verify it contains the correct message ID
-        $this->assertEquals($messageId, $headers['X-Message-Id']);
+        $stampData = json_decode($headers[$stampHeaderKey], true);
+        $this->assertIsArray($stampData);
+        $this->assertEquals($messageId, $stampData[0]['messageId']);
     }
 }

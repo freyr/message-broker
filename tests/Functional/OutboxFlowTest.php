@@ -88,14 +88,16 @@ final class OutboxFlowTest extends FunctionalTestCase
         $headers = $message['headers']->getNativeData();
         $this->assertEquals('test.event.sent', $headers['type']);
 
-        // And: Message has semantic X-Message-Id header (not FQN-based stamp header)
-        $this->assertArrayHasKey('X-Message-Id', $headers);
+        // And: Message has native MessageIdStamp header
+        $stampHeaderKey = 'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp';
+        $this->assertArrayHasKey($stampHeaderKey, $headers);
 
-        // And: X-Message-Id contains a valid UUID v7
-        $this->assertIsString($headers['X-Message-Id']);
+        // And: MessageIdStamp contains a valid UUID v7
+        $stampData = json_decode($headers[$stampHeaderKey], true);
+        $this->assertIsArray($stampData);
         $this->assertMatchesRegularExpression(
             '/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
-            $headers['X-Message-Id']
+            $stampData[0]['messageId']
         );
 
         // And: Body contains event data (no messageId in payload)

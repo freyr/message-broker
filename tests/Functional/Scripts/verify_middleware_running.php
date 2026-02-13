@@ -24,7 +24,7 @@ class MiddlewareTest extends FunctionalTestCase
         for ($i = 1; $i <= 2; ++$i) {
             $this->publishToAmqp('test_inbox', [
                 'type' => 'test.event.sent',
-                'X-Message-Id' => $messageId,
+                'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
             ], [
                 'id' => Id::new()->__toString(),
                 'name' => "attempt-{$i}",

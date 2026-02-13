@@ -27,11 +27,10 @@ use Symfony\Component\Serializer\Serializer;
  *
  * Tests that the serializer:
  * - Translates FQN to semantic name in type header on encode
- * - Adds X-Message-Id and X-Message-Class headers on encode
- * - Strips X-Message-Stamp-* headers for MessageIdStamp and MessageNameStamp
- * - Throws when MessageNameStamp or MessageIdStamp is missing
+ * - Adds X-Message-Class header on encode
+ * - Preserves native X-Message-Stamp-* headers (no stripping)
+ * - Throws when MessageNameStamp is missing
  * - Restores FQN from X-Message-Class on decode
- * - Restores stamps from semantic headers on decode
  * - Round-trips correctly (encode then decode)
  */
 final class WireFormatSerializerTest extends TestCase
@@ -71,16 +70,6 @@ final class WireFormatSerializerTest extends TestCase
         $this->assertSame('test.message.sent', $encoded['headers']['type']);
     }
 
-    public function testEncodeAddsMessageIdHeader(): void
-    {
-        $envelope = $this->createStampedEnvelope();
-
-        $encoded = $this->serializer->encode($envelope);
-
-        $this->assertArrayHasKey('X-Message-Id', $encoded['headers']);
-        $this->assertSame('01234567-89ab-7def-8000-000000000001', $encoded['headers']['X-Message-Id']);
-    }
-
     public function testEncodeAddsMessageClassHeader(): void
     {
         $envelope = $this->createStampedEnvelope();
@@ -91,21 +80,21 @@ final class WireFormatSerializerTest extends TestCase
         $this->assertSame(TestMessage::class, $encoded['headers']['X-Message-Class']);
     }
 
-    public function testEncodeStripsStampHeaders(): void
+    public function testEncodePreservesStampHeaders(): void
     {
         $envelope = $this->createStampedEnvelope();
 
         $encoded = $this->serializer->encode($envelope);
 
-        $this->assertArrayNotHasKey(
+        $this->assertArrayHasKey(
             'X-Message-Stamp-' . MessageIdStamp::class,
             $encoded['headers'],
-            'MessageIdStamp header should be stripped'
+            'MessageIdStamp header should be preserved'
         );
-        $this->assertArrayNotHasKey(
+        $this->assertArrayHasKey(
             'X-Message-Stamp-' . MessageNameStamp::class,
             $encoded['headers'],
-            'MessageNameStamp header should be stripped'
+            'MessageNameStamp header should be preserved'
         );
     }
 
@@ -118,19 +107,6 @@ final class WireFormatSerializerTest extends TestCase
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/must contain MessageNameStamp/');
-
-        $this->serializer->encode($envelope);
-    }
-
-    public function testEncodeThrowsWhenMessageIdStampMissing(): void
-    {
-        $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
-        $envelope = new Envelope($message, [
-            new MessageNameStamp('test.message.sent'),
-        ]);
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/must contain MessageIdStamp/');
 
         $this->serializer->encode($envelope);
     }

@@ -33,7 +33,7 @@ final class InboxFlowTest extends FunctionalTestCase
             'test_inbox',
             [
                 'type' => 'test.event.sent',
-                'X-Message-Id' => $messageId,
+                'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
             ],
             [
                 'id' => $testId,
@@ -69,7 +69,7 @@ final class InboxFlowTest extends FunctionalTestCase
 
         $headers = [
             'type' => 'test.event.sent',
-            'X-Message-Id' => $messageId,
+            'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
         ];
 
         // First message
@@ -106,7 +106,7 @@ final class InboxFlowTest extends FunctionalTestCase
             'test_inbox',
             [
                 'type' => 'test.event.sent',  // Semantic name
-                'X-Message-Id' => $messageId,
+                'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
             ],
             [
                 'id' => $testId->__toString(),
@@ -139,7 +139,7 @@ final class InboxFlowTest extends FunctionalTestCase
             'test_inbox',
             [
                 'type' => 'test.order.placed',
-                'X-Message-Id' => $messageId,
+                'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
             ],
             [
                 'orderId' => $orderId->__toString(),
