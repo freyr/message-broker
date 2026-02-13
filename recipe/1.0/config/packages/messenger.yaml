@@ -21,13 +21,13 @@ framework:
                 middleware:
                     - 'Freyr\MessageBroker\Outbox\MessageIdStampMiddleware'
                     - doctrine_transaction
-                    - 'Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge'
+                    - 'Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware'
                     # DeduplicationMiddleware is registered via service tag (priority -10)
                     # and runs automatically after doctrine_transaction
 
         transports:
             # Outbox: stores domain events in the database within your business transaction.
-            # Consumed by OutboxToAmqpBridge, which publishes them to AMQP.
+            # Consumed by OutboxPublishingMiddleware, which delegates to transport-specific publishers.
             outbox:
                 dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
                 options:
@@ -37,7 +37,7 @@ framework:
                 #     delay: 1000
                 #     multiplier: 2
 
-            # AMQP publish: OutboxToAmqpBridge publishes events here.
+            # AMQP publish: AmqpOutboxPublisher publishes events here.
             # Uses OutboxSerializer to translate PHP class names to semantic message names.
             # TODO: Configure the exchange to match your RabbitMQ setup
             amqp:

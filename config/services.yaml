@@ -26,7 +26,7 @@ services:
     # Outbox Serializer (for AMQP publishing transports)
     # - encode(): Extracts semantic name from #[MessageName] attribute (e.g., 'App\Event\OrderPlaced' → 'order.placed')
     # - decode(): Restores FQN from X-Message-Class header (for retry/failed scenarios)
-    # Used on AMQP publishing transport (where OutboxToAmqpBridge publishes)
+    # Used on AMQP publishing transport (where AmqpOutboxPublisher publishes)
     Freyr\MessageBroker\Serializer\OutboxSerializer:
         arguments:
             $serializer: '@serializer'
@@ -48,27 +48,38 @@ services:
         tags:
             - { name: 'messenger.middleware', priority: -10 }
 
-    # AMQP Routing Strategy (default convention-based routing)
-    Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface:
-        class: Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy
-
     # MessageIdStamp Middleware
     # Stamps OutboxMessage envelopes with MessageIdStamp at dispatch time
     Freyr\MessageBroker\Outbox\MessageIdStampMiddleware:
         tags:
             - { name: 'messenger.middleware' }
 
-    # Outbox Bridge (middleware — publishes outbox events to AMQP)
-    # Uses sender locator to resolve transport by name (supports multiple exchanges).
-    # Default sender is 'amqp'. Add more transports to the locator for #[AmqpExchange] support.
-    Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
+    # Outbox Publishing Middleware (core — transport-agnostic)
+    # Delegates to transport-specific publishers via a service locator.
+    # Publisher locator is populated by OutboxPublisherPass compiler pass.
+    Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware:
         arguments:
-            $senderLocator: !service_locator
-                amqp: '@messenger.transport.amqp'
-            $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
             $logger: '@logger'
         tags:
             - { name: 'messenger.middleware' }
+
+    # AMQP Routing Strategy (convention-based with YAML overrides)
+    Freyr\MessageBroker\Amqp\Routing\AmqpRoutingStrategyInterface:
+        class: Freyr\MessageBroker\Amqp\Routing\DefaultAmqpRoutingStrategy
+        arguments:
+            $defaultSenderName: 'amqp'
+            $routingOverrides: '%message_broker.amqp.routing_overrides%'
+
+    # AMQP Outbox Publisher (publishes outbox events to RabbitMQ)
+    # Tagged for auto-registration by OutboxPublisherPass compiler pass.
+    Freyr\MessageBroker\Amqp\AmqpOutboxPublisher:
+        arguments:
+            $senderLocator: !service_locator
+                amqp: '@messenger.transport.amqp'
+            $routingStrategy: '@Freyr\MessageBroker\Amqp\Routing\AmqpRoutingStrategyInterface'
+            $logger: '@logger'
+        tags:
+            - { name: 'message_broker.outbox_publisher', transport: 'outbox' }
 
     # AMQP Topology Manager
     # Declares exchanges, queues, and bindings against RabbitMQ
@@ -89,7 +100,7 @@ services:
 
     # AMQP Topology Setup Command
     # Declares AMQP topology from configuration
-    Freyr\MessageBroker\Command\SetupAmqpTopologyCommand:
+    Freyr\MessageBroker\Amqp\Command\SetupAmqpTopologyCommand:
         arguments:
             $topologyManager: '@Freyr\MessageBroker\Amqp\TopologyManager'
             $definitionsFormatter: '@Freyr\MessageBroker\Amqp\DefinitionsFormatter'

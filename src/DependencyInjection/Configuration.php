@@ -40,18 +40,39 @@ final class Configuration implements ConfigurationInterface
             ->end()
             ->end();
 
-        $this->addAmqpTopologySection($rootNode);
+        $this->addAmqpSection($rootNode);
 
         return $treeBuilder;
     }
 
-    private function addAmqpTopologySection(ArrayNodeDefinition $rootNode): void
+    private function addAmqpSection(ArrayNodeDefinition $rootNode): void
     {
         $rootNode
             ->children()
             ->arrayNode('amqp')
             ->addDefaultsIfNotSet()
             ->children()
+
+            // Routing overrides
+            ->arrayNode('routing')
+            ->info('Override convention-based routing for specific message names')
+            ->useAttributeAsKey('message_name')
+            ->defaultValue([])
+            ->arrayPrototype()
+            ->children()
+            ->scalarNode('sender')
+            ->info('Override sender/transport name (default: amqp)')
+            ->defaultNull()
+            ->end()
+            ->scalarNode('routing_key')
+            ->info('Override AMQP routing key (default: full message name)')
+            ->defaultNull()
+            ->end()
+            ->end()
+            ->end()
+            ->end()
+
+            // Topology
             ->arrayNode('topology')
             ->addDefaultsIfNotSet()
             ->children()
@@ -138,6 +159,7 @@ final class Configuration implements ConfigurationInterface
 
             ->end()
             ->end()
+
             ->end()
             ->end();
     }

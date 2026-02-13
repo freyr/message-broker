@@ -16,7 +16,7 @@ framework:
                 middleware:
                     - 'Freyr\MessageBroker\Outbox\MessageIdStampMiddleware'
                     - doctrine_transaction
-                    - 'Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge'
+                    - 'Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware'
                     - 'Freyr\MessageBroker\Inbox\DeduplicationMiddleware'
 
         transports:
@@ -168,20 +168,30 @@ services:
         tags:
             - { name: 'messenger.middleware', priority: -10 }
 
-    # AMQP Routing Strategy
-    Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface:
-        class: Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy
-
     # MessageIdStamp Middleware
     Freyr\MessageBroker\Outbox\MessageIdStampMiddleware: ~
 
-    # Outbox Bridge (middleware)
-    Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
+    # Outbox Publishing Middleware (core — transport-agnostic)
+    Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware:
+        arguments:
+            $logger: '@logger'
+
+    # AMQP Routing Strategy (convention-based with YAML overrides)
+    Freyr\MessageBroker\Amqp\Routing\AmqpRoutingStrategyInterface:
+        class: Freyr\MessageBroker\Amqp\Routing\DefaultAmqpRoutingStrategy
+        arguments:
+            $defaultSenderName: 'amqp'
+            $routingOverrides: '%message_broker.amqp.routing_overrides%'
+
+    # AMQP Outbox Publisher
+    Freyr\MessageBroker\Amqp\AmqpOutboxPublisher:
         arguments:
             $senderLocator: !service_locator
                 amqp: '@messenger.transport.amqp'
-            $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
+            $routingStrategy: '@Freyr\MessageBroker\Amqp\Routing\AmqpRoutingStrategyInterface'
             $logger: '@logger'
+        tags:
+            - { name: 'message_broker.outbox_publisher', transport: 'outbox' }
 
     # AMQP Topology Manager
     Freyr\MessageBroker\Amqp\TopologyManager:
@@ -198,7 +208,7 @@ services:
     Freyr\MessageBroker\Amqp\AmqpConnectionFactory: ~
 
     # AMQP Topology Setup Command (public for functional tests)
-    Freyr\MessageBroker\Command\SetupAmqpTopologyCommand:
+    Freyr\MessageBroker\Amqp\Command\SetupAmqpTopologyCommand:
         public: true
         arguments:
             $topologyManager: '@Freyr\MessageBroker\Amqp\TopologyManager'
