@@ -68,7 +68,7 @@ final readonly class AmqpOutboxPublisher implements OutboxPublisherInterface
 
         $this->logger->debug('Publishing event to AMQP', [
             'message_name' => $messageName,
-            'message_id' => $messageIdStamp->messageId,
+            'message_id' => (string) $messageIdStamp->messageId,
             'event_class' => $event::class,
             'sender' => $senderName,
             'routing_key' => $routingKey,

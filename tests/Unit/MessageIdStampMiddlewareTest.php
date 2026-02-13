@@ -44,7 +44,7 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $this->assertNotNull($stamp, 'OutboxMessage should receive MessageIdStamp');
         $this->assertMatchesRegularExpression(
             '/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
-            $stamp->messageId,
+            (string) $stamp->messageId,
             'MessageId should be a valid UUID v7'
         );
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
@@ -67,7 +67,7 @@ final class MessageIdStampMiddlewareTest extends TestCase
 
     public function testOutboxMessageWithExistingStampIsNotReStamped(): void
     {
-        $existingStamp = new MessageIdStamp('01234567-89ab-7def-8000-000000000001');
+        $existingStamp = new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001'));
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [$existingStamp]);
 
@@ -76,9 +76,9 @@ final class MessageIdStampMiddlewareTest extends TestCase
 
         $stamp = $result->last(MessageIdStamp::class);
         $this->assertNotNull($stamp);
-        $this->assertEquals(
+        $this->assertSame(
             '01234567-89ab-7def-8000-000000000001',
-            $stamp->messageId,
+            (string) $stamp->messageId,
             'Existing MessageIdStamp should not be overwritten'
         );
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');

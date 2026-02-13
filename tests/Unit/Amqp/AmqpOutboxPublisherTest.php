@@ -43,7 +43,7 @@ final class AmqpOutboxPublisherTest extends TestCase
         $messageId = '01234567-89ab-7def-8000-000000000001';
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [
-            new MessageIdStamp($messageId),
+            new MessageIdStamp(Id::fromString($messageId)),
             new MessageNameStamp('test.message.sent'),
         ]);
 
@@ -61,7 +61,7 @@ final class AmqpOutboxPublisherTest extends TestCase
 
         // Verify stamps forwarded from publisher envelope
         $this->assertNotNull($sentEnvelope->last(MessageIdStamp::class));
-        $this->assertSame($messageId, $sentEnvelope->last(MessageIdStamp::class)->messageId);
+        $this->assertSame($messageId, (string) $sentEnvelope->last(MessageIdStamp::class)->messageId);
         $this->assertNotNull($sentEnvelope->last(MessageNameStamp::class));
         $this->assertSame('test.message.sent', $sentEnvelope->last(MessageNameStamp::class)->messageName);
     }
@@ -77,7 +77,7 @@ final class AmqpOutboxPublisherTest extends TestCase
 
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [
-            new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
+            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
             new MessageNameStamp('test.message.sent'),
         ]);
 
@@ -100,7 +100,7 @@ final class AmqpOutboxPublisherTest extends TestCase
 
         $message = new CommerceTestMessage(orderId: Id::new(), amount: 99.99, placedAt: CarbonImmutable::now());
         $envelope = new Envelope($message, [
-            new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
+            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
             new MessageNameStamp('commerce.order.placed'),
         ]);
 
@@ -124,7 +124,7 @@ final class AmqpOutboxPublisherTest extends TestCase
 
         $message = new CommerceTestMessage(orderId: Id::new(), amount: 50.00, placedAt: CarbonImmutable::now());
         $envelope = new Envelope($message, [
-            new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
+            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
             new MessageNameStamp('commerce.order.placed'),
         ]);
 
@@ -139,7 +139,7 @@ final class AmqpOutboxPublisherTest extends TestCase
         $publisher = $this->createPublisher();
 
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
-        $envelope = new Envelope($message, [new MessageIdStamp('01234567-89ab-7def-8000-000000000001')]);
+        $envelope = new Envelope($message, [new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001'))]);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/missing MessageNameStamp/');
@@ -167,7 +167,7 @@ final class AmqpOutboxPublisherTest extends TestCase
         $messageId = '01234567-89ab-7def-8000-000000000001';
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [
-            new MessageIdStamp($messageId),
+            new MessageIdStamp(Id::fromString($messageId)),
             new MessageNameStamp('test.message.sent'),
         ]);
 

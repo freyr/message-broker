@@ -91,7 +91,7 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [
             new ReceivedStamp('outbox'),
-            new MessageIdStamp($messageId),
+            new MessageIdStamp(Id::fromString($messageId)),
             new MessageNameStamp('test.message.sent'),
         ]);
 
@@ -108,7 +108,7 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         // Verify stamp values
         $idStamp = $publishedEnvelope->last(MessageIdStamp::class);
         $this->assertNotNull($idStamp);
-        $this->assertSame($messageId, $idStamp->messageId);
+        $this->assertSame($messageId, (string) $idStamp->messageId);
 
         $nameStamp = $publishedEnvelope->last(MessageNameStamp::class);
         $this->assertNotNull($nameStamp);
@@ -125,7 +125,7 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [
             new ReceivedStamp('outbox'),
-            new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
+            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
             // No MessageNameStamp — simulates missing middleware
         ]);
 
@@ -163,7 +163,7 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [
             new ReceivedStamp('outbox'),
-            new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
+            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
             new MessageNameStamp('test.message.sent'),
         ]);
 
@@ -184,7 +184,7 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [
             new ReceivedStamp('outbox'),
-            new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
+            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
             new MessageNameStamp('test.message.sent'),
         ]);
 

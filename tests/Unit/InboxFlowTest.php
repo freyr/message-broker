@@ -84,9 +84,8 @@ final class InboxFlowTest extends TestCase
         $this->assertNotNull($amqpEnvelope);
         $amqpStamp = $amqpEnvelope->last(MessageIdStamp::class);
         $this->assertNotNull($amqpStamp, 'AMQP message should have MessageIdStamp');
-        $this->assertEquals(
-            $dispatchStamp->messageId,
-            $amqpStamp->messageId,
+        $this->assertTrue(
+            $dispatchStamp->messageId->sameAs($amqpStamp->messageId),
             'AMQP message should have the SAME MessageIdStamp as outbox dispatch'
         );
 

@@ -36,14 +36,12 @@ final readonly class OutboxPublishingMiddleware implements MiddlewareInterface
     public function handle(Envelope $envelope, StackInterface $stack): Envelope
     {
         if (!$envelope->getMessage() instanceof OutboxMessage) {
-            return $stack->next()
-                ->handle($envelope, $stack);
+            return $stack->next()->handle($envelope, $stack);
         }
 
         $receivedStamp = $envelope->last(ReceivedStamp::class);
         if (!$receivedStamp instanceof ReceivedStamp) {
-            return $stack->next()
-                ->handle($envelope, $stack);
+            return $stack->next()->handle($envelope, $stack);
         }
 
         $transportName = $receivedStamp->getTransportName();
@@ -53,8 +51,7 @@ final readonly class OutboxPublishingMiddleware implements MiddlewareInterface
                 'transport' => $transportName,
             ]);
 
-            return $stack->next()
-                ->handle($envelope, $stack);
+            return $stack->next()->handle($envelope, $stack);
         }
 
         $event = $envelope->getMessage();
@@ -71,7 +68,7 @@ final readonly class OutboxPublishingMiddleware implements MiddlewareInterface
                 $event::class,
             ));
 
-        // Build clean envelope for publisher (strip transport stamps)
+        // Build a clean envelope for the publisher (strip transport stamps)
         $publishEnvelope = new Envelope($event, [$messageIdStamp, $messageNameStamp]);
 
         /** @var OutboxPublisherInterface $publisher */

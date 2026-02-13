@@ -32,7 +32,7 @@ final readonly class MessageIdStampMiddleware implements MiddlewareInterface
         }
 
         if ($envelope->last(MessageIdStamp::class) === null) {
-            $envelope = $envelope->with(new MessageIdStamp((string) Id::new()));
+            $envelope = $envelope->with(new MessageIdStamp(Id::new()));
         }
 
         return $stack->next()

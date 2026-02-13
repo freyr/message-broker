@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Stamp;
 
+use Freyr\Identity\Id;
 use Symfony\Component\Messenger\Stamp\StampInterface;
 
 /**
@@ -15,6 +16,6 @@ use Symfony\Component\Messenger\Stamp\StampInterface;
 final readonly class MessageIdStamp implements StampInterface
 {
     public function __construct(
-        public string $messageId,
+        public Id $messageId,
     ) {}
 }

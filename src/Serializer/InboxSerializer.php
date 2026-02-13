@@ -43,8 +43,8 @@ final class InboxSerializer extends Serializer
      * 1. Read semantic name from the 'type' header (e.g., 'order.placed')
      * 2. Look up FQN in messageTypes mapping
      * 3. Replace the 'type' header with FQN for parent decoder
-     * 4. Delegate to parent::decode() for message + stamp reconstruction
-     * 5. Attach MessageNameStamp (needed for encode() on retry path)
+     * 4. Delegate to parent::decode() for message and a stamp reconstruction
+     * 5. Attach MessageNameStamp (needed for encode() on a retry path)
      *
      * @param array<string, mixed> $encodedEnvelope
      */
@@ -93,7 +93,7 @@ final class InboxSerializer extends Serializer
      * Flow:
      * 1. Let parent encode (produces FQN in 'type' header, stamps in X-Message-Stamp-*)
      * 2. Check for MessageNameStamp (added during decoding)
-     * 3. Replace the 'type' header with semantic name
+     * 3. Replace the 'type' header with a semantic name
      *
      * @return array<string, mixed>
      */
@@ -102,7 +102,7 @@ final class InboxSerializer extends Serializer
         $encoded = parent::encode($envelope);
         $headers = $encoded['headers'] ?? [];
 
-        // Retrieve semantic name from stamp
+        // Retrieve semantic name from a stamp
         $messageNameStamp = $envelope->last(MessageNameStamp::class);
         if ($messageNameStamp instanceof MessageNameStamp) {
             $headers['type'] = $messageNameStamp->messageName;

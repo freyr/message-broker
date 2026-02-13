@@ -17,7 +17,7 @@ final class InboxDeduplicationOnlyTest extends FunctionalTestCase
     public function testDeduplicationStoreDirectly(): void
     {
         // Given: A message ID
-        $messageId = Id::new()->__toString();
+        $messageId = Id::new();
         $messageName = 'Freyr\MessageBroker\Tests\Functional\Fixtures\TestEvent';
 
         // When: We check if it's a duplicate (first time)
@@ -30,7 +30,7 @@ final class InboxDeduplicationOnlyTest extends FunctionalTestCase
         $this->assertFalse($isDuplicate1, 'First message should not be duplicate');
 
         // And: Deduplication entry was created
-        $this->assertDeduplicationEntryExists($messageId);
+        $this->assertDeduplicationEntryExists((string) $messageId);
 
         // When: We check the same message again
         $isDuplicate2 = $store->isDuplicate($messageId, $messageName);

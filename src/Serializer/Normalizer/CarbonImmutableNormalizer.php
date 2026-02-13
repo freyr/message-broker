@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Serializer\Normalizer;
 
 use Carbon\CarbonImmutable;
+use InvalidArgumentException;
 use Symfony\Component\Serializer\Normalizer\DenormalizerInterface;
 use Symfony\Component\Serializer\Normalizer\NormalizerInterface;
 
@@ -36,7 +37,7 @@ final readonly class CarbonImmutableNormalizer implements NormalizerInterface, D
     public function denormalize(mixed $data, string $type, ?string $format = null, array $context = []): CarbonImmutable
     {
         if (!is_string($data)) {
-            throw new \InvalidArgumentException('CarbonImmutable value must be a string');
+            throw new InvalidArgumentException('CarbonImmutable value must be a string');
         }
 
         return CarbonImmutable::parse($data);

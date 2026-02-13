@@ -102,7 +102,7 @@ final class WireFormatSerializerTest extends TestCase
     {
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
         $envelope = new Envelope($message, [
-            new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
+            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
         ]);
 
         $this->expectException(RuntimeException::class);
@@ -142,7 +142,7 @@ final class WireFormatSerializerTest extends TestCase
 
         $stamp = $decoded->last(MessageIdStamp::class);
         $this->assertNotNull($stamp, 'MessageIdStamp should be restored on decode');
-        $this->assertSame('01234567-89ab-7def-8000-000000000001', $stamp->messageId);
+        $this->assertSame('01234567-89ab-7def-8000-000000000001', (string) $stamp->messageId);
     }
 
     public function testRoundTripPreservesMessageData(): void
@@ -151,7 +151,7 @@ final class WireFormatSerializerTest extends TestCase
         $timestamp = CarbonImmutable::now();
         $message = new TestMessage(id: $id, name: 'Round-trip Test', timestamp: $timestamp);
         $envelope = new Envelope($message, [
-            new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
+            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
             new MessageNameStamp('test.message.sent'),
         ]);
 
@@ -181,7 +181,7 @@ final class WireFormatSerializerTest extends TestCase
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
 
         return new Envelope($message, [
-            new MessageIdStamp('01234567-89ab-7def-8000-000000000001'),
+            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
             new MessageNameStamp('test.message.sent'),
         ]);
     }

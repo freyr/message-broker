@@ -42,6 +42,6 @@ final class InboxSerializerDebugTest extends FunctionalTestCase
         $messageIdStamp = $envelope->last(MessageIdStamp::class);
 
         $this->assertNotNull($messageIdStamp, 'MessageIdStamp should be restored from native stamp header');
-        $this->assertEquals($messageId, $messageIdStamp->messageId);
+        $this->assertSame($messageId, (string) $messageIdStamp->messageId);
     }
 }
