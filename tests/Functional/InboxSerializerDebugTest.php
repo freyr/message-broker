@@ -6,8 +6,8 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
+use Freyr\MessageBroker\Contracts\MessageIdStamp;
 use Freyr\MessageBroker\Serializer\InboxSerializer;
-use Freyr\MessageBroker\Stamp\MessageIdStamp;
 
 /**
  * Tests InboxSerializer native stamp header handling.

@@ -7,6 +7,7 @@ namespace Freyr\MessageBroker\Inbox;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Freyr\Identity\Id;
+use Freyr\MessageBroker\Contracts\DeduplicationStore;
 use Psr\Log\LoggerInterface;
 
 /**

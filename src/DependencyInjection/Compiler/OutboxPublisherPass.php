@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\DependencyInjection\Compiler;
 
-use Freyr\MessageBroker\Outbox\OutboxPublisherInterface;
+use Freyr\MessageBroker\Contracts\OutboxPublisherInterface;
 use Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware;
 use InvalidArgumentException;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;

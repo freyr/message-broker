@@ -6,7 +6,7 @@ namespace Freyr\MessageBroker\Tests\Unit;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Stamp\MessageIdStamp;
+use Freyr\MessageBroker\Contracts\MessageIdStamp;
 use Freyr\MessageBroker\Tests\Unit\Factory\EventBusFactory;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\Consumer\OrderPlacedMessage;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\TestMessage;
@@ -59,7 +59,7 @@ final class InboxFlowTest extends TestCase
 
         // Then: Message should be in outbox transport with MessageIdStamp
         $this->assertEquals(1, $context->outboxTransport->count());
-        $this->assertEquals(0, $context->amqpPublishTransport->count());
+        $this->assertEquals(0, $context->outboxPublisher->count());
         $this->assertEquals(0, $handlerInvocationCount, 'Handler should not be invoked yet');
 
         // Verify outbox envelope has MessageIdStamp from dispatch
@@ -76,22 +76,22 @@ final class InboxFlowTest extends TestCase
         }
 
         // Then: Message should be in AMQP publish transport
-        $this->assertEquals(1, $context->amqpPublishTransport->count(), 'Publisher should publish to AMQP');
+        $this->assertEquals(1, $context->outboxPublisher->count(), 'Publisher should receive the message');
         $this->assertEquals(0, $handlerInvocationCount, 'Handler should not be invoked yet');
 
-        // Verify AMQP message has the SAME MessageIdStamp
-        $amqpEnvelope = $context->amqpPublishTransport->getLastEnvelope();
-        $this->assertNotNull($amqpEnvelope);
-        $amqpStamp = $amqpEnvelope->last(MessageIdStamp::class);
-        $this->assertNotNull($amqpStamp, 'AMQP message should have MessageIdStamp');
+        // Verify published envelope has the SAME MessageIdStamp
+        $publishedEnvelope = $context->outboxPublisher->getLastPublishedEnvelope();
+        $this->assertNotNull($publishedEnvelope);
+        $publishedStamp = $publishedEnvelope->last(MessageIdStamp::class);
+        $this->assertNotNull($publishedStamp, 'Published envelope should have MessageIdStamp');
         $this->assertTrue(
-            $dispatchStamp->messageId->sameAs($amqpStamp->messageId),
-            'AMQP message should have the SAME MessageIdStamp as outbox dispatch'
+            $dispatchStamp->messageId->sameAs($publishedStamp->messageId),
+            'Published envelope should have the SAME MessageIdStamp as outbox dispatch'
         );
 
-        // Step 3: Consume from AMQP (InboxSerializer deserializes)
-        $serialized = $context->amqpPublishTransport->getLastSerialized();
-        $this->assertNotNull($serialized, 'AMQP should have serialized message');
+        // Step 3: Simulate wire serialisation (WireFormatSerializer encodes for transport)
+        $serialized = $context->wireFormatSerializer->encode($publishedEnvelope);
+        $this->assertNotEmpty($serialized, 'Should produce serialised message');
 
         // Deserialize with InboxSerializer (translates semantic name → OrderPlacedMessage)
         $deserializedEnvelope = $context->inboxSerializer->decode($serialized);
@@ -147,9 +147,10 @@ final class InboxFlowTest extends TestCase
             $context->bus->dispatch($envelope->with(new ReceivedStamp('outbox')));
         }
 
-        // Get the AMQP serialised message
-        $serialized = $context->amqpPublishTransport->getLastSerialized();
-        $this->assertNotNull($serialized);
+        // Get the published envelope and simulate wire serialisation
+        $publishedEnvelope = $context->outboxPublisher->getLastPublishedEnvelope();
+        $this->assertNotNull($publishedEnvelope);
+        $serialized = $context->wireFormatSerializer->encode($publishedEnvelope);
         $deserializedEnvelope = $context->inboxSerializer->decode($serialized);
         $deserializedEnvelope = $deserializedEnvelope->with(new ReceivedStamp('amqp'));
 
@@ -206,13 +207,17 @@ final class InboxFlowTest extends TestCase
             $context->bus->dispatch($envelope->with(new ReceivedStamp('outbox')));
         }
 
-        // Then: AMQP message should have semantic name in type header
-        $amqpSerialized = $context->amqpPublishTransport->getLastSerialized();
-        $this->assertNotNull($amqpSerialized);
+        // Then: Serialised message should have semantic name in type header
+        $publishedEnvelope = $context->outboxPublisher->getLastPublishedEnvelope();
+        $this->assertNotNull($publishedEnvelope);
+        $amqpSerialized = $context->wireFormatSerializer->encode($publishedEnvelope);
+
+        /** @var array<string, mixed> $headers */
+        $headers = $amqpSerialized['headers'];
         $this->assertEquals(
             'test.message.sent',
-            $amqpSerialized['headers']['type'],
-            'AMQP transport should have semantic name (from WireFormatSerializer)'
+            $headers['type'],
+            'Wire format should use semantic name (from WireFormatSerializer)'
         );
 
         // When: Message consumed from AMQP and deserialized

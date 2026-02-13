@@ -7,7 +7,7 @@ namespace Freyr\MessageBroker\Tests\Unit;
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Tests\Unit\Factory\EventBusFactory;
-use Freyr\MessageBroker\Tests\Unit\Fixtures\AmqpTestMessage;
+use Freyr\MessageBroker\Tests\Unit\Fixtures\SampleOutboxMessage;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\TestMessage;
 use PHPUnit\Framework\TestCase;
 
@@ -73,12 +73,12 @@ final class TransportSerializerTest extends TestCase
 
         $headers = $serialized['headers'];
         $this->assertArrayHasKey(
-            'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp',
+            'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp',
             $headers,
             'MessageIdStamp should be preserved in native format'
         );
         $this->assertArrayHasKey(
-            'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageNameStamp',
+            'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageNameStamp',
             $headers,
             'MessageNameStamp should be preserved in native format'
         );
@@ -91,14 +91,14 @@ final class TransportSerializerTest extends TestCase
         // InboxSerializer::encode() reads the stamp and uses semantic name
         $context = EventBusFactory::createForOutboxTesting(
             messageTypes: [
-                'test.amqp.sent' => AmqpTestMessage::class,
+                'test.sample.sent' => SampleOutboxMessage::class,
             ],
             routing: [
-                AmqpTestMessage::class => ['amqp'],
+                SampleOutboxMessage::class => ['amqp'],
             ]
         );
 
-        $message = new AmqpTestMessage(
+        $message = new SampleOutboxMessage(
             eventId: Id::new(),
             payload: 'Direct AMQP',
             sentAt: CarbonImmutable::now(),
@@ -112,7 +112,7 @@ final class TransportSerializerTest extends TestCase
         $this->assertNotNull($serialized);
 
         $this->assertEquals(
-            'test.amqp.sent',
+            'test.sample.sent',
             $serialized['headers']['type'],
             'InboxSerializer should use semantic name from MessageNameStamp'
         );
@@ -124,11 +124,11 @@ final class TransportSerializerTest extends TestCase
         $context = EventBusFactory::createForOutboxTesting(
             messageTypes: [
                 'test.message.sent' => TestMessage::class,
-                'test.amqp.sent' => AmqpTestMessage::class,
+                'test.sample.sent' => SampleOutboxMessage::class,
             ],
             routing: [
                 TestMessage::class => ['outbox'],
-                AmqpTestMessage::class => ['amqp'],
+                SampleOutboxMessage::class => ['amqp'],
             ]
         );
 
@@ -138,7 +138,7 @@ final class TransportSerializerTest extends TestCase
             timestamp: CarbonImmutable::now(),
         );
 
-        $amqpMessage = new AmqpTestMessage(
+        $amqpMessage = new SampleOutboxMessage(
             eventId: Id::new(),
             payload: 'AMQP Message',
             sentAt: CarbonImmutable::now(),
@@ -161,7 +161,7 @@ final class TransportSerializerTest extends TestCase
         $amqpSerialized = $context->amqpTransport->getLastSerialized();
         $this->assertNotNull($amqpSerialized);
         $this->assertEquals(
-            'test.amqp.sent',
+            'test.sample.sent',
             $amqpSerialized['headers']['type'],
             'AMQP should have semantic name (InboxSerializer reads MessageNameStamp)'
         );

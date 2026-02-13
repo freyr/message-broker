@@ -6,8 +6,8 @@ namespace Freyr\MessageBroker\Tests\Unit;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
+use Freyr\MessageBroker\Contracts\MessageIdStamp;
 use Freyr\MessageBroker\Outbox\MessageIdStampMiddleware;
-use Freyr\MessageBroker\Stamp\MessageIdStamp;
 use Freyr\MessageBroker\Tests\Unit\Factory\MiddlewareStackFactory;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\TestMessage;
 use PHPUnit\Framework\TestCase;

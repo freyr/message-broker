@@ -6,11 +6,11 @@ namespace Freyr\MessageBroker\Tests\Unit\Serializer;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
+use Freyr\MessageBroker\Contracts\MessageIdStamp;
+use Freyr\MessageBroker\Contracts\MessageNameStamp;
 use Freyr\MessageBroker\Serializer\Normalizer\CarbonImmutableNormalizer;
 use Freyr\MessageBroker\Serializer\Normalizer\IdNormalizer;
 use Freyr\MessageBroker\Serializer\WireFormatSerializer;
-use Freyr\MessageBroker\Stamp\MessageIdStamp;
-use Freyr\MessageBroker\Stamp\MessageNameStamp;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\TestMessage;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;

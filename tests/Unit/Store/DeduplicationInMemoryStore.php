@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Unit\Store;
 
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Inbox\DeduplicationStore;
+use Freyr\MessageBroker\Contracts\DeduplicationStore;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 

@@ -6,7 +6,7 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Inbox\DeduplicationStore;
+use Freyr\MessageBroker\Contracts\DeduplicationStore;
 use Freyr\MessageBroker\Tests\Functional\Fixtures\TestEventHandler;
 
 /**
@@ -23,7 +23,7 @@ final class InboxDeduplicationOnlyTest extends FunctionalTestCase
         // When: We check if it's a duplicate (first time)
         /** @var DeduplicationStore $store */
         $store = $this->getContainer()
-            ->get('Freyr\MessageBroker\Inbox\DeduplicationStore');
+            ->get('Freyr\MessageBroker\Contracts\DeduplicationStore');
         $isDuplicate1 = $store->isDuplicate($messageId, $messageName);
 
         // Then: It's not a duplicate (first occurrence)
@@ -50,7 +50,7 @@ final class InboxDeduplicationOnlyTest extends FunctionalTestCase
 
         $headers = [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp' => json_encode([[
+            'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp' => json_encode([[
                 'messageId' => $messageId,
             ]]),
         ];

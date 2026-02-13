@@ -9,8 +9,6 @@
         "inbox-pattern",
         "outbox-pattern",
         "event-driven",
-        "amqp",
-        "rabbitmq",
         "deduplication",
         "uuid-v7"
     ],
@@ -21,6 +19,7 @@
     ],
     "require": {
         "php": ">=8.2",
+        "freyr/message-broker-contracts": "^0.1",
         "symfony/messenger": "^6.4|^7.0",
         "symfony/console": "^6.4|^7.0",
         "symfony/config": "^6.4|^7.0",
@@ -46,10 +45,6 @@
         "symfony/framework-bundle": "^6.4|^7.0",
         "symfony/yaml": "^6.4|^7.0",
         "doctrine/doctrine-bundle": "^2.0"
-    },
-    "suggest": {
-        "ext-amqp": "Required for AMQP transport support",
-        "symfony/amqp-messenger": "Required for AMQP transport support"
     },
     "autoload": {
         "psr-4": {

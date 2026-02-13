@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Outbox;
 
-use Freyr\MessageBroker\Stamp\MessageNameStamp;
+use Freyr\MessageBroker\Contracts\MessageName;
+use Freyr\MessageBroker\Contracts\MessageNameStamp;
+use Freyr\MessageBroker\Contracts\OutboxMessage;
 use RuntimeException;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Middleware\MiddlewareInterface;

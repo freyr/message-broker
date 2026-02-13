@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Inbox;
 
-use Freyr\MessageBroker\Stamp\MessageIdStamp;
+use Freyr\MessageBroker\Contracts\DeduplicationStore;
+use Freyr\MessageBroker\Contracts\MessageIdStamp;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Middleware\MiddlewareInterface;
 use Symfony\Component\Messenger\Middleware\StackInterface;

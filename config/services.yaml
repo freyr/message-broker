@@ -32,7 +32,7 @@ services:
             $serializer: '@serializer'
 
     # Deduplication Store (DBAL implementation)
-    Freyr\MessageBroker\Inbox\DeduplicationStore:
+    Freyr\MessageBroker\Contracts\DeduplicationStore:
         class: Freyr\MessageBroker\Inbox\DeduplicationDbalStore
         arguments:
             $connection: '@doctrine.dbal.default_connection'
@@ -43,7 +43,7 @@ services:
     # Runs AFTER doctrine_transaction middleware (priority -10)
     Freyr\MessageBroker\Inbox\DeduplicationMiddleware:
         arguments:
-            $store: '@Freyr\MessageBroker\Inbox\DeduplicationStore'
+            $store: '@Freyr\MessageBroker\Contracts\DeduplicationStore'
         tags:
             - { name: 'messenger.middleware', priority: -10 }
 
@@ -68,51 +68,6 @@ services:
             $logger: '@logger'
         tags:
             - { name: 'messenger.middleware' }
-
-    # AMQP Routing Strategy (convention-based with YAML overrides)
-    Freyr\MessageBroker\Amqp\Routing\AmqpRoutingStrategyInterface:
-        class: Freyr\MessageBroker\Amqp\Routing\DefaultAmqpRoutingStrategy
-        arguments:
-            $defaultSenderName: 'amqp'
-            $routingOverrides: '%message_broker.amqp.routing_overrides%'
-
-    # AMQP Outbox Publisher (publishes outbox events to RabbitMQ)
-    # Tagged for auto-registration by OutboxPublisherPass compiler pass.
-    Freyr\MessageBroker\Amqp\AmqpOutboxPublisher:
-        arguments:
-            $senderLocator: !service_locator
-                amqp: '@messenger.transport.amqp'
-            $routingStrategy: '@Freyr\MessageBroker\Amqp\Routing\AmqpRoutingStrategyInterface'
-            $logger: '@logger'
-        tags:
-            - { name: 'message_broker.outbox_publisher', transport: 'outbox' }
-
-    # AMQP Topology Manager
-    # Declares exchanges, queues, and bindings against RabbitMQ
-    Freyr\MessageBroker\Amqp\TopologyManager:
-        arguments:
-            $topology: '%message_broker.amqp.topology%'
-            $logger: '@logger'
-
-    # AMQP Definitions Formatter
-    # Generates RabbitMQ-compatible definitions JSON
-    Freyr\MessageBroker\Amqp\DefinitionsFormatter:
-        arguments:
-            $topology: '%message_broker.amqp.topology%'
-
-    # AMQP Connection Factory
-    # Creates ext-amqp connections from DSN strings
-    Freyr\MessageBroker\Amqp\AmqpConnectionFactory: ~
-
-    # AMQP Topology Setup Command
-    # Declares AMQP topology from configuration
-    Freyr\MessageBroker\Amqp\Command\SetupAmqpTopologyCommand:
-        arguments:
-            $topologyManager: '@Freyr\MessageBroker\Amqp\TopologyManager'
-            $definitionsFormatter: '@Freyr\MessageBroker\Amqp\DefinitionsFormatter'
-            $connectionFactory: '@Freyr\MessageBroker\Amqp\AmqpConnectionFactory'
-            $defaultDsn: '%env(default::MESSENGER_AMQP_DSN)%'
-        tags: ['console.command']
 
     # Deduplication Store Cleanup Command
     # Removes old deduplication records

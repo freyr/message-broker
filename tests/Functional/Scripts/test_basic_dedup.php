@@ -41,7 +41,7 @@ $message = new AMQPMessage(json_encode([
     'content_type' => 'application/json',
     'application_headers' => new AMQPTable([
         'type' => 'test.event.sent',
-        'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp' => json_encode([[
+        'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp' => json_encode([[
             'messageId' => $messageId,
         ]]),
     ]),

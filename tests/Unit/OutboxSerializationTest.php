@@ -7,7 +7,7 @@ namespace Freyr\MessageBroker\Tests\Unit;
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Tests\Unit\Factory\EventBusFactory;
-use Freyr\MessageBroker\Tests\Unit\Fixtures\AmqpTestMessage;
+use Freyr\MessageBroker\Tests\Unit\Fixtures\SampleOutboxMessage;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\TestMessage;
 use PHPUnit\Framework\TestCase;
 
@@ -125,11 +125,11 @@ final class OutboxSerializationTest extends TestCase
         $context = EventBusFactory::createForOutboxTesting(
             messageTypes: [
                 'test.message.sent' => TestMessage::class,
-                'test.amqp.sent' => AmqpTestMessage::class,
+                'test.sample.sent' => SampleOutboxMessage::class,
             ],
             routing: [
                 TestMessage::class => ['outbox'],
-                AmqpTestMessage::class => ['amqp'],
+                SampleOutboxMessage::class => ['amqp'],
             ]
         );
 
@@ -139,7 +139,7 @@ final class OutboxSerializationTest extends TestCase
             timestamp: CarbonImmutable::now(),
         );
 
-        $amqpMessage = new AmqpTestMessage(
+        $amqpMessage = new SampleOutboxMessage(
             eventId: Id::new(),
             payload: 'AMQP Payload',
             sentAt: CarbonImmutable::now(),
@@ -155,18 +155,18 @@ final class OutboxSerializationTest extends TestCase
         $this->assertNotNull($outboxEnvelope);
         $this->assertInstanceOf(TestMessage::class, $outboxEnvelope->getMessage());
 
-        // And: AmqpTestMessage should be in AMQP transport only
+        // And: SampleOutboxMessage should be in AMQP transport only
         $this->assertEquals(1, $context->amqpTransport->count(), 'AMQP should have 1 message');
         $amqpEnvelope = $context->amqpTransport->getLastEnvelope();
         $this->assertNotNull($amqpEnvelope);
-        $this->assertInstanceOf(AmqpTestMessage::class, $amqpEnvelope->getMessage());
+        $this->assertInstanceOf(SampleOutboxMessage::class, $amqpEnvelope->getMessage());
 
         // Verify serialization format for AMQP message
         // AMQP transport uses InboxSerializer, which reads MessageNameStamp and produces semantic name
         $amqpSerialized = $context->amqpTransport->getLastSerialized();
         $this->assertNotNull($amqpSerialized);
         $this->assertEquals(
-            'test.amqp.sent',
+            'test.sample.sent',
             $amqpSerialized['headers']['type'],
             'AMQP message should have semantic name (InboxSerializer reads MessageNameStamp)'
         );

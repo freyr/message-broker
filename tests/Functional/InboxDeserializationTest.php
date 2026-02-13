@@ -32,7 +32,7 @@ final class InboxDeserializationTest extends FunctionalTestCase
             'test_inbox',
             [
                 'type' => 'test.event.sent',  // Semantic name - should be translated to FQN
-                'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp' => json_encode([[
+                'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp' => json_encode([[
                     'messageId' => $messageId,
                 ]]),
             ],

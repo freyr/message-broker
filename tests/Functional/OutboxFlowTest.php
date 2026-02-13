@@ -89,7 +89,7 @@ final class OutboxFlowTest extends FunctionalTestCase
         $this->assertEquals('test.event.sent', $headers['type']);
 
         // And: Message has native MessageIdStamp header
-        $stampHeaderKey = 'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp';
+        $stampHeaderKey = 'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp';
         $this->assertArrayHasKey($stampHeaderKey, $headers);
 
         // And: MessageIdStamp contains a valid UUID v7

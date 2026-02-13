@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Outbox;
 
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Stamp\MessageIdStamp;
+use Freyr\MessageBroker\Contracts\MessageIdStamp;
+use Freyr\MessageBroker\Contracts\OutboxMessage;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Middleware\MiddlewareInterface;
 use Symfony\Component\Messenger\Middleware\StackInterface;

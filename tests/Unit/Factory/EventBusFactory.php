@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Unit\Factory;
 
-use Freyr\MessageBroker\Amqp\AmqpOutboxPublisher;
-use Freyr\MessageBroker\Amqp\Routing\DefaultAmqpRoutingStrategy;
 use Freyr\MessageBroker\Inbox\DeduplicationMiddleware;
 use Freyr\MessageBroker\Outbox\MessageIdStampMiddleware;
 use Freyr\MessageBroker\Outbox\MessageNameStampMiddleware;
@@ -15,6 +13,7 @@ use Freyr\MessageBroker\Serializer\Normalizer\CarbonImmutableNormalizer;
 use Freyr\MessageBroker\Serializer\Normalizer\IdNormalizer;
 use Freyr\MessageBroker\Serializer\WireFormatSerializer;
 use Freyr\MessageBroker\Tests\Unit\Store\DeduplicationInMemoryStore;
+use Freyr\MessageBroker\Tests\Unit\Store\InMemoryOutboxPublisher;
 use Freyr\MessageBroker\Tests\Unit\Transport\InMemoryTransport;
 use Psr\Log\NullLogger;
 use Symfony\Component\DependencyInjection\ServiceLocator;
@@ -136,12 +135,8 @@ final class EventBusFactory
         $wireFormatSerializer = new WireFormatSerializer($symfonySerializer);
         $inboxSerializer = new InboxSerializer($symfonySerializer, $messageTypes);
 
-        // Create 3 separate transports to avoid mixing concerns:
-        // 1. Outbox: Stores domain events (native serialiser — FQN in type header)
+        // Create outbox transport: stores domain events (native serialiser — FQN in type header)
         $outboxTransport = new InMemoryTransport($nativeSerializer);
-
-        // 2. AMQP Publish: Publisher publishes here (WireFormatSerializer for encoding)
-        $amqpPublishTransport = new InMemoryTransport($wireFormatSerializer);
 
         // Create handlers locator
         $handlersLocator = new HandlersLocator($handlers);
@@ -149,7 +144,6 @@ final class EventBusFactory
         // Create transport container
         $transportContainer = new SimpleContainer([
             'outbox' => $outboxTransport,
-            'amqp' => $amqpPublishTransport,
         ]);
 
         // Create deduplication store (in-memory for testing)
@@ -158,19 +152,13 @@ final class EventBusFactory
         // Create deduplication middleware with store
         $deduplicationMiddleware = new DeduplicationMiddleware($deduplicationStore);
 
-        // Create AmqpOutboxPublisher with sender locator
-        $amqpPublisher = new AmqpOutboxPublisher(
-            senderLocator: new ServiceLocator([
-                'amqp' => fn () => $amqpPublishTransport,
-            ]),
-            routingStrategy: new DefaultAmqpRoutingStrategy(),
-            logger: new NullLogger(),
-        );
+        // Create in-memory outbox publisher (stores published envelopes)
+        $outboxPublisher = new InMemoryOutboxPublisher();
 
         // Create OutboxPublishingMiddleware with publisher locator
         $publishingMiddleware = new OutboxPublishingMiddleware(
             publisherLocator: new ServiceLocator([
-                'outbox' => fn () => $amqpPublisher,
+                'outbox' => fn () => $outboxPublisher,
             ]),
             logger: new NullLogger(),
         );
@@ -191,7 +179,7 @@ final class EventBusFactory
         return new InboxFlowTestContext(
             bus: $bus,
             outboxTransport: $outboxTransport,
-            amqpPublishTransport: $amqpPublishTransport,
+            outboxPublisher: $outboxPublisher,
             wireFormatSerializer: $wireFormatSerializer,
             inboxSerializer: $inboxSerializer,
             deduplicationStore: $deduplicationStore,
@@ -251,7 +239,7 @@ final readonly class InboxFlowTestContext
     public function __construct(
         public MessageBusInterface $bus,
         public InMemoryTransport $outboxTransport,
-        public InMemoryTransport $amqpPublishTransport,
+        public InMemoryOutboxPublisher $outboxPublisher,
         public WireFormatSerializer $wireFormatSerializer,
         public InboxSerializer $inboxSerializer,
         public DeduplicationInMemoryStore $deduplicationStore,

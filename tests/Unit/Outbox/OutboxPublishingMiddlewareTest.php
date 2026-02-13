@@ -6,10 +6,10 @@ namespace Freyr\MessageBroker\Tests\Unit\Outbox;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Outbox\OutboxPublisherInterface;
+use Freyr\MessageBroker\Contracts\MessageIdStamp;
+use Freyr\MessageBroker\Contracts\MessageNameStamp;
+use Freyr\MessageBroker\Contracts\OutboxPublisherInterface;
 use Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware;
-use Freyr\MessageBroker\Stamp\MessageIdStamp;
-use Freyr\MessageBroker\Stamp\MessageNameStamp;
 use Freyr\MessageBroker\Tests\Unit\Factory\MiddlewareStackFactory;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\TestMessage;
 use PHPUnit\Framework\TestCase;

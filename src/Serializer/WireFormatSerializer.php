@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Serializer;
 
-use Freyr\MessageBroker\Stamp\MessageNameStamp;
+use Freyr\MessageBroker\Contracts\MessageNameStamp;
 use RuntimeException;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Transport\Serialization\Serializer;

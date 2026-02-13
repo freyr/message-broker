@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Unit\Outbox;
 
+use Freyr\MessageBroker\Contracts\OutboxPublisherInterface;
 use Freyr\MessageBroker\DependencyInjection\Compiler\OutboxPublisherPass;
-use Freyr\MessageBroker\Outbox\OutboxPublisherInterface;
 use Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;

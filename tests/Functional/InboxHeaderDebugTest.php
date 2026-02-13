@@ -6,7 +6,7 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Stamp\MessageIdStamp;
+use Freyr\MessageBroker\Contracts\MessageIdStamp;
 
 /**
  * Debug test to inspect actual AMQP message headers.

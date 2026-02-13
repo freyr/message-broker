@@ -60,7 +60,7 @@ final class InboxDeduplicationEdgeCasesTest extends FunctionalTestCase
         // Given: A message with unmapped type header
         $this->publishToAmqp('test_inbox', [
             'type' => 'unknown.event.name', // Not in message_types config
-            'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp' => json_encode([[
+            'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp' => json_encode([[
                 'messageId' => Id::new()->__toString(),
             ]]),
         ], [
@@ -112,7 +112,7 @@ final class InboxDeduplicationEdgeCasesTest extends FunctionalTestCase
         for ($i = 1; $i <= 2; ++$i) {
             $this->publishToAmqp('test_inbox', [
                 'type' => 'test.event.sent',
-                'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp' => json_encode([[
+                'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp' => json_encode([[
                     'messageId' => $messageId,
                 ]]),
             ], [

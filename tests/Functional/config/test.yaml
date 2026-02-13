@@ -33,7 +33,7 @@ framework:
                     delay: 1000
                     multiplier: 2
 
-            # AMQP publish transport - MANUAL MANAGEMENT (auto_setup: false)
+            # AMQP publish transport (for functional outbox flow tests)
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
                 serializer: 'Freyr\MessageBroker\Serializer\WireFormatSerializer'
@@ -47,7 +47,7 @@ framework:
                     delay: 1000
                     multiplier: 2
 
-            # AMQP consumption transport - MANUAL MANAGEMENT (auto_setup: false)
+            # AMQP consumption transport (for functional inbox tests)
             amqp_test:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
                 serializer: 'Freyr\MessageBroker\Serializer\InboxSerializer'
@@ -107,19 +107,6 @@ message_broker:
         message_types:
             'test.event.sent': 'Freyr\MessageBroker\Tests\Functional\Fixtures\TestEvent'
             'test.order.placed': 'Freyr\MessageBroker\Tests\Functional\Fixtures\OrderPlaced'
-    amqp:
-        topology:
-            exchanges:
-                topology_test_exchange:
-                    type: topic
-                    durable: true
-            queues:
-                topology_test_queue:
-                    durable: true
-            bindings:
-                - exchange: topology_test_exchange
-                  queue: topology_test_queue
-                  binding_key: 'test.#'
 
 services:
     _defaults:
@@ -148,13 +135,13 @@ services:
             $serializer: '@serializer'
             $messageTypes: '%message_broker.inbox.message_types%'
 
-    # Wire Format Serializer (for AMQP publishing)
+    # Wire Format Serializer (for AMQP publishing transport)
     Freyr\MessageBroker\Serializer\WireFormatSerializer:
         arguments:
             $serializer: '@serializer'
 
     # Deduplication Store
-    Freyr\MessageBroker\Inbox\DeduplicationStore:
+    Freyr\MessageBroker\Contracts\DeduplicationStore:
         class: Freyr\MessageBroker\Inbox\DeduplicationDbalStore
         public: true
         arguments:
@@ -165,7 +152,7 @@ services:
     # Deduplication Middleware
     Freyr\MessageBroker\Inbox\DeduplicationMiddleware:
         arguments:
-            $store: '@Freyr\MessageBroker\Inbox\DeduplicationStore'
+            $store: '@Freyr\MessageBroker\Contracts\DeduplicationStore'
         tags:
             - { name: 'messenger.middleware', priority: -10 }
 
@@ -180,46 +167,13 @@ services:
         arguments:
             $logger: '@logger'
 
-    # AMQP Routing Strategy (convention-based with YAML overrides)
-    Freyr\MessageBroker\Amqp\Routing\AmqpRoutingStrategyInterface:
-        class: Freyr\MessageBroker\Amqp\Routing\DefaultAmqpRoutingStrategy
-        arguments:
-            $defaultSenderName: 'amqp'
-            $routingOverrides: '%message_broker.amqp.routing_overrides%'
-
-    # AMQP Outbox Publisher
-    Freyr\MessageBroker\Amqp\AmqpOutboxPublisher:
+    # Test Outbox Publisher (publishes to AMQP for functional tests)
+    Freyr\MessageBroker\Tests\Functional\Fixtures\TestOutboxPublisher:
         arguments:
             $senderLocator: !service_locator
                 amqp: '@messenger.transport.amqp'
-            $routingStrategy: '@Freyr\MessageBroker\Amqp\Routing\AmqpRoutingStrategyInterface'
-            $logger: '@logger'
         tags:
             - { name: 'message_broker.outbox_publisher', transport: 'outbox' }
-
-    # AMQP Topology Manager
-    Freyr\MessageBroker\Amqp\TopologyManager:
-        arguments:
-            $topology: '%message_broker.amqp.topology%'
-            $logger: '@logger'
-
-    # AMQP Definitions Formatter
-    Freyr\MessageBroker\Amqp\DefinitionsFormatter:
-        arguments:
-            $topology: '%message_broker.amqp.topology%'
-
-    # AMQP Connection Factory
-    Freyr\MessageBroker\Amqp\AmqpConnectionFactory: ~
-
-    # AMQP Topology Setup Command (public for functional tests)
-    Freyr\MessageBroker\Amqp\Command\SetupAmqpTopologyCommand:
-        public: true
-        arguments:
-            $topologyManager: '@Freyr\MessageBroker\Amqp\TopologyManager'
-            $definitionsFormatter: '@Freyr\MessageBroker\Amqp\DefinitionsFormatter'
-            $connectionFactory: '@Freyr\MessageBroker\Amqp\AmqpConnectionFactory'
-            $defaultDsn: '%env(MESSENGER_AMQP_DSN)%'
-        tags: ['console.command']
 
     # Test Handlers (for inbox flow tests)
     Freyr\MessageBroker\Tests\Functional\Fixtures\TestEventHandler:

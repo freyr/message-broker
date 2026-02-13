@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Outbox;
 
-use Freyr\MessageBroker\Stamp\MessageIdStamp;
-use Freyr\MessageBroker\Stamp\MessageNameStamp;
+use Freyr\MessageBroker\Contracts\MessageIdStamp;
+use Freyr\MessageBroker\Contracts\MessageNameStamp;
+use Freyr\MessageBroker\Contracts\OutboxMessage;
+use Freyr\MessageBroker\Contracts\OutboxPublisherInterface;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use RuntimeException;

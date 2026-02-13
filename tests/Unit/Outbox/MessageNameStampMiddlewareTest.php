@@ -6,8 +6,8 @@ namespace Freyr\MessageBroker\Tests\Unit\Outbox;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
+use Freyr\MessageBroker\Contracts\MessageNameStamp;
 use Freyr\MessageBroker\Outbox\MessageNameStampMiddleware;
-use Freyr\MessageBroker\Stamp\MessageNameStamp;
 use Freyr\MessageBroker\Tests\Unit\Factory\MiddlewareStackFactory;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\TestMessage;
 use PHPUnit\Framework\TestCase;
@@ -97,7 +97,7 @@ final class MessageNameStampMiddlewareTest extends TestCase
 
     public function testThrowsWhenMessageNameAttributeMissing(): void
     {
-        $message = new class implements \Freyr\MessageBroker\Outbox\OutboxMessage {};
+        $message = new class implements \Freyr\MessageBroker\Contracts\OutboxMessage {};
         $envelope = new Envelope($message);
 
         $this->expectException(RuntimeException::class);
