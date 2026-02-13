@@ -23,11 +23,11 @@ services:
             $serializer: '@serializer'
             $messageTypes: '%message_broker.inbox.message_types%'
 
-    # Outbox Serializer (for AMQP publishing transports)
-    # - encode(): Extracts semantic name from #[MessageName] attribute (e.g., 'App\Event\OrderPlaced' → 'order.placed')
+    # Wire Format Serializer (for AMQP publishing transports)
+    # - encode(): Reads stamps, translates FQN → semantic name, adds X-Message-Id header
     # - decode(): Restores FQN from X-Message-Class header (for retry/failed scenarios)
     # Used on AMQP publishing transport (where AmqpOutboxPublisher publishes)
-    Freyr\MessageBroker\Serializer\OutboxSerializer:
+    Freyr\MessageBroker\Serializer\WireFormatSerializer:
         arguments:
             $serializer: '@serializer'
 
@@ -51,6 +51,13 @@ services:
     # MessageIdStamp Middleware
     # Stamps OutboxMessage envelopes with MessageIdStamp at dispatch time
     Freyr\MessageBroker\Outbox\MessageIdStampMiddleware:
+        tags:
+            - { name: 'messenger.middleware' }
+
+    # MessageNameStamp Middleware
+    # Stamps OutboxMessage envelopes with MessageNameStamp at dispatch time
+    # Extracts semantic name from #[MessageName] attribute once (single reflection point)
+    Freyr\MessageBroker\Outbox\MessageNameStampMiddleware:
         tags:
             - { name: 'messenger.middleware' }
 

@@ -12,7 +12,8 @@ use Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware;
 use Freyr\MessageBroker\Serializer\InboxSerializer;
 use Freyr\MessageBroker\Serializer\Normalizer\CarbonImmutableNormalizer;
 use Freyr\MessageBroker\Serializer\Normalizer\IdNormalizer;
-use Freyr\MessageBroker\Serializer\OutboxSerializer;
+use Freyr\MessageBroker\Outbox\MessageNameStampMiddleware;
+use Freyr\MessageBroker\Serializer\WireFormatSerializer;
 use Freyr\MessageBroker\Tests\Unit\Store\DeduplicationInMemoryStore;
 use Freyr\MessageBroker\Tests\Unit\Transport\InMemoryTransport;
 use Psr\Log\NullLogger;
@@ -34,10 +35,10 @@ use Symfony\Component\Serializer\Serializer;
  * Factory for creating configured MessageBus instances for unit testing.
  *
  * Creates a complete Messenger setup programmatically without YAML configuration:
- * - In-memory transports (outbox, amqp)
- * - OutboxSerializer/InboxSerializer with custom normalizers
+ * - In-memory transports (outbox with native serialiser, amqp with WireFormatSerializer)
+ * - WireFormatSerializer/InboxSerializer with custom normalizers
  * - Routing configuration
- * - Middleware chain
+ * - Middleware chain (MessageIdStampMiddleware, MessageNameStampMiddleware, etc.)
  */
 final class EventBusFactory
 {
@@ -45,7 +46,7 @@ final class EventBusFactory
      * Create MessageBus for testing outbox serialization.
      *
      * Configuration:
-     * - Outbox transport with OutboxSerializer
+     * - Outbox transport with native serialiser (FQN in type header)
      * - Routes messages based on FQN configuration
      * - Optional handlers for consumption testing
      *
@@ -58,10 +59,15 @@ final class EventBusFactory
         array $routing = [],
         array $handlers = [],
     ): EventBusTestContext {
-        [$outboxSerializer, $inboxSerializer] = self::createSerializers($messageTypes);
+        $symfonySerializer = self::createSymfonySerializer();
+        $nativeSerializer = new \Symfony\Component\Messenger\Transport\Serialization\Serializer($symfonySerializer);
+        $wireFormatSerializer = new WireFormatSerializer($symfonySerializer);
+        $inboxSerializer = new InboxSerializer($symfonySerializer, $messageTypes);
 
-        // Create in-memory transports with different serializers
-        $outboxTransport = new InMemoryTransport($outboxSerializer);
+        // Create in-memory transports:
+        // - Outbox uses native serialiser (FQN in type header — internal storage)
+        // - AMQP uses InboxSerializer for consumption testing
+        $outboxTransport = new InMemoryTransport($nativeSerializer);
         $amqpTransport = new InMemoryTransport($inboxSerializer);
 
         // Create transport locator for routing
@@ -78,6 +84,7 @@ final class EventBusFactory
         // Create middleware chain
         $middleware = [
             new MessageIdStampMiddleware(),
+            new MessageNameStampMiddleware(),
             new SendMessageMiddleware($senderLocator),
             new HandleMessageMiddleware($handlersLocator),
         ];
@@ -89,7 +96,7 @@ final class EventBusFactory
             bus: $bus,
             outboxTransport: $outboxTransport,
             amqpTransport: $amqpTransport,
-            outboxSerializer: $outboxSerializer,
+            wireFormatSerializer: $wireFormatSerializer,
             inboxSerializer: $inboxSerializer,
         );
     }
@@ -98,13 +105,13 @@ final class EventBusFactory
      * Create MessageBus for testing complete inbox flow with deduplication.
      *
      * Transport Architecture (3 transports):
-     * 1. Outbox transport (doctrine://outbox) - Stores domain events, consumed by middleware
-     * 2. AMQP publish transport (amqp://publish) - Publisher publishes here with OutboxSerializer
+     * 1. Outbox transport (doctrine://outbox) - Stores domain events with native serialiser
+     * 2. AMQP publish transport (amqp://publish) - Publisher publishes here with WireFormatSerializer
      * 3. AMQP consume transport (amqp://consume) - Consumers read from here with InboxSerializer
      *
      * Configuration:
-     * - Outbox transport with OutboxSerializer (for storage)
-     * - AMQP publish transport with OutboxSerializer (for publisher publishing)
+     * - Outbox transport with native serialiser (FQN in type header — internal storage)
+     * - AMQP publish transport with WireFormatSerializer (for publisher publishing)
      * - AMQP consume transport with InboxSerializer (for consuming external messages)
      * - DeduplicationMiddleware (in-memory store)
      * - Routes messages to handlers
@@ -124,14 +131,17 @@ final class EventBusFactory
         array $handlers = [],
         array $routing = [],
     ): InboxFlowTestContext {
-        [$outboxSerializer, $inboxSerializer] = self::createSerializers($messageTypes);
+        $symfonySerializer = self::createSymfonySerializer();
+        $nativeSerializer = new \Symfony\Component\Messenger\Transport\Serialization\Serializer($symfonySerializer);
+        $wireFormatSerializer = new WireFormatSerializer($symfonySerializer);
+        $inboxSerializer = new InboxSerializer($symfonySerializer, $messageTypes);
 
         // Create 3 separate transports to avoid mixing concerns:
-        // 1. Outbox: Stores domain events (uses OutboxSerializer for encode/decode)
-        $outboxTransport = new InMemoryTransport($outboxSerializer);
+        // 1. Outbox: Stores domain events (native serialiser — FQN in type header)
+        $outboxTransport = new InMemoryTransport($nativeSerializer);
 
-        // 2. AMQP Publish: Publisher publishes here (uses OutboxSerializer for encoding)
-        $amqpPublishTransport = new InMemoryTransport($outboxSerializer);
+        // 2. AMQP Publish: Publisher publishes here (WireFormatSerializer for encoding)
+        $amqpPublishTransport = new InMemoryTransport($wireFormatSerializer);
 
         // Create handlers locator
         $handlersLocator = new HandlersLocator($handlers);
@@ -168,6 +178,7 @@ final class EventBusFactory
         // Create middleware chain matching production ordering
         $middleware = [
             new MessageIdStampMiddleware(),
+            new MessageNameStampMiddleware(),
             new SendMessageMiddleware(new SendersLocator($routing, $transportContainer)),
             $publishingMiddleware,
             $deduplicationMiddleware,
@@ -181,25 +192,21 @@ final class EventBusFactory
             bus: $bus,
             outboxTransport: $outboxTransport,
             amqpPublishTransport: $amqpPublishTransport,
-            outboxSerializer: $outboxSerializer,
+            wireFormatSerializer: $wireFormatSerializer,
             inboxSerializer: $inboxSerializer,
             deduplicationStore: $deduplicationStore,
         );
     }
 
     /**
-     * Create OutboxSerializer and InboxSerializer with custom normalizers.
+     * Create Symfony Serializer with custom normalizers.
      *
      * Matches production configuration from config/services.yaml:
      * - IdNormalizer for Freyr\Identity\Id
      * - CarbonImmutableNormalizer for Carbon\CarbonImmutable
      * - ObjectNormalizer with propertyTypeExtractor for constructor property promotion
-     *
-     * @param array<string, class-string> $messageTypes Message name to class mapping
-     *
-     * @return array{OutboxSerializer, InboxSerializer}
      */
-    private static function createSerializers(array $messageTypes): array
+    private static function createSymfonySerializer(): Serializer
     {
         $reflectionExtractor = new ReflectionExtractor();
         $propertyTypeExtractor = new PropertyInfoExtractor(
@@ -210,7 +217,7 @@ final class EventBusFactory
             [$reflectionExtractor]
         );
 
-        $symfonySerializer = new Serializer(
+        return new Serializer(
             [
                 new IdNormalizer(),
                 new CarbonImmutableNormalizer(),
@@ -219,8 +226,6 @@ final class EventBusFactory
             ],
             [new JsonEncoder()]
         );
-
-        return [new OutboxSerializer($symfonySerializer), new InboxSerializer($symfonySerializer, $messageTypes)];
     }
 }
 
@@ -233,7 +238,7 @@ final readonly class EventBusTestContext
         public MessageBusInterface $bus,
         public InMemoryTransport $outboxTransport,
         public InMemoryTransport $amqpTransport,
-        public OutboxSerializer $outboxSerializer,
+        public WireFormatSerializer $wireFormatSerializer,
         public InboxSerializer $inboxSerializer,
     ) {}
 }
@@ -247,7 +252,7 @@ final readonly class InboxFlowTestContext
         public MessageBusInterface $bus,
         public InMemoryTransport $outboxTransport,
         public InMemoryTransport $amqpPublishTransport,
-        public OutboxSerializer $outboxSerializer,
+        public WireFormatSerializer $wireFormatSerializer,
         public InboxSerializer $inboxSerializer,
         public DeduplicationInMemoryStore $deduplicationStore,
     ) {}

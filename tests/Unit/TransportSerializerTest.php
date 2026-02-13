@@ -15,13 +15,13 @@ use PHPUnit\Framework\TestCase;
  * Unit test for transport-specific serializer usage.
  *
  * Tests that:
- * - Outbox transport uses OutboxSerializer (semantic names in type header)
- * - AMQP transport uses standard Symfony serialiser (FQN in type header)
- * - This ensures OutboxSerializer is only triggered for outbox messages
+ * - Outbox transport uses native serialiser (FQN in type header — internal storage)
+ * - AMQP consumption transport uses InboxSerializer (FQN in type header from config mapping)
+ * - Both stamp middlewares add stamps at dispatch time
  */
 final class TransportSerializerTest extends TestCase
 {
-    public function testOutboxTransportUsesOutboxSerializer(): void
+    public function testOutboxTransportUsesNativeSerializer(): void
     {
         // Given: EventBus with message routed to outbox
         $context = EventBusFactory::createForOutboxTesting(
@@ -38,27 +38,57 @@ final class TransportSerializerTest extends TestCase
         // When: Message is dispatched
         $context->bus->dispatch($message);
 
-        // Then: Message should be serialised with OutboxSerializer
+        // Then: Message should be serialised with native serialiser
         $serialized = $context->outboxTransport->getLastSerialized();
         $this->assertNotNull($serialized);
 
-        // Type header should contain semantic name (NOT FQN)
+        // Type header should contain FQN (native serialiser uses class name)
         $this->assertEquals(
-            'test.message.sent',
-            $serialized['headers']['type'],
-            'Outbox transport should use OutboxSerializer — type header should be semantic name'
-        );
-
-        $this->assertNotEquals(
             TestMessage::class,
             $serialized['headers']['type'],
-            'Outbox transport should NOT have FQN in type header'
+            'Outbox transport should use native serialiser — type header should be FQN'
         );
     }
 
-    public function testAmqpTransportUsesStandardSerializer(): void
+    public function testOutboxTransportPreservesStampsInHeaders(): void
     {
-        // Given: EventBus with message routed directly to AMQP
+        // Given: EventBus with message routed to outbox
+        $context = EventBusFactory::createForOutboxTesting(
+            messageTypes: [
+                'test.message.sent' => TestMessage::class,
+            ],
+            routing: [
+                TestMessage::class => ['outbox'],
+            ]
+        );
+
+        $message = new TestMessage(id: Id::new(), name: 'Outbox Test', timestamp: CarbonImmutable::now());
+
+        // When: Message is dispatched
+        $context->bus->dispatch($message);
+
+        // Then: Stamps should be preserved in X-Message-Stamp-* headers
+        $serialized = $context->outboxTransport->getLastSerialized();
+        $this->assertNotNull($serialized);
+
+        $headers = $serialized['headers'];
+        $this->assertArrayHasKey(
+            'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp',
+            $headers,
+            'MessageIdStamp should be preserved in native format'
+        );
+        $this->assertArrayHasKey(
+            'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageNameStamp',
+            $headers,
+            'MessageNameStamp should be preserved in native format'
+        );
+    }
+
+    public function testAmqpConsumptionTransportUsesInboxSerializer(): void
+    {
+        // Given: EventBus with OutboxMessage routed directly to AMQP
+        // MessageNameStampMiddleware adds MessageNameStamp at dispatch for all OutboxMessages
+        // InboxSerializer::encode() reads the stamp and uses semantic name
         $context = EventBusFactory::createForOutboxTesting(
             messageTypes: [
                 'test.amqp.sent' => AmqpTestMessage::class,
@@ -77,25 +107,18 @@ final class TransportSerializerTest extends TestCase
         // When: Message is dispatched
         $context->bus->dispatch($message);
 
-        // Then: Message should be serialized with standard Symfony serializer
+        // Then: InboxSerializer::encode() uses semantic name from MessageNameStamp
         $serialized = $context->amqpTransport->getLastSerialized();
         $this->assertNotNull($serialized);
 
-        // Type header should contain FQN (NOT semantic name)
         $this->assertEquals(
-            AmqpTestMessage::class,
-            $serialized['headers']['type'],
-            'AMQP transport should use standard serializer - type header should be FQN'
-        );
-
-        $this->assertNotEquals(
             'test.amqp.sent',
             $serialized['headers']['type'],
-            'AMQP transport should NOT have semantic name in type header'
+            'InboxSerializer should use semantic name from MessageNameStamp'
         );
     }
 
-    public function testDifferentTransportsUseDifferentSerializers(): void
+    public function testOutboxUsesNativeSerializerAmqpUsesInboxSerializer(): void
     {
         // Given: EventBus with messages routed to different transports
         $context = EventBusFactory::createForOutboxTesting(
@@ -125,64 +148,29 @@ final class TransportSerializerTest extends TestCase
         $context->bus->dispatch($outboxMessage);
         $context->bus->dispatch($amqpMessage);
 
-        // Then: Outbox message should have semantic name
+        // Then: Outbox stores FQN (native serialiser — internal storage)
         $outboxSerialized = $context->outboxTransport->getLastSerialized();
         $this->assertNotNull($outboxSerialized);
-        $outboxHeaders = $outboxSerialized['headers'];
         $this->assertEquals(
-            'test.message.sent',
-            $outboxHeaders['type'],
-            'Outbox message should have semantic name'
+            TestMessage::class,
+            $outboxSerialized['headers']['type'],
+            'Outbox should have FQN in type header (native serialiser)'
         );
 
-        // And: AMQP message should have FQN
+        // And: AMQP stores semantic name (InboxSerializer reads MessageNameStamp)
         $amqpSerialized = $context->amqpTransport->getLastSerialized();
         $this->assertNotNull($amqpSerialized);
-        $amqpHeaders = $amqpSerialized['headers'];
-        $this->assertEquals(AmqpTestMessage::class, $amqpHeaders['type'], 'AMQP message should have FQN');
+        $this->assertEquals(
+            'test.amqp.sent',
+            $amqpSerialized['headers']['type'],
+            'AMQP should have semantic name (InboxSerializer reads MessageNameStamp)'
+        );
 
-        // Verify they are different
+        // Verify the transports use different formats
         $this->assertNotEquals(
-            $outboxHeaders['type'],
-            $amqpHeaders['type'],
-            'Different transports should use different serialization formats'
+            $outboxSerialized['headers']['type'],
+            $amqpSerialized['headers']['type'],
+            'Different transports should use different serialisation formats'
         );
-    }
-
-    public function testOutboxSerializerOnlyTriggeredForOutbox(): void
-    {
-        // Given: Multiple messages with MessageName attributes
-        $context = EventBusFactory::createForOutboxTesting(
-            messageTypes: [
-                'test.message.sent' => TestMessage::class,
-                'test.amqp.sent' => AmqpTestMessage::class,
-            ],
-            routing: [
-                TestMessage::class => ['outbox'],
-                AmqpTestMessage::class => ['amqp'],
-            ]
-        );
-
-        // Both messages have #[MessageName] attribute
-        // But only TestMessage (routed to outbox) should use semantic name
-        // AmqpTestMessage (routed to AMQP) should ignore the attribute
-
-        $outboxMessage = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
-
-        $amqpMessage = new AmqpTestMessage(eventId: Id::new(), payload: 'Test', sentAt: CarbonImmutable::now());
-
-        // When: Messages are dispatched
-        $context->bus->dispatch($outboxMessage);
-        $context->bus->dispatch($amqpMessage);
-
-        // Then: Outbox respects #[MessageName] attribute
-        $outboxSerialized = $context->outboxTransport->getLastSerialized();
-        $this->assertNotNull($outboxSerialized);
-        $this->assertEquals('test.message.sent', $outboxSerialized['headers']['type']);
-
-        // And: AMQP ignores #[MessageName] attribute (uses FQN)
-        $amqpSerialized = $context->amqpTransport->getLastSerialized();
-        $this->assertNotNull($amqpSerialized);
-        $this->assertEquals(AmqpTestMessage::class, $amqpSerialized['headers']['type']);
     }
 }

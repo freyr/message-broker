@@ -213,7 +213,7 @@ final class InboxFlowTest extends TestCase
         $this->assertEquals(
             'test.message.sent',
             $amqpSerialized['headers']['type'],
-            'AMQP transport should have semantic name (from OutboxSerializer)'
+            'AMQP transport should have semantic name (from WireFormatSerializer)'
         );
 
         // When: Message consumed from AMQP and deserialized

@@ -53,17 +53,17 @@ final class OutboxFlowTest extends FunctionalTestCase
 
         $this->assertIsArray($result);
 
-        // Body should be JSON (OutboxSerializer)
+        // Body should be JSON (native serialiser)
         $this->assertIsString($result['body']);
         $body = json_decode($result['body'], true);
         $this->assertIsArray($body, 'Body should be valid JSON');
         $this->assertEquals('integration-test-event', $body['name']);
 
-        // Headers should contain semantic name
+        // Headers should contain FQN (native serialiser stores class name internally)
         $this->assertIsString($result['headers']);
         $headers = json_decode($result['headers'], true);
         $this->assertIsArray($headers);
-        $this->assertEquals('test.event.sent', $headers['type']);
+        $this->assertEquals(TestEvent::class, $headers['type']);
     }
 
     public function testOutboxPublishesToAmqp(): void
