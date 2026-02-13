@@ -17,7 +17,7 @@ use Symfony\Component\Messenger\MessageBusInterface;
  * Tests complete outbox flow:
  * 1. Event dispatched to message bus
  * 2. Event stored in messenger_outbox table
- * 3. OutboxToAmqpBridge processes outbox
+ * 3. OutboxPublishingMiddleware processes outbox
  * 4. Event published to AMQP with correct format
  */
 final class OutboxFlowTest extends FunctionalTestCase
@@ -76,7 +76,7 @@ final class OutboxFlowTest extends FunctionalTestCase
             ->get(MessageBusInterface::class);
         $messageBus->dispatch($testEvent);
 
-        // When: OutboxToAmqpBridge processes the outbox (with LIMIT to prevent hanging)
+        // When: OutboxPublishingMiddleware processes the outbox (with LIMIT to prevent hanging)
         $this->processOutbox(limit: 1);
 
         // Then: Message is published to AMQP (routing key = semantic name = test.event.sent)

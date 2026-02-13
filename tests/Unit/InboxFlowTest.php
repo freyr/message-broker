@@ -18,7 +18,7 @@ use Symfony\Component\Messenger\Stamp\ReceivedStamp;
  *
  * Tests the full message flow using the middleware chain:
  * 1. Dispatch: MessageIdStampMiddleware stamps → SendMessageMiddleware routes to outbox
- * 2. Outbox consumption: Re-dispatch with ReceivedStamp('outbox') → OutboxToAmqpBridge
+ * 2. Outbox consumption: Re-dispatch with ReceivedStamp('outbox') → OutboxPublishingMiddleware
  *    publishes to AMQP sender (short-circuit)
  * 3. AMQP consumption: InboxSerializer translates semantic name → FQN
  *    → DeduplicationMiddleware checks MessageIdStamp → Handler
