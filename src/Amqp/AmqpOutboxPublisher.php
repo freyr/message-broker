@@ -13,6 +13,7 @@ use Psr\Log\LoggerInterface;
 use RuntimeException;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
 use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\Transport\Sender\SenderInterface;
 
 /**
  * AMQP implementation of OutboxPublisherInterface.
@@ -67,7 +68,7 @@ final readonly class AmqpOutboxPublisher implements OutboxPublisherInterface
         $routingKey = $this->routingStrategy->getRoutingKey($event, $messageName);
         $headers = $this->routingStrategy->getHeaders($messageName);
 
-        // Forward all stamps from bridge envelope, add AMQP-specific stamp
+        // Forward all stamps from a publisher envelope, add an AMQP-specific stamp
         $amqpEnvelope = $envelope->with(
             new AmqpStamp($routingKey, AMQP_NOPARAM, $headers),
         );
@@ -80,7 +81,7 @@ final readonly class AmqpOutboxPublisher implements OutboxPublisherInterface
             'routing_key' => $routingKey,
         ]);
 
-        /** @var \Symfony\Component\Messenger\Transport\Sender\SenderInterface $sender */
+        /** @var SenderInterface $sender */
         $sender = $this->senderLocator->get($senderName);
         $sender->send($amqpEnvelope);
     }

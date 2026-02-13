@@ -59,7 +59,7 @@ final class AmqpOutboxPublisherTest extends TestCase
         $this->assertNotNull($amqpStamp);
         $this->assertSame('test.message.sent', $amqpStamp->getRoutingKey());
 
-        // Verify stamps forwarded from bridge envelope
+        // Verify stamps forwarded from publisher envelope
         $this->assertNotNull($sentEnvelope->last(MessageIdStamp::class));
         $this->assertSame($messageId, $sentEnvelope->last(MessageIdStamp::class)->messageId);
         $this->assertNotNull($sentEnvelope->last(MessageNameStamp::class));
@@ -164,7 +164,7 @@ final class AmqpOutboxPublisherTest extends TestCase
         $publisher->publish($envelope);
     }
 
-    public function testForwardsStampsFromBridgeEnvelope(): void
+    public function testForwardsStampsFromPublisherEnvelope(): void
     {
         $publisher = $this->createPublisher();
 

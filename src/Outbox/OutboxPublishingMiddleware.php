@@ -75,13 +75,6 @@ final readonly class OutboxPublishingMiddleware implements MiddlewareInterface
             new MessageNameStamp($messageName),
         ]);
 
-        $this->logger->debug('Delegating outbox event to transport publisher', [
-            'message_name' => $messageName,
-            'message_id' => $messageIdStamp->messageId,
-            'event_class' => $event::class,
-            'outbox_transport' => $transportName,
-        ]);
-
         /** @var OutboxPublisherInterface $publisher */
         $publisher = $this->publisherLocator->get($transportName);
         $publisher->publish($publishEnvelope);

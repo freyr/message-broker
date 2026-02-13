@@ -98,7 +98,7 @@ final class EventBusFactory
      * Create MessageBus for testing complete inbox flow with deduplication.
      *
      * Transport Architecture (3 transports):
-     * 1. Outbox transport (doctrine://outbox) - Stores domain events, consumed by bridge
+     * 1. Outbox transport (doctrine://outbox) - Stores domain events, consumed by middleware
      * 2. AMQP publish transport (amqp://publish) - Publisher publishes here with OutboxSerializer
      * 3. AMQP consume transport (amqp://consume) - Consumers read from here with InboxSerializer
      *

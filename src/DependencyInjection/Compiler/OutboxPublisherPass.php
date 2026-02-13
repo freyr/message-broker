@@ -66,7 +66,7 @@ final class OutboxPublisherPass implements CompilerPassInterface
             $container->log($this, 'No outbox publishers registered. OutboxPublishingMiddleware will not publish any messages.');
         }
 
-        $bridge = $container->getDefinition(OutboxPublishingMiddleware::class);
-        $bridge->setArgument('$publisherLocator', ServiceLocatorTagPass::register($container, $publishers));
+        $middleware = $container->getDefinition(OutboxPublishingMiddleware::class);
+        $middleware->setArgument('$publisherLocator', ServiceLocatorTagPass::register($container, $publishers));
     }
 }
