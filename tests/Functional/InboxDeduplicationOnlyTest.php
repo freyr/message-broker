@@ -50,7 +50,9 @@ final class InboxDeduplicationOnlyTest extends FunctionalTestCase
 
         $headers = [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
+            'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp' => json_encode([[
+                'messageId' => $messageId,
+            ]]),
         ];
 
         $body = [

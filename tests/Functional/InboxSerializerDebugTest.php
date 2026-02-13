@@ -28,7 +28,9 @@ final class InboxSerializerDebugTest extends FunctionalTestCase
             ]),
             'headers' => [
                 'type' => 'test.event.sent',
-                'X-Message-Stamp-' . MessageIdStamp::class => json_encode([['messageId' => $messageId]]),
+                'X-Message-Stamp-'.MessageIdStamp::class => json_encode([[
+                    'messageId' => $messageId,
+                ]]),
             ],
         ];
 

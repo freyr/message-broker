@@ -25,7 +25,9 @@ final class TransactionBehaviorTest extends FunctionalTestCase
 
         $this->publishToAmqp('test_inbox', [
             'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp' => json_encode([['messageId' => $messageId]]),
+            'X-Message-Stamp-Freyr\MessageBroker\Stamp\MessageIdStamp' => json_encode([[
+                'messageId' => $messageId,
+            ]]),
         ], [
             'id' => $testEvent->id->__toString(),
             'name' => $testEvent->name,

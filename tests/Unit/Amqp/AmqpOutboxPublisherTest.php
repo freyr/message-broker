@@ -139,7 +139,9 @@ final class AmqpOutboxPublisherTest extends TestCase
         $publisher = $this->createPublisher();
 
         $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
-        $envelope = new Envelope($message, [new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001'))]);
+        $envelope = new Envelope($message, [
+            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
+        ]);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/missing MessageNameStamp/');
