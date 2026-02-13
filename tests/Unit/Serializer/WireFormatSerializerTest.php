@@ -67,7 +67,9 @@ final class WireFormatSerializerTest extends TestCase
 
         $encoded = $this->serializer->encode($envelope);
 
-        $this->assertSame('test.message.sent', $encoded['headers']['type']);
+        /** @var array<string, string> $headers */
+        $headers = $encoded['headers'];
+        $this->assertSame('test.message.sent', $headers['type']);
     }
 
     public function testEncodeAddsMessageClassHeader(): void
@@ -76,8 +78,10 @@ final class WireFormatSerializerTest extends TestCase
 
         $encoded = $this->serializer->encode($envelope);
 
-        $this->assertArrayHasKey('X-Message-Class', $encoded['headers']);
-        $this->assertSame(TestMessage::class, $encoded['headers']['X-Message-Class']);
+        /** @var array<string, string> $headers */
+        $headers = $encoded['headers'];
+        $this->assertArrayHasKey('X-Message-Class', $headers);
+        $this->assertSame(TestMessage::class, $headers['X-Message-Class']);
     }
 
     public function testEncodePreservesStampHeaders(): void
@@ -86,14 +90,16 @@ final class WireFormatSerializerTest extends TestCase
 
         $encoded = $this->serializer->encode($envelope);
 
+        /** @var array<string, string> $headers */
+        $headers = $encoded['headers'];
         $this->assertArrayHasKey(
-            'X-Message-Stamp-' . MessageIdStamp::class,
-            $encoded['headers'],
+            'X-Message-Stamp-'.MessageIdStamp::class,
+            $headers,
             'MessageIdStamp header should be preserved'
         );
         $this->assertArrayHasKey(
-            'X-Message-Stamp-' . MessageNameStamp::class,
-            $encoded['headers'],
+            'X-Message-Stamp-'.MessageNameStamp::class,
+            $headers,
             'MessageNameStamp header should be preserved'
         );
     }
@@ -170,6 +176,7 @@ final class WireFormatSerializerTest extends TestCase
 
         $encoded = $this->serializer->encode($envelope);
 
+        $this->assertIsString($encoded['body']);
         $body = json_decode($encoded['body'], true);
         $this->assertIsArray($body);
         $this->assertArrayHasKey('name', $body);

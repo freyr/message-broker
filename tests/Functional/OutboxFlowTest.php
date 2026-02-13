@@ -93,8 +93,11 @@ final class OutboxFlowTest extends FunctionalTestCase
         $this->assertArrayHasKey($stampHeaderKey, $headers);
 
         // And: MessageIdStamp contains a valid UUID v7
-        $stampData = json_decode($headers[$stampHeaderKey], true);
+        $stampJson = $headers[$stampHeaderKey];
+        $this->assertIsString($stampJson);
+        $stampData = json_decode($stampJson, true);
         $this->assertIsArray($stampData);
+        /** @var array<int, array{messageId: string}> $stampData */
         $this->assertMatchesRegularExpression(
             '/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
             $stampData[0]['messageId']
