@@ -6,7 +6,7 @@ namespace Freyr\MessageBroker\Tests\Unit\Fixtures;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Outbox\EventBridge\OutboxMessage;
+use Freyr\MessageBroker\Outbox\OutboxMessage;
 use Freyr\MessageBroker\Outbox\MessageName;
 
 /**

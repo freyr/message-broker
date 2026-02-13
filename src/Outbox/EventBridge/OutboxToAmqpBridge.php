@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Outbox\EventBridge;
 
 use Freyr\MessageBroker\Outbox\MessageName;
+use Freyr\MessageBroker\Outbox\OutboxMessage;
 use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface;
 use Freyr\MessageBroker\Stamp\MessageIdStamp;
 use Psr\Container\ContainerInterface;

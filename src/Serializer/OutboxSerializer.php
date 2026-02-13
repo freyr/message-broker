@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Serializer;
 
 use Freyr\MessageBroker\Outbox\MessageName;
 use Freyr\MessageBroker\Stamp\MessageIdStamp;
+use Freyr\MessageBroker\Stamp\MessageNameStamp;
 use RuntimeException;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Transport\Serialization\Serializer;

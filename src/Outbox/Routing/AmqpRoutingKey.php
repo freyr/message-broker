@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Outbox\Routing;
 
 use Attribute;
-use Freyr\MessageBroker\Outbox\ResolvesFromClass;
+use Freyr\MessageBroker\Attribute\ResolvesFromClass;
 
 /**
  * AMQP Routing Key Attribute.

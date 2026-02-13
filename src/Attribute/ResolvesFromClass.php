@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\MessageBroker\Outbox;
+namespace Freyr\MessageBroker\Attribute;
 
 use ReflectionClass;
 
