@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional\Command;
 
-use Freyr\MessageBroker\Command\SetupAmqpTopologyCommand;
+use Freyr\MessageBroker\Amqp\Command\SetupAmqpTopologyCommand;
 use Freyr\MessageBroker\Tests\Functional\FunctionalTestCase;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;

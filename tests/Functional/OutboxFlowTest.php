@@ -17,7 +17,7 @@ use Symfony\Component\Messenger\MessageBusInterface;
  * Tests complete outbox flow:
  * 1. Event dispatched to message bus
  * 2. Event stored in messenger_outbox table
- * 3. OutboxToAmqpBridge processes outbox
+ * 3. OutboxPublishingMiddleware processes outbox
  * 4. Event published to AMQP with correct format
  */
 final class OutboxFlowTest extends FunctionalTestCase
@@ -66,17 +66,17 @@ final class OutboxFlowTest extends FunctionalTestCase
         $this->assertEquals('test.event.sent', $headers['type']);
     }
 
-    public function testOutboxBridgePublishesToAmqp(): void
+    public function testOutboxPublishesToAmqp(): void
     {
         // Given: An event in the outbox
-        $testEvent = new TestEvent(id: Id::new(), name: 'bridge-test-event', timestamp: CarbonImmutable::now());
+        $testEvent = new TestEvent(id: Id::new(), name: 'publish-test-event', timestamp: CarbonImmutable::now());
 
         /** @var MessageBusInterface $messageBus */
         $messageBus = $this->getContainer()
             ->get(MessageBusInterface::class);
         $messageBus->dispatch($testEvent);
 
-        // When: OutboxToAmqpBridge processes the outbox (with LIMIT to prevent hanging)
+        // When: OutboxPublishingMiddleware processes the outbox (with LIMIT to prevent hanging)
         $this->processOutbox(limit: 1);
 
         // Then: Message is published to AMQP (routing key = semantic name = test.event.sent)
@@ -101,7 +101,7 @@ final class OutboxFlowTest extends FunctionalTestCase
         // And: Body contains event data (no messageId in payload)
         $body = $message['body'];
         $this->assertIsArray($body);
-        $this->assertEquals('bridge-test-event', $body['name']);
+        $this->assertEquals('publish-test-event', $body['name']);
         $this->assertArrayNotHasKey('messageId', $body);
     }
 
@@ -120,7 +120,7 @@ final class OutboxFlowTest extends FunctionalTestCase
             ->get(MessageBusInterface::class);
         $messageBus->dispatch($testEvent);
 
-        // When: Bridge processes and publishes (with LIMIT to prevent hanging)
+        // When: Middleware processes and publishes (with LIMIT to prevent hanging)
         $this->processOutbox(limit: 1);
 
         // Then: Message in AMQP has correct structure (routing key = semantic name = test.order.placed)

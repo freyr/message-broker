@@ -4,7 +4,7 @@
 
 **IMPORTANT** This library is in a very early stage of development! Not production ready!
 
-A Symfony bundle providing reliable event publishing and consumption with transactional guarantees, automatic deduplication, and seamless AMQP integration.
+A Symfony bundle providing reliable event publishing and consumption with transactional guarantees, automatic deduplication, and a transport-agnostic architecture.
 
 ## Features
 
@@ -12,11 +12,11 @@ A Symfony bundle providing reliable event publishing and consumption with transa
 - ✅ **Automatic Deduplication at the Inbox** - Binary UUID v7 primary key prevents duplicate processing
 - ✅ **Typed Message Handlers** - Type-safe event consumption with IDE autocomplete
 - ✅ **Horizontal Scaling** - Multiple workers with database-level SKIP LOCKED
+- ✅ **Transport-Agnostic Core** - Pluggable publisher architecture (AMQP included, SQS/Kafka planned)
 - ✅ **AMQP Topology Management** - Declare exchanges, queues, and bindings from YAML configuration
 
 ## Restrictions
 - **Zero Configuration** - (in progress) Symfony Flex recipe automates installation
-- **AMQP support only** - There is no plan do add Kafka/SQS etc.
 
 ## Quick Start
 
@@ -99,7 +99,7 @@ All events published through the outbox pattern must implement `OutboxEventInter
 
   ```php
   use Freyr\MessageBroker\Outbox\MessageName;
-  use Freyr\MessageBroker\Outbox\EventBridge\OutboxMessage;
+  use Freyr\MessageBroker\Outbox\OutboxMessage;
 
   #[MessageName('order.placed')]
   final class OrderPlaced implements OutboxMessage
@@ -146,11 +146,22 @@ By default, events are published using convention-based routing:
 - **Exchange**: First 2 parts of message name (`order.placed` → `order.placed`)
 - **Routing Key**: Full message name (`order.placed`)
 
-You can override this with attributes:
+You can override this with YAML configuration (preferred) or attributes:
 
+**YAML overrides** (in `config/packages/message_broker.yaml`):
+```yaml
+message_broker:
+    amqp:
+        routing:
+            'order.placed':
+                sender: commerce              # Publish via 'commerce' transport
+                routing_key: commerce.orders   # Custom routing key
+```
+
+**Attribute overrides** (on event class):
 ```php
-use Freyr\MessageBroker\Outbox\Routing\AmqpExchange;
-use Freyr\MessageBroker\Outbox\Routing\AmqpRoutingKey;
+use Freyr\MessageBroker\Amqp\Routing\AmqpExchange;
+use Freyr\MessageBroker\Amqp\Routing\AmqpRoutingKey;
 
 #[MessageName('order.placed')]
 #[AmqpExchange('commerce')]                  // Custom exchange
@@ -160,6 +171,8 @@ final readonly class OrderPlaced
     // ...
 }
 ```
+
+YAML overrides take precedence over attributes.
 
 See [AMQP Routing](docs/amqp-routing.md) for complete documentation.
 
@@ -542,7 +555,7 @@ framework:
         middleware:
           - 'Freyr\MessageBroker\Outbox\MessageIdStampMiddleware'  # Stamps OutboxMessage at dispatch
           - doctrine_transaction  # Priority 0 (starts transaction)
-          - 'Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge'  # Publishes outbox → AMQP
+          - 'Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware'  # Delegates to transport publishers
           - 'Freyr\MessageBroker\Inbox\DeduplicationMiddleware'  # Inbox deduplication (priority -10)
 
     transports:
@@ -665,22 +678,35 @@ services:
     tags:
       - { name: 'messenger.middleware', priority: -10 }
 
-  # AMQP Routing Strategy (default convention-based routing)
-  Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface:
-    class: Freyr\MessageBroker\Outbox\Routing\DefaultAmqpRoutingStrategy
-
   # MessageIdStamp Middleware
   Freyr\MessageBroker\Outbox\MessageIdStampMiddleware:
     tags:
       - { name: 'messenger.middleware' }
 
-  # Outbox Bridge (middleware — publishes outbox events to AMQP via sender locator)
-  Freyr\MessageBroker\Outbox\EventBridge\OutboxToAmqpBridge:
+  # Outbox Publishing Middleware (core — transport-agnostic)
+  # Publisher locator is populated by OutboxPublisherPass compiler pass
+  Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware:
+    arguments:
+      $logger: '@logger'
+    tags:
+      - { name: 'messenger.middleware' }
+
+  # AMQP Routing Strategy (convention-based with YAML overrides)
+  Freyr\MessageBroker\Amqp\Routing\AmqpRoutingStrategyInterface:
+    class: Freyr\MessageBroker\Amqp\Routing\DefaultAmqpRoutingStrategy
+    arguments:
+      $defaultSenderName: 'amqp'
+      $routingOverrides: '%message_broker.amqp.routing_overrides%'
+
+  # AMQP Outbox Publisher (publishes outbox events to RabbitMQ)
+  Freyr\MessageBroker\Amqp\AmqpOutboxPublisher:
     arguments:
       $senderLocator: !service_locator
         amqp: '@messenger.transport.amqp'
-      $routingStrategy: '@Freyr\MessageBroker\Outbox\Routing\AmqpRoutingStrategyInterface'
+      $routingStrategy: '@Freyr\MessageBroker\Amqp\Routing\AmqpRoutingStrategyInterface'
       $logger: '@logger'
+    tags:
+      - { name: 'message_broker.outbox_publisher', transport: 'outbox' }
 
   # Deduplication Store Cleanup Command (optional maintenance)
   Freyr\MessageBroker\Command\DeduplicationStoreCleanup:

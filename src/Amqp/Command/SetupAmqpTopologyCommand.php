@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\MessageBroker\Command;
+namespace Freyr\MessageBroker\Amqp\Command;
 
 use Freyr\MessageBroker\Amqp\AmqpConnectionFactory;
 use Freyr\MessageBroker\Amqp\DefinitionsFormatter;

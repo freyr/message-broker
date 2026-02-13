@@ -26,7 +26,6 @@
         "symfony/config": "^6.4|^7.0",
         "symfony/dependency-injection": "^6.4|^7.0",
         "symfony/http-kernel": "^6.4|^7.0",
-        "symfony/amqp-messenger": "^6.4|^7.0",
         "symfony/doctrine-messenger": "^6.4|^7.0",
         "symfony/serializer": "^6.4|^7.0",
         "symfony/property-access": "^6.4|^7.0",
@@ -34,10 +33,11 @@
         "doctrine/orm": "^3.0",
         "freyr/identity": "^0.4",
         "nesbot/carbon": "^2.0|^3.0",
-        "ext-curl": "*",
-        "ext-amqp": "*"
+        "ext-curl": "*"
     },
     "require-dev": {
+        "ext-amqp": "*",
+        "symfony/amqp-messenger": "^6.4|^7.0",
         "php-amqplib/php-amqplib": "^3.7",
         "phpstan/phpstan": "^2.1",
         "symplify/easy-coding-standard": "^13.0",
@@ -46,6 +46,10 @@
         "symfony/framework-bundle": "^6.4|^7.0",
         "symfony/yaml": "^6.4|^7.0",
         "doctrine/doctrine-bundle": "^2.0"
+    },
+    "suggest": {
+        "ext-amqp": "Required for AMQP transport support",
+        "symfony/amqp-messenger": "Required for AMQP transport support"
     },
     "autoload": {
         "psr-4": {

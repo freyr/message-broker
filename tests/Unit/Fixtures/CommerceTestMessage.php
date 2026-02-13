@@ -6,9 +6,9 @@ namespace Freyr\MessageBroker\Tests\Unit\Fixtures;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Outbox\EventBridge\OutboxMessage;
+use Freyr\MessageBroker\Amqp\Routing\AmqpExchange;
 use Freyr\MessageBroker\Outbox\MessageName;
-use Freyr\MessageBroker\Outbox\Routing\AmqpExchange;
+use Freyr\MessageBroker\Outbox\OutboxMessage;
 
 /**
  * Test message routed to a custom AMQP exchange via #[AmqpExchange].

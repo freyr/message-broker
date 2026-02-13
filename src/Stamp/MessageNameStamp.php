@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\MessageBroker\Serializer;
+namespace Freyr\MessageBroker\Stamp;
 
 use Symfony\Component\Messenger\Stamp\StampInterface;
 

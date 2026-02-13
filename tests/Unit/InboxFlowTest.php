@@ -18,7 +18,7 @@ use Symfony\Component\Messenger\Stamp\ReceivedStamp;
  *
  * Tests the full message flow using the middleware chain:
  * 1. Dispatch: MessageIdStampMiddleware stamps → SendMessageMiddleware routes to outbox
- * 2. Outbox consumption: Re-dispatch with ReceivedStamp('outbox') → OutboxToAmqpBridge
+ * 2. Outbox consumption: Re-dispatch with ReceivedStamp('outbox') → OutboxPublishingMiddleware
  *    publishes to AMQP sender (short-circuit)
  * 3. AMQP consumption: InboxSerializer translates semantic name → FQN
  *    → DeduplicationMiddleware checks MessageIdStamp → Handler
@@ -69,14 +69,14 @@ final class InboxFlowTest extends TestCase
         $this->assertNotNull($dispatchStamp, 'Outbox envelope should have MessageIdStamp from dispatch');
 
         // Step 2: Simulate outbox consumption — re-dispatch with ReceivedStamp
-        // The bridge middleware intercepts and publishes to AMQP sender
+        // The publishing middleware intercepts and publishes to AMQP sender
         $outboxEnvelopes = $context->outboxTransport->get();
         foreach ($outboxEnvelopes as $envelope) {
             $context->bus->dispatch($envelope->with(new ReceivedStamp('outbox')));
         }
 
         // Then: Message should be in AMQP publish transport
-        $this->assertEquals(1, $context->amqpPublishTransport->count(), 'Bridge should publish to AMQP');
+        $this->assertEquals(1, $context->amqpPublishTransport->count(), 'Publisher should publish to AMQP');
         $this->assertEquals(0, $handlerInvocationCount, 'Handler should not be invoked yet');
 
         // Verify AMQP message has the SAME MessageIdStamp
@@ -142,7 +142,7 @@ final class InboxFlowTest extends TestCase
         // Step 1: Publish to outbox
         $context->bus->dispatch($message);
 
-        // Step 2: Bridge publishes to AMQP via middleware chain
+        // Step 2: Middleware publishes to AMQP via publisher
         $outboxEnvelopes = $context->outboxTransport->get();
         foreach ($outboxEnvelopes as $envelope) {
             $context->bus->dispatch($envelope->with(new ReceivedStamp('outbox')));
@@ -201,7 +201,7 @@ final class InboxFlowTest extends TestCase
         // When: Message published to outbox
         $context->bus->dispatch($message);
 
-        // And: Bridge publishes to AMQP via middleware chain
+        // And: Middleware publishes to AMQP via publisher
         $outboxEnvelopes = $context->outboxTransport->get();
         foreach ($outboxEnvelopes as $envelope) {
             $context->bus->dispatch($envelope->with(new ReceivedStamp('outbox')));

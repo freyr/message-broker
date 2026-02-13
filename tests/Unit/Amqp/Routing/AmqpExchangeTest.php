@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Freyr\MessageBroker\Tests\Unit\Routing;
+namespace Freyr\MessageBroker\Tests\Unit\Amqp\Routing;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
-use Freyr\MessageBroker\Outbox\Routing\AmqpExchange;
+use Freyr\MessageBroker\Amqp\Routing\AmqpExchange;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\CommerceTestMessage;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\TestMessage;
 use PHPUnit\Framework\TestCase;
@@ -20,7 +20,7 @@ final class AmqpExchangeTest extends TestCase
     {
         $message = new CommerceTestMessage(orderId: Id::new(), amount: 99.99, placedAt: CarbonImmutable::now());
 
-        $this->assertEquals('commerce', AmqpExchange::fromClass($message));
+        $this->assertSame('commerce', AmqpExchange::fromClass($message));
     }
 
     public function testReturnsNullWhenAttributeAbsent(): void
@@ -36,7 +36,7 @@ final class AmqpExchangeTest extends TestCase
         $second = new CommerceTestMessage(orderId: Id::new(), amount: 20.00, placedAt: CarbonImmutable::now());
 
         // Both instances of the same class should resolve identically (cached)
-        $this->assertEquals(AmqpExchange::fromClass($first), AmqpExchange::fromClass($second));
-        $this->assertEquals('commerce', AmqpExchange::fromClass($second));
+        $this->assertSame(AmqpExchange::fromClass($first), AmqpExchange::fromClass($second));
+        $this->assertSame('commerce', AmqpExchange::fromClass($second));
     }
 }

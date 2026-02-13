@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Serializer;
 
 use Freyr\MessageBroker\Stamp\MessageIdStamp;
+use Freyr\MessageBroker\Stamp\MessageNameStamp;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\MessageDecodingFailedException;
 use Symfony\Component\Messenger\Transport\Serialization\Serializer;
