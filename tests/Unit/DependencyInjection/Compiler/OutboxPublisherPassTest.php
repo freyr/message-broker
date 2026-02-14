@@ -2,17 +2,16 @@
 
 declare(strict_types=1);
 
-namespace Freyr\MessageBroker\Tests\Unit\Outbox;
+namespace Freyr\MessageBroker\Tests\Unit\DependencyInjection\Compiler;
 
-use Freyr\MessageBroker\Contracts\OutboxPublisherInterface;
 use Freyr\MessageBroker\DependencyInjection\Compiler\OutboxPublisherPass;
 use Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware;
+use Freyr\MessageBroker\Tests\Unit\Fixtures\TestPublisher;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Reference;
-use Symfony\Component\Messenger\Envelope;
 
 /**
  * Unit test for OutboxPublisherPass compiler pass.
@@ -139,12 +138,4 @@ final class OutboxPublisherPassTest extends TestCase
         $locatorArg = $middlewareDef->getArgument('$publisherLocator');
         $this->assertInstanceOf(Reference::class, $locatorArg);
     }
-}
-
-/**
- * @internal Test double implementing OutboxPublisherInterface
- */
-final class TestPublisher implements OutboxPublisherInterface
-{
-    public function publish(Envelope $envelope): void {}
 }

@@ -81,19 +81,18 @@ final class OutboxFlowTest extends FunctionalTestCase
 
         // Then: Message is published to AMQP (routing key = semantic name = test.event.sent)
         // Messages are routed to queue bound with matching routing key
-        $message = $this->assertMessageInQueue('test.event.sent');
+        $message = $this->assertMessageInQueue(self::TEST_EVENT_TYPE);
 
         // And: Message has correct type header (semantic name)
         /** @var array<string, mixed> $headers */
         $headers = $message['headers']->getNativeData();
-        $this->assertEquals('test.event.sent', $headers['type']);
+        $this->assertEquals(self::TEST_EVENT_TYPE, $headers['type']);
 
         // And: Message has native MessageIdStamp header
-        $stampHeaderKey = 'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp';
-        $this->assertArrayHasKey($stampHeaderKey, $headers);
+        $this->assertArrayHasKey(self::MESSAGE_ID_STAMP_HEADER, $headers);
 
         // And: MessageIdStamp contains a valid UUID v7
-        $stampJson = $headers[$stampHeaderKey];
+        $stampJson = $headers[self::MESSAGE_ID_STAMP_HEADER];
         $this->assertIsString($stampJson);
         $stampData = json_decode($stampJson, true);
         $this->assertIsArray($stampData);
@@ -130,12 +129,12 @@ final class OutboxFlowTest extends FunctionalTestCase
 
         // Then: Message in AMQP has correct structure (routing key = semantic name = test.order.placed)
         // With default exchange, message is routed to queue with same name as routing key
-        $message = $this->assertMessageInQueue('test.order.placed');
+        $message = $this->assertMessageInQueue(self::ORDER_PLACED_TYPE);
 
         // Semantic name in type header
         /** @var array<string, mixed> $headers */
         $headers = $message['headers']->getNativeData();
-        $this->assertEquals('test.order.placed', $headers['type']);
+        $this->assertEquals(self::ORDER_PLACED_TYPE, $headers['type']);
 
         // UUIDs are serialised as strings
         $body = $message['body'];

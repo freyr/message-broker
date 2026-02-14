@@ -8,7 +8,7 @@ use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Contracts\MessageIdStamp;
 use Freyr\MessageBroker\Tests\Unit\Factory\EventBusFactory;
-use Freyr\MessageBroker\Tests\Unit\Fixtures\Consumer\OrderPlacedMessage;
+use Freyr\MessageBroker\Tests\Unit\Fixtures\OrderPlacedMessage;
 use Freyr\MessageBroker\Tests\Unit\Fixtures\TestMessage;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Messenger\Stamp\ReceivedStamp;

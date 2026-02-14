@@ -42,8 +42,8 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
 
         // Publish to AMQP with MessageIdStamp
         $this->publishToAmqp('test_inbox', [
-            'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp' => json_encode([[
+            'type' => self::TEST_EVENT_TYPE,
+            self::MESSAGE_ID_STAMP_HEADER => json_encode([[
                 'messageId' => $messageId,
             ]]),
         ], [
@@ -97,8 +97,8 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
         ThrowingTestEventHandler::throwOnNextInvocation(new \RuntimeException('First attempt fails'));
 
         $this->publishToAmqp('test_inbox', [
-            'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp' => json_encode([[
+            'type' => self::TEST_EVENT_TYPE,
+            self::MESSAGE_ID_STAMP_HEADER => json_encode([[
                 'messageId' => $messageId,
             ]]),
         ], [
@@ -122,8 +122,8 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
 
         // Republish same message (simulating retry)
         $this->publishToAmqp('test_inbox', [
-            'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp' => json_encode([[
+            'type' => self::TEST_EVENT_TYPE,
+            self::MESSAGE_ID_STAMP_HEADER => json_encode([[
                 'messageId' => $messageId,
             ]]),
         ], [
@@ -173,8 +173,8 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
             ThrowingTestEventHandler::throwOnNextInvocation(new \RuntimeException("Attempt {$attempt} fails"));
 
             $this->publishToAmqp('test_inbox', [
-                'type' => 'test.event.sent',
-                'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp' => json_encode([[
+                'type' => self::TEST_EVENT_TYPE,
+                self::MESSAGE_ID_STAMP_HEADER => json_encode([[
                     'messageId' => $messageId,
                 ]]),
             ], [
@@ -196,8 +196,8 @@ final class InboxTransactionRollbackTest extends FunctionalTestCase
 
         // Attempt 4: Success
         $this->publishToAmqp('test_inbox', [
-            'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp' => json_encode([[
+            'type' => self::TEST_EVENT_TYPE,
+            self::MESSAGE_ID_STAMP_HEADER => json_encode([[
                 'messageId' => $messageId,
             ]]),
         ], [

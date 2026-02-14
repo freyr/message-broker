@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\MessageBroker\Tests\Unit;
+namespace Freyr\MessageBroker\Tests\Unit\Outbox;
 
 use Carbon\CarbonImmutable;
 use Freyr\Identity\Id;

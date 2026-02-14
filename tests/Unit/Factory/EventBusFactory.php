@@ -216,32 +216,3 @@ final class EventBusFactory
         );
     }
 }
-
-/**
- * Test context containing MessageBus and related components for assertions.
- */
-final readonly class EventBusTestContext
-{
-    public function __construct(
-        public MessageBusInterface $bus,
-        public InMemoryTransport $outboxTransport,
-        public InMemoryTransport $amqpTransport,
-        public WireFormatSerializer $wireFormatSerializer,
-        public InboxSerializer $inboxSerializer,
-    ) {}
-}
-
-/**
- * Test context for inbox flow testing with deduplication.
- */
-final readonly class InboxFlowTestContext
-{
-    public function __construct(
-        public MessageBusInterface $bus,
-        public InMemoryTransport $outboxTransport,
-        public InMemoryOutboxPublisher $outboxPublisher,
-        public WireFormatSerializer $wireFormatSerializer,
-        public InboxSerializer $inboxSerializer,
-        public DeduplicationInMemoryStore $deduplicationStore,
-    ) {}
-}

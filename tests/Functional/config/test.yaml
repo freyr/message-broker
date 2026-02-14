@@ -114,57 +114,20 @@ services:
         autoconfigure: false
         public: false
 
-    # Use NullLogger to suppress logging output during tests
+    # Test-specific overrides (bundle services loaded via FreyrMessageBrokerExtension)
+
+    # Suppress logging output during tests
     logger:
         class: Psr\Log\NullLogger
         public: true
 
-    # Doctrine Integration
-    Freyr\MessageBroker\Doctrine\Type\IdType:
-        tags:
-            - { name: 'doctrine.dbal.types', type: 'id_binary' }
-
-    # Auto-register all Normalizers
-    Freyr\MessageBroker\Serializer\Normalizer\:
-        resource: '../../../src/Serializer/Normalizer/'
-        tags: ['serializer.normalizer']
-
-    # Inbox Serializer
-    Freyr\MessageBroker\Serializer\InboxSerializer:
-        arguments:
-            $serializer: '@serializer'
-            $messageTypes: '%message_broker.inbox.message_types%'
-
-    # Wire Format Serializer (for AMQP publishing transport)
-    Freyr\MessageBroker\Serializer\WireFormatSerializer:
-        arguments:
-            $serializer: '@serializer'
-
-    # Deduplication Store
+    # Make DeduplicationStore public for direct access in tests
     Freyr\MessageBroker\Contracts\DeduplicationStore:
         class: Freyr\MessageBroker\Inbox\DeduplicationDbalStore
         public: true
         arguments:
             $connection: '@doctrine.dbal.default_connection'
             $tableName: '%message_broker.inbox.deduplication_table_name%'
-            $logger: '@logger'
-
-    # Deduplication Middleware
-    Freyr\MessageBroker\Inbox\DeduplicationMiddleware:
-        arguments:
-            $store: '@Freyr\MessageBroker\Contracts\DeduplicationStore'
-        tags:
-            - { name: 'messenger.middleware', priority: -10 }
-
-    # MessageIdStamp Middleware
-    Freyr\MessageBroker\Outbox\MessageIdStampMiddleware: ~
-
-    # MessageNameStamp Middleware
-    Freyr\MessageBroker\Outbox\MessageNameStampMiddleware: ~
-
-    # Outbox Publishing Middleware (core — transport-agnostic)
-    Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware:
-        arguments:
             $logger: '@logger'
 
     # Test Outbox Publisher (publishes to AMQP for functional tests)

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Doctrine\DBAL\Connection;
-use Freyr\Identity\Id;
+use Freyr\MessageBroker\Contracts\MessageIdStamp;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
@@ -29,9 +29,14 @@ use Symfony\Component\Messenger\Worker;
  */
 abstract class FunctionalTestCase extends KernelTestCase
 {
+    protected const MESSAGE_ID_STAMP_HEADER = 'X-Message-Stamp-' . MessageIdStamp::class;
+    protected const TEST_EVENT_TYPE = 'test.event.sent';
+    protected const ORDER_PLACED_TYPE = 'test.order.placed';
+
     // PERFORMANCE: Static connection pooling to avoid overhead (saves ~800ms-1.7s for 20 tests)
     private static ?AMQPStreamConnection $amqpConnection = null;
     private static bool $schemaInitialized = false;
+    private static bool $amqpInfrastructureReady = false;
 
     protected static function getKernelClass(): string
     {
@@ -55,7 +60,7 @@ abstract class FunctionalTestCase extends KernelTestCase
         self::bootKernel();
 
         $this->cleanDatabase();
-        $this->setupAmqp();
+        $this->purgeAmqpQueues();
         $this->resetHandlers();
     }
 
@@ -172,26 +177,10 @@ abstract class FunctionalTestCase extends KernelTestCase
             );
         }
 
-        // Truncate tables (order matters due to foreign keys if any)
-        // All tables may not exist yet - check before truncating
-        $connection->executeStatement('SET FOREIGN_KEY_CHECKS=0');
-
-        $schemaManager = $connection->createSchemaManager();
-
-        // Application-managed deduplication table
-        if ($schemaManager->tablesExist(['message_broker_deduplication'])) {
-            $connection->executeStatement('TRUNCATE TABLE message_broker_deduplication');
-        }
-
-        // Auto-managed messenger tables (created by Symfony on first use)
-        if ($schemaManager->tablesExist(['messenger_outbox'])) {
-            $connection->executeStatement('TRUNCATE TABLE messenger_outbox');
-        }
-        if ($schemaManager->tablesExist(['messenger_messages'])) {
-            $connection->executeStatement('TRUNCATE TABLE messenger_messages');
-        }
-
-        $connection->executeStatement('SET FOREIGN_KEY_CHECKS=1');
+        // Tables are guaranteed to exist — created by schema.sql in setUpBeforeClass()
+        $connection->executeStatement('TRUNCATE TABLE message_broker_deduplication');
+        $connection->executeStatement('TRUNCATE TABLE messenger_outbox');
+        $connection->executeStatement('TRUNCATE TABLE messenger_messages');
     }
 
     protected static function getAmqpConnection(): AMQPStreamConnection
@@ -217,39 +206,48 @@ abstract class FunctionalTestCase extends KernelTestCase
         return self::$amqpConnection;
     }
 
-    private function setupAmqp(): void
+    private static function ensureAmqpInfrastructure(): void
+    {
+        if (self::$amqpInfrastructureReady) {
+            return;
+        }
+
+        $channel = self::getAmqpConnection()->channel();
+
+        // Declare exchange (idempotent)
+        $channel->exchange_declare('test_events', 'topic', false, true, false);
+
+        // Define queues with their routing keys
+        $queueBindings = [
+            'test.event.sent' => ['test.event.sent'],
+            'test.order.placed' => ['test.order.placed'],
+            'test_inbox' => [],
+            'failed' => [],
+        ];
+
+        foreach ($queueBindings as $queueName => $routingKeys) {
+            $channel->queue_declare($queueName, false, true, false, false);
+            foreach ($routingKeys as $routingKey) {
+                $channel->queue_bind($queueName, 'test_events', $routingKey);
+            }
+        }
+
+        $channel->close();
+        self::$amqpInfrastructureReady = true;
+    }
+
+    private function purgeAmqpQueues(): void
     {
         try {
+            self::ensureAmqpInfrastructure();
+
             $channel = self::getAmqpConnection()->channel();
-
-            // Declare exchange
-            $channel->exchange_declare('test_events', 'topic', false, true, false);
-
-            // Define queues with their routing keys
-            $queueBindings = [
-                'test.event.sent' => ['test.event.sent'],      // TestEvent queue
-                'test.order.placed' => ['test.order.placed'],  // OrderPlaced queue
-                'test_inbox' => [],                            // Inbox test queue (no binding needed)
-                'failed' => [],                                // Failed messages queue (no binding needed)
-            ];
-
-            foreach ($queueBindings as $queueName => $routingKeys) {
-                // Declare queue
-                $channel->queue_declare($queueName, false, true, false, false);
-
-                // Bind to exchange with routing keys
-                foreach ($routingKeys as $routingKey) {
-                    $channel->queue_bind($queueName, 'test_events', $routingKey);
-                }
-
-                // Purge existing messages
-                $channel->queue_purge($queueName);
+            foreach (['test.event.sent', 'test.order.placed', 'test_inbox', 'failed'] as $queue) {
+                $channel->queue_purge($queue);
             }
-
             $channel->close();
         } catch (\Exception $e) {
             // CRITICAL: Inbox tests MUST fail if AMQP is unavailable
-            // Prevents false positives when RabbitMQ is down
             if (str_contains(static::class, 'Inbox')) {
                 throw new \RuntimeException(
                     'AMQP setup failed for inbox test. RabbitMQ must be running: '.$e->getMessage(),
@@ -258,7 +256,6 @@ abstract class FunctionalTestCase extends KernelTestCase
             }
 
             // Outbox tests can continue without AMQP (they only test database storage)
-            // Log the warning but don't fail
             error_log('AMQP unavailable for outbox test: '.$e->getMessage());
         }
     }
@@ -313,8 +310,6 @@ abstract class FunctionalTestCase extends KernelTestCase
     {
         $channel = self::getAmqpConnection()->channel();
 
-        $channel->queue_declare($queue, false, true, false, false);
-
         $message = new AMQPMessage(
             (string) json_encode($body),
             [
@@ -326,67 +321,6 @@ abstract class FunctionalTestCase extends KernelTestCase
         $channel->basic_publish($message, '', $queue);
 
         $channel->close();
-    }
-
-    /**
-     * Publish a TestEvent to AMQP inbox queue with proper headers.
-     *
-     * @param Fixtures\TestEvent $event The event to publish
-     * @param string|null $messageId Optional message ID (auto-generated if null)
-     * @param string $queue Queue name (default: test_inbox)
-     *
-     * @return string The message ID (for assertions)
-     */
-    protected function publishTestEvent(
-        Fixtures\TestEvent $event,
-        ?string $messageId = null,
-        string $queue = 'test_inbox',
-    ): string {
-        $messageId = $messageId ?? Id::new()->__toString();
-
-        $this->publishToAmqp($queue, [
-            'type' => 'test.event.sent',
-            'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp' => json_encode([[
-                'messageId' => $messageId,
-            ]]),
-        ], [
-            'id' => $event->id->__toString(),
-            'name' => $event->name,
-            'timestamp' => $event->timestamp->toIso8601String(),
-        ]);
-
-        return $messageId;
-    }
-
-    /**
-     * Publish an OrderPlaced event to AMQP queue with proper headers.
-     *
-     * @param Fixtures\OrderPlaced $event The event to publish
-     * @param string|null $messageId Optional message ID (auto-generated if null)
-     * @param string $queue Queue name (default: test.order.placed)
-     *
-     * @return string The message ID (for assertions)
-     */
-    protected function publishOrderPlacedEvent(
-        Fixtures\OrderPlaced $event,
-        ?string $messageId = null,
-        string $queue = 'test.order.placed',
-    ): string {
-        $messageId = $messageId ?? Id::new()->__toString();
-
-        $this->publishToAmqp($queue, [
-            'type' => 'test.order.placed',
-            'X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp' => json_encode([[
-                'messageId' => $messageId,
-            ]]),
-        ], [
-            'orderId' => $event->orderId->__toString(),
-            'customerId' => $event->customerId->__toString(),
-            'totalAmount' => $event->totalAmount,
-            'placedAt' => $event->placedAt->toIso8601String(),
-        ]);
-
-        return $messageId;
     }
 
     protected function consumeFromInbox(int $limit = 1): void
@@ -467,13 +401,13 @@ abstract class FunctionalTestCase extends KernelTestCase
         $connection = $this->getContainer()
             ->get('doctrine.dbal.default_connection');
 
-        // Convert UUID string to uppercase hex (no dashes) for binary comparison
-        $messageIdHex = strtoupper(str_replace('-', '', $messageId));
+        $messageIdBinary = hex2bin(str_replace('-', '', $messageId));
 
         /** @var numeric-string $count */
         $count = $connection->fetchOne(
-            'SELECT COUNT(*) FROM message_broker_deduplication WHERE HEX(message_id) = ?',
-            [$messageIdHex]
+            'SELECT COUNT(*) FROM message_broker_deduplication WHERE message_id = ?',
+            [$messageIdBinary],
+            [\Doctrine\DBAL\ParameterType::BINARY]
         );
 
         $this->assertGreaterThan(
@@ -506,12 +440,12 @@ abstract class FunctionalTestCase extends KernelTestCase
         $connection = $this->getContainer()
             ->get('doctrine.dbal.default_connection');
 
-        // Convert UUID string to uppercase hex (no dashes) for binary comparison
-        $messageIdHex = strtoupper(str_replace('-', '', $messageId));
+        $messageIdBinary = hex2bin(str_replace('-', '', $messageId));
 
         $result = $connection->fetchOne(
-            'SELECT COUNT(*) FROM message_broker_deduplication WHERE HEX(message_id) = ?',
-            [$messageIdHex]
+            'SELECT COUNT(*) FROM message_broker_deduplication WHERE message_id = ?',
+            [$messageIdBinary],
+            [\Doctrine\DBAL\ParameterType::BINARY]
         );
 
         $this->assertEquals(
@@ -521,112 +455,39 @@ abstract class FunctionalTestCase extends KernelTestCase
         );
     }
 
-    /**
-     * Assert that a message exists in the failed transport.
-     *
-     * @return array{body: array<mixed>, headers: array<mixed>}
-     */
-    protected function assertMessageInFailedTransport(string $messageClass): array
-    {
-        /** @var Connection $connection */
-        $connection = $this->getContainer()
-            ->get('doctrine.dbal.default_connection');
-
-        $result = $connection->fetchAssociative(
-            "SELECT body, headers FROM messenger_messages WHERE queue_name = 'failed' ORDER BY id DESC LIMIT 1"
-        );
-
-        $this->assertIsArray($result, 'Expected message in failed transport, but failed transport is empty');
-
-        $headersRaw = $result['headers'];
-        $this->assertIsString($headersRaw);
-        $headers = json_decode($headersRaw, true);
-        $this->assertIsArray($headers);
-        $this->assertArrayHasKey('X-Message-Class', $headers);
-
-        $xMessageClass = $headers['X-Message-Class'];
-        $this->assertIsArray($xMessageClass);
-        $this->assertEquals($messageClass, $xMessageClass[0]);
-
-        $bodyRaw = $result['body'];
-        $this->assertIsString($bodyRaw);
-        $body = json_decode($bodyRaw, true);
-        $this->assertIsArray($body);
-
-        return [
-            'body' => $body,
-            'headers' => $headers,
-        ];
-    }
-
-    /**
-     * Allowed tables for getTableRowCount() to prevent SQL injection.
-     */
-    private const ALLOWED_TABLES = ['message_broker_deduplication', 'messenger_outbox', 'messenger_messages'];
 
     /**
      * Get row count for a table (helper for quick assertions).
-     *
-     * Returns 0 if table doesn't exist (handles auto-managed tables that may not be created yet).
      */
     protected function getTableRowCount(string $table): int
     {
-        if (!in_array($table, self::ALLOWED_TABLES, strict: true)) {
-            throw new \InvalidArgumentException(sprintf(
-                'Invalid table name: "%s". Allowed tables: %s',
-                $table,
-                implode(', ', self::ALLOWED_TABLES)
-            ));
-        }
-
         /** @var Connection $connection */
         $connection = $this->getContainer()
             ->get('doctrine.dbal.default_connection');
 
-        // Check if table exists first (auto-managed tables may not be created yet)
-        $schemaManager = $connection->createSchemaManager();
-        if (!$schemaManager->tablesExist([$table])) {
-            return 0;
-        }
-
         /** @var numeric-string $count */
-        $count = $connection->fetchOne("SELECT COUNT(*) FROM {$table}");
+        $count = $connection->fetchOne(
+            sprintf('SELECT COUNT(*) FROM %s', $connection->quoteIdentifier($table))
+        );
 
         return (int) $count;
     }
 
     /**
-     * Publish a malformed AMQP message for testing error handling.
-     *
-     * @param array<string> $options Options: 'missingType', 'missingMessageId', 'invalidUuid', 'invalidJson'
+     * Publish an AMQP message with an invalid UUID in the MessageIdStamp header.
      */
-    protected function publishMalformedAmqpMessage(string $queue, array $options = []): void
+    protected function publishMalformedAmqpMessage(string $queue): void
     {
         $channel = self::getAmqpConnection()->channel();
 
-        $headers = [];
+        $headers = [
+            'type' => self::TEST_EVENT_TYPE,
+            self::MESSAGE_ID_STAMP_HEADER => json_encode([[
+                'messageId' => 'not-a-uuid',
+            ]]),
+        ];
+
         $body = '{"id": "01234567-89ab-cdef-0123-456789abcdef", "name": "test", "timestamp": "2026-01-30T12:00:00+00:00"}';
-
-        // Apply malformation options
-        if (!in_array('missingType', $options, true)) {
-            $headers['type'] = 'test.event.sent';
-        }
-
-        if (!in_array('missingMessageId', $options, true)) {
-            if (in_array('invalidUuid', $options, true)) {
-                $headers['X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp'] = json_encode([[
-                    'messageId' => 'not-a-uuid',
-                ]]);
-            } else {
-                $headers['X-Message-Stamp-Freyr\MessageBroker\Contracts\MessageIdStamp'] = json_encode([[
-                    'messageId' => '01234567-89ab-cdef-0123-456789abcdef',
-                ]]);
-            }
-        }
-
-        if (in_array('invalidJson', $options, true)) {
-            $body = '{invalid json';
-        }
 
         $message = new AMQPMessage($body, [
             'content_type' => 'application/json',
