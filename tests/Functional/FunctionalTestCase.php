@@ -29,7 +29,7 @@ use Symfony\Component\Messenger\Worker;
  */
 abstract class FunctionalTestCase extends KernelTestCase
 {
-    protected const MESSAGE_ID_STAMP_HEADER = 'X-Message-Stamp-' . MessageIdStamp::class;
+    protected const MESSAGE_ID_STAMP_HEADER = 'X-Message-Stamp-'.MessageIdStamp::class;
     protected const TEST_EVENT_TYPE = 'test.event.sent';
     protected const ORDER_PLACED_TYPE = 'test.order.placed';
 
@@ -455,7 +455,6 @@ abstract class FunctionalTestCase extends KernelTestCase
         );
     }
 
-
     /**
      * Get row count for a table (helper for quick assertions).
      */
@@ -466,9 +465,7 @@ abstract class FunctionalTestCase extends KernelTestCase
             ->get('doctrine.dbal.default_connection');
 
         /** @var numeric-string $count */
-        $count = $connection->fetchOne(
-            sprintf('SELECT COUNT(*) FROM %s', $connection->quoteIdentifier($table))
-        );
+        $count = $connection->fetchOne(sprintf('SELECT COUNT(*) FROM %s', $connection->quoteIdentifier($table)));
 
         return (int) $count;
     }

@@ -23,6 +23,7 @@ final class DeduplicationStoreCleanupTest extends FunctionalTestCase
     {
         parent::setUp();
 
+        self::assertNotNull(self::$kernel);
         $application = new Application(self::$kernel);
         $command = $application->find('message-broker:deduplication-cleanup');
         $this->commandTester = new CommandTester($command);
@@ -31,7 +32,8 @@ final class DeduplicationStoreCleanupTest extends FunctionalTestCase
     public function testRemovesOldRecordsAndPreservesRecentOnes(): void
     {
         /** @var Connection $connection */
-        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+        $connection = $this->getContainer()
+            ->get('doctrine.dbal.default_connection');
 
         // Given: Two old records (31 days ago) and one recent record (1 day ago)
         $oldDate = (new \DateTimeImmutable('-31 days'))->format('Y-m-d H:i:s');
@@ -40,26 +42,40 @@ final class DeduplicationStoreCleanupTest extends FunctionalTestCase
         $connection->executeStatement(
             'INSERT INTO message_broker_deduplication (message_id, message_name, processed_at) VALUES (?, ?, ?)',
             [hex2bin('0195711a5bbb7000800000000000aa01'), 'old.event.one', $oldDate],
-            [\Doctrine\DBAL\ParameterType::BINARY, \Doctrine\DBAL\ParameterType::STRING, \Doctrine\DBAL\ParameterType::STRING]
+            [
+                \Doctrine\DBAL\ParameterType::BINARY,
+                \Doctrine\DBAL\ParameterType::STRING,
+                \Doctrine\DBAL\ParameterType::STRING,
+            ]
         );
 
         $connection->executeStatement(
             'INSERT INTO message_broker_deduplication (message_id, message_name, processed_at) VALUES (?, ?, ?)',
             [hex2bin('0195711a5bbb7000800000000000aa02'), 'old.event.two', $oldDate],
-            [\Doctrine\DBAL\ParameterType::BINARY, \Doctrine\DBAL\ParameterType::STRING, \Doctrine\DBAL\ParameterType::STRING]
+            [
+                \Doctrine\DBAL\ParameterType::BINARY,
+                \Doctrine\DBAL\ParameterType::STRING,
+                \Doctrine\DBAL\ParameterType::STRING,
+            ]
         );
 
         $connection->executeStatement(
             'INSERT INTO message_broker_deduplication (message_id, message_name, processed_at) VALUES (?, ?, ?)',
             [hex2bin('0195711a5bbb7000800000000000aa03'), 'recent.event', $recentDate],
-            [\Doctrine\DBAL\ParameterType::BINARY, \Doctrine\DBAL\ParameterType::STRING, \Doctrine\DBAL\ParameterType::STRING]
+            [
+                \Doctrine\DBAL\ParameterType::BINARY,
+                \Doctrine\DBAL\ParameterType::STRING,
+                \Doctrine\DBAL\ParameterType::STRING,
+            ]
         );
 
         // Sanity check: 3 records exist
         $this->assertEquals(3, $this->getDeduplicationEntryCount());
 
         // When: Run cleanup with default 30 days
-        $exitCode = $this->commandTester->execute(['--days' => 30]);
+        $exitCode = $this->commandTester->execute([
+            '--days' => 30,
+        ]);
 
         // Then: Command succeeds
         $this->assertSame(Command::SUCCESS, $exitCode);
@@ -77,7 +93,9 @@ final class DeduplicationStoreCleanupTest extends FunctionalTestCase
         $this->assertEquals(0, $this->getDeduplicationEntryCount());
 
         // When: Run cleanup
-        $exitCode = $this->commandTester->execute(['--days' => 30]);
+        $exitCode = $this->commandTester->execute([
+            '--days' => 30,
+        ]);
 
         // Then: Command succeeds
         $this->assertSame(Command::SUCCESS, $exitCode);
@@ -89,7 +107,8 @@ final class DeduplicationStoreCleanupTest extends FunctionalTestCase
     public function testCustomDaysOption(): void
     {
         /** @var Connection $connection */
-        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+        $connection = $this->getContainer()
+            ->get('doctrine.dbal.default_connection');
 
         // Given: A record from 3 days ago
         $threeDaysAgo = (new \DateTimeImmutable('-3 days'))->format('Y-m-d H:i:s');
@@ -97,17 +116,25 @@ final class DeduplicationStoreCleanupTest extends FunctionalTestCase
         $connection->executeStatement(
             'INSERT INTO message_broker_deduplication (message_id, message_name, processed_at) VALUES (?, ?, ?)',
             [hex2bin('0195711a5bbb7000800000000000bb01'), 'three.day.old', $threeDaysAgo],
-            [\Doctrine\DBAL\ParameterType::BINARY, \Doctrine\DBAL\ParameterType::STRING, \Doctrine\DBAL\ParameterType::STRING]
+            [
+                \Doctrine\DBAL\ParameterType::BINARY,
+                \Doctrine\DBAL\ParameterType::STRING,
+                \Doctrine\DBAL\ParameterType::STRING,
+            ]
         );
 
         // When: Run cleanup with --days=7 (record is newer than 7 days)
-        $this->commandTester->execute(['--days' => 7]);
+        $this->commandTester->execute([
+            '--days' => 7,
+        ]);
 
         // Then: Record is preserved (only 3 days old, threshold is 7)
         $this->assertEquals(1, $this->getDeduplicationEntryCount());
 
         // When: Run cleanup with --days=2 (record is older than 2 days)
-        $this->commandTester->execute(['--days' => 2]);
+        $this->commandTester->execute([
+            '--days' => 2,
+        ]);
 
         // Then: Record is deleted
         $this->assertEquals(0, $this->getDeduplicationEntryCount());

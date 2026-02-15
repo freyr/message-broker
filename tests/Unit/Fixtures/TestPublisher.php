@@ -8,7 +8,7 @@ use Freyr\MessageBroker\Contracts\OutboxPublisherInterface;
 use Symfony\Component\Messenger\Envelope;
 
 /**
- * @internal Test double implementing OutboxPublisherInterface.
+ * @internal test double implementing OutboxPublisherInterface
  */
 final class TestPublisher implements OutboxPublisherInterface
 {
