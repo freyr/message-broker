@@ -7,26 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-15
+
 ### Changed
+
+- **BREAKING: Package split — AMQP and contracts extracted into separate packages**
+  - Contracts (stamps, interfaces) moved to `freyr/message-broker-contracts` (^0.1)
+  - AMQP bridge, routing strategy, and topology moved to `freyr/message-broker-amqp`
+  - Core package is now transport-agnostic — no direct AMQP dependency
+  - **Migration path**: Add `freyr/message-broker-amqp` to your `composer.json` and update `use` statements from `Freyr\MessageBroker\...` to `Freyr\MessageBroker\Contracts\...` for stamps and interfaces
+
+- **BREAKING: Transport-agnostic outbox architecture**
+  - `OutboxToAmqpBridge` replaced by generic `OutboxPublishingMiddleware` + `OutboxPublisherInterface`
+  - Publishers are collected via `message_broker.outbox_publisher` service tag and `OutboxPublisherPass` compiler pass
+  - Any transport (AMQP, SNS, HTTP, etc.) can be plugged in by implementing `OutboxPublisherInterface`
+
+- **BREAKING: Stamp-first middleware pattern**
+  - `MessageIdStampMiddleware` generates `MessageIdStamp` at dispatch time (previously generated in bridge)
+  - New `MessageNameStampMiddleware` extracts semantic name from `#[MessageName]` at dispatch time
+  - Stamps are now the single source of truth for message metadata — serialisers read stamps instead of reflecting on classes
+
+- **BREAKING: Namespace changes** — the following classes moved to `freyr/message-broker-contracts`:
+  - `Freyr\MessageBroker\Inbox\MessageIdStamp` → `Freyr\MessageBroker\Contracts\MessageIdStamp`
+  - `Freyr\MessageBroker\Inbox\DeduplicationStore` → `Freyr\MessageBroker\Contracts\DeduplicationStore`
+  - `Freyr\MessageBroker\Outbox\EventBridge\OutboxMessage` → `Freyr\MessageBroker\Contracts\OutboxMessage`
+  - `Freyr\MessageBroker\Outbox\MessageName` → `Freyr\MessageBroker\Contracts\MessageName`
+  - `Freyr\MessageBroker\Serializer\MessageNameStamp` → `Freyr\MessageBroker\Contracts\MessageNameStamp`
+
+- **BREAKING: `DeduplicationStore::isDuplicate()` signature change** — accepts `Id` instead of `string` for messageId parameter
+
+- **BREAKING: `OutboxSerializer` replaced by `WireFormatSerializer`**
+  - Reads semantic name from `MessageNameStamp` instead of reflecting on `#[MessageName]` attribute
+  - Cleaner separation: serialiser handles wire format only, metadata extraction is middleware's responsibility
 
 - **BREAKING: Enabled `auto_setup: true` for Doctrine Messenger transports** (outbox, failed)
   - `messenger_outbox` and `messenger_messages` tables are now auto-created by Symfony Messenger
-  - Tables are created automatically on first worker run (first `messenger:consume` command)
   - `migrations/schema.sql` reduced to only `message_broker_deduplication` table
-  - **Migration path for existing installations**: Existing installations must have messenger tables created before upgrading (tables are not dropped, only management changes)
-  - **Benefit**: Eliminates manual migration maintenance, reduces deployment friction, aligns with Symfony Messenger best practices
+  - **Migration path for existing installations**: Tables are not dropped, only management changes
+
+- **BREAKING: PHP requirement lowered from 8.4 to 8.2** — typed constants changed to untyped for compatibility
+- Configurable deduplication table name via `message_broker.inbox.deduplication_table_name` config option
+- `DeduplicationStoreCleanup` command now uses configurable table name
+
+### Added
+
+- `OutboxPublishingMiddleware` — generic middleware that delegates to transport-specific `OutboxPublisherInterface` implementations via service locator
+- `OutboxPublisherPass` compiler pass — collects services tagged with `message_broker.outbox_publisher` into the middleware's service locator
+- `MessageIdStampMiddleware` — stamps `OutboxMessage` envelopes with `MessageIdStamp` at dispatch time
+- `MessageNameStampMiddleware` — stamps `OutboxMessage` envelopes with `MessageNameStamp` at dispatch time
+- `WireFormatSerializer` — wire format serialiser for AMQP publishing (replaces `OutboxSerializer`)
+- Configurable deduplication table name (`deduplication_table_name` in bundle configuration)
+- Comprehensive functional test suite (Outbox flow, Inbox flow, deduplication edge cases, transaction rollback)
+- Phase 1 critical data integrity tests
+- CI pipeline with ECS and PHPStan (level max, 0 errors)
+- Test matrix covering PHP 8.2+ and Symfony 6.4+
+
+### Fixed
+
+- **MessageIdStamp generated at dispatch time** — ensures stable IDs that survive outbox redelivery, fixing deduplication reliability
+- `DeduplicationMiddleware` now `final readonly` with proper logger injection
+- All PHPStan level max errors resolved (119 → 0)
+- ORM entity mapping moved to test directory (not shipped with package)
+- Recipe serialiser class references corrected
 
 ### Removed
 
+- `OutboxToAmqpBridge` — replaced by `OutboxPublishingMiddleware` + `OutboxPublisherInterface`
+- `OutboxSerializer` — replaced by `WireFormatSerializer`
+- `MessageIdStamp`, `DeduplicationStore`, `OutboxMessage`, `MessageName`, `MessageNameStamp` — moved to `freyr/message-broker-contracts`
+- `AmqpRoutingKey`, `AmqpRoutingStrategyInterface`, `DefaultAmqpRoutingStrategy`, `MessengerTransport`, `AmqpExchange` — moved to `freyr/message-broker-amqp`
+- `PropertyPromotionObjectNormalizer` service (redundant)
 - Manual messenger table definitions from `migrations/schema.sql` (now auto-managed by Symfony)
-- Recipe migration no longer creates `messenger_outbox` and `messenger_messages` tables
-
-### Documentation
-
-- Updated `docs/database-schema.md` with table management strategy section
-- Updated `README.md` setup instructions to reflect auto-managed tables
-- Updated `CLAUDE.md` configuration to document auto_setup policy
-- Updated `.github/workflows/tests.yml` with clarifying comment about reduced schema
+- `.idea/` project files from version control
 
 ## [0.2.3] - 2026-01-29
 
@@ -157,8 +209,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Message Serialization - Semantic naming and cross-language compatibility
 - AMQP Routing - Convention-based routing with customization options
 
-[0.2.3]: https://github.com/freyr/message-broker/releases/tag/0.2.3
-[0.2.2]: https://github.com/freyr/message-broker/releases/tag/0.2.2
-[0.2.1]: https://github.com/freyr/message-broker/releases/tag/0.2.1
-[0.2.0]: https://github.com/freyr/message-broker/releases/tag/0.2.0
-[0.1.0]: https://github.com/freyr/message-broker/releases/tag/0.1.0
+[0.3.0]: https://github.com/freyr/message-broker/releases/tag/v0.3.0
+[0.2.3]: https://github.com/freyr/message-broker/releases/tag/v0.2.3
+[0.2.2]: https://github.com/freyr/message-broker/releases/tag/v0.2.2
+[0.2.1]: https://github.com/freyr/message-broker/releases/tag/v0.2.1
+[0.2.0]: https://github.com/freyr/message-broker/releases/tag/v0.2.0
+[0.1.0]: https://github.com/freyr/message-broker/releases/tag/v0.1.0
