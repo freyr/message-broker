@@ -51,7 +51,9 @@ final class SetupDeduplicationCommandTest extends TestCase
                 $processedAt = $table->getColumn('processed_at');
                 $this->assertInstanceOf(DateTimeType::class, $processedAt->getType());
 
-                $this->assertSame(['message_id'], $table->getPrimaryKey()->getColumns());
+                $primaryKey = $table->getPrimaryKey();
+                $this->assertNotNull($primaryKey);
+                $this->assertSame(['message_id'], $primaryKey->getColumns());
                 $this->assertTrue($table->hasIndex('idx_dedup_message_name'));
                 $this->assertTrue($table->hasIndex('idx_dedup_processed_at'));
 
@@ -59,8 +61,10 @@ final class SetupDeduplicationCommandTest extends TestCase
             });
 
         $connection = $this->createMock(Connection::class);
-        $connection->method('createSchemaManager')->willReturn($schemaManager);
-        $connection->method('getDatabasePlatform')->willReturn($platform);
+        $connection->method('createSchemaManager')
+            ->willReturn($schemaManager);
+        $connection->method('getDatabasePlatform')
+            ->willReturn($platform);
 
         $command = new SetupDeduplicationCommand($connection, 'message_broker_deduplication');
         $tester = new CommandTester($command);
@@ -78,7 +82,8 @@ final class SetupDeduplicationCommandTest extends TestCase
             ->willReturn(true);
 
         $connection = $this->createMock(Connection::class);
-        $connection->method('createSchemaManager')->willReturn($schemaManager);
+        $connection->method('createSchemaManager')
+            ->willReturn($schemaManager);
 
         $command = new SetupDeduplicationCommand($connection, 'message_broker_deduplication');
         $tester = new CommandTester($command);
@@ -104,8 +109,10 @@ final class SetupDeduplicationCommandTest extends TestCase
             });
 
         $connection = $this->createMock(Connection::class);
-        $connection->method('createSchemaManager')->willReturn($schemaManager);
-        $connection->method('getDatabasePlatform')->willReturn($platform);
+        $connection->method('createSchemaManager')
+            ->willReturn($schemaManager);
+        $connection->method('getDatabasePlatform')
+            ->willReturn($platform);
 
         $command = new SetupDeduplicationCommand($connection, 'custom_dedup');
         $tester = new CommandTester($command);
@@ -121,7 +128,10 @@ final class SetupDeduplicationCommandTest extends TestCase
 
         $command = new SetupDeduplicationCommand($connection, 'message_broker_deduplication');
         $tester = new CommandTester($command);
-        $tester->execute(['--force' => true, '--migration' => true]);
+        $tester->execute([
+            '--force' => true,
+            '--migration' => true,
+        ]);
 
         $this->assertSame(Command::FAILURE, $tester->getStatusCode());
         $this->assertStringContainsString('mutually exclusive', $tester->getDisplay());
@@ -134,7 +144,9 @@ final class SetupDeduplicationCommandTest extends TestCase
         // No migrations configuration injected (null)
         $command = new SetupDeduplicationCommand($connection, 'message_broker_deduplication');
         $tester = new CommandTester($command);
-        $tester->execute(['--migration' => true]);
+        $tester->execute([
+            '--migration' => true,
+        ]);
 
         $this->assertSame(Command::FAILURE, $tester->getStatusCode());
         $this->assertStringContainsString('Could not determine migrations configuration', $tester->getDisplay());

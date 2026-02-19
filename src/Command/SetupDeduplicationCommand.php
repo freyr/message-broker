@@ -16,7 +16,10 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-#[AsCommand(name: 'message-broker:setup-deduplication', description: 'Create the deduplication table from configuration')]
+#[AsCommand(
+    name: 'message-broker:setup-deduplication',
+    description: 'Create the deduplication table from configuration'
+)]
 final class SetupDeduplicationCommand extends Command
 {
     public function __construct(
@@ -30,7 +33,12 @@ final class SetupDeduplicationCommand extends Command
     protected function configure(): void
     {
         $this->addOption('force', null, InputOption::VALUE_NONE, 'Execute the table creation directly');
-        $this->addOption('dry-run', null, InputOption::VALUE_NONE, 'Show the SQL without executing (default behaviour)');
+        $this->addOption(
+            'dry-run',
+            null,
+            InputOption::VALUE_NONE,
+            'Show the SQL without executing (default behaviour)'
+        );
         $this->addOption('migration', null, InputOption::VALUE_NONE, 'Generate a Doctrine migration file');
     }
 
@@ -76,7 +84,7 @@ final class SetupDeduplicationCommand extends Command
 
         $io->section('SQL statements to create the deduplication table:');
         foreach ($statements as $statement) {
-            $io->text($statement . ';');
+            $io->text($statement.';');
         }
 
         return Command::SUCCESS;
@@ -110,28 +118,34 @@ final class SetupDeduplicationCommand extends Command
     private function executeMigrationMode(SymfonyStyle $io): int
     {
         if (!class_exists(AbstractMigration::class)) {
-            $io->error('The --migration option requires doctrine/doctrine-migrations-bundle. Install it with: composer require doctrine/doctrine-migrations-bundle');
+            $io->error(
+                'The --migration option requires doctrine/doctrine-migrations-bundle. Install it with: composer require doctrine/doctrine-migrations-bundle'
+            );
 
             return Command::FAILURE;
         }
 
         if ($this->migrationsConfiguration === null) {
-            $io->error('Could not determine migrations configuration. Ensure doctrine/doctrine-migrations-bundle is properly configured.');
+            $io->error(
+                'Could not determine migrations configuration. Ensure doctrine/doctrine-migrations-bundle is properly configured.'
+            );
 
             return Command::FAILURE;
         }
 
         $migrationDirectories = $this->migrationsConfiguration->getMigrationDirectories();
         if ($migrationDirectories === []) {
-            $io->error('No migration directories configured. Add migrations_paths to your doctrine_migrations configuration.');
+            $io->error(
+                'No migration directories configured. Add migrations_paths to your doctrine_migrations configuration.'
+            );
 
             return Command::FAILURE;
         }
 
         $namespace = array_key_first($migrationDirectories);
         $migrationsDir = $migrationDirectories[$namespace];
-        $className = 'Version' . date('YmdHis');
-        $filePath = rtrim($migrationsDir, '/') . '/' . $className . '.php';
+        $className = 'Version'.date('YmdHis');
+        $filePath = rtrim($migrationsDir, '/').'/'.$className.'.php';
 
         if (!is_dir($migrationsDir)) {
             mkdir($migrationsDir, 0o755, true);

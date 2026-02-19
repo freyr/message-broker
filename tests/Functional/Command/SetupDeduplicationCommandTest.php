@@ -60,20 +60,25 @@ final class SetupDeduplicationCommandTest extends FunctionalTestCase
     {
         $this->dropDeduplicationTable();
 
-        $exitCode = $this->commandTester->execute(['--force' => true]);
+        $exitCode = $this->commandTester->execute([
+            '--force' => true,
+        ]);
 
         $this->assertSame(Command::SUCCESS, $exitCode);
         $this->assertStringContainsString('created successfully', $this->commandTester->getDisplay());
 
         // Verify table was actually created
-        $schemaManager = $this->getConnection()->createSchemaManager();
+        $schemaManager = $this->getConnection()
+            ->createSchemaManager();
         $this->assertTrue($schemaManager->tablesExist(['message_broker_deduplication']));
     }
 
     public function testForceModeIsIdempotent(): void
     {
         // Table already exists from schema.sql setup
-        $exitCode = $this->commandTester->execute(['--force' => true]);
+        $exitCode = $this->commandTester->execute([
+            '--force' => true,
+        ]);
 
         $this->assertSame(Command::SUCCESS, $exitCode);
         $this->assertStringContainsString('already exists', $this->commandTester->getDisplay());
@@ -81,17 +86,19 @@ final class SetupDeduplicationCommandTest extends FunctionalTestCase
 
     public function testMigrationModeGeneratesFile(): void
     {
-        $exitCode = $this->commandTester->execute(['--migration' => true]);
+        $exitCode = $this->commandTester->execute([
+            '--migration' => true,
+        ]);
 
         $display = $this->commandTester->getDisplay();
-        $this->assertSame(Command::SUCCESS, $exitCode, 'Command failed with output: ' . $display);
+        $this->assertSame(Command::SUCCESS, $exitCode, 'Command failed with output: '.$display);
 
         $display = $this->commandTester->getDisplay();
         $this->assertStringContainsString('Migration file generated', $display);
 
         // Extract file path from output (SymfonyStyle wraps with whitespace/borders)
         preg_match('/Migration file generated:\s*(.+\.php)/', $display, $matches);
-        $this->assertNotEmpty($matches[1] ?? '', 'Could not extract file path from: ' . $display);
+        $this->assertNotEmpty($matches[1] ?? '', 'Could not extract file path from: '.$display);
         $filePath = trim($matches[1]);
 
         // Verify file exists and contains correct content
@@ -114,7 +121,10 @@ final class SetupDeduplicationCommandTest extends FunctionalTestCase
 
     public function testConflictingFlagsProduceError(): void
     {
-        $exitCode = $this->commandTester->execute(['--force' => true, '--migration' => true]);
+        $exitCode = $this->commandTester->execute([
+            '--force' => true,
+            '--migration' => true,
+        ]);
 
         $this->assertSame(Command::FAILURE, $exitCode);
         $this->assertStringContainsString('mutually exclusive', $this->commandTester->getDisplay());
@@ -125,7 +135,9 @@ final class SetupDeduplicationCommandTest extends FunctionalTestCase
         $this->dropDeduplicationTable();
 
         // Create table
-        $this->commandTester->execute(['--force' => true]);
+        $this->commandTester->execute([
+            '--force' => true,
+        ]);
         $this->assertSame(Command::SUCCESS, $this->commandTester->getStatusCode());
 
         // Dry-run should report it exists
@@ -136,7 +148,8 @@ final class SetupDeduplicationCommandTest extends FunctionalTestCase
 
     private function dropDeduplicationTable(): void
     {
-        $schemaManager = $this->getConnection()->createSchemaManager();
+        $schemaManager = $this->getConnection()
+            ->createSchemaManager();
         if ($schemaManager->tablesExist(['message_broker_deduplication'])) {
             $schemaManager->dropTable('message_broker_deduplication');
         }
@@ -162,7 +175,8 @@ final class SetupDeduplicationCommandTest extends FunctionalTestCase
     private function getConnection(): Connection
     {
         /** @var Connection $connection */
-        $connection = $this->getContainer()->get('doctrine.dbal.default_connection');
+        $connection = $this->getContainer()
+            ->get('doctrine.dbal.default_connection');
 
         return $connection;
     }
