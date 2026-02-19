@@ -7,7 +7,6 @@ namespace Freyr\MessageBroker\Command;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Types;
-use Doctrine\Migrations\AbstractMigration;
 use Doctrine\Migrations\Configuration\Configuration as MigrationsConfiguration;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -33,12 +32,6 @@ final class SetupDeduplicationCommand extends Command
     protected function configure(): void
     {
         $this->addOption('force', null, InputOption::VALUE_NONE, 'Execute the table creation directly');
-        $this->addOption(
-            'dry-run',
-            null,
-            InputOption::VALUE_NONE,
-            'Show the SQL without executing (default behaviour)'
-        );
         $this->addOption('migration', null, InputOption::VALUE_NONE, 'Generate a Doctrine migration file');
     }
 
@@ -47,12 +40,10 @@ final class SetupDeduplicationCommand extends Command
         $io = new SymfonyStyle($input, $output);
 
         $force = $input->getOption('force');
-        $dryRun = $input->getOption('dry-run');
         $migration = $input->getOption('migration');
 
-        $activeModes = ($force ? 1 : 0) + ($dryRun ? 1 : 0) + ($migration ? 1 : 0);
-        if ($activeModes > 1) {
-            $io->error('The --force, --migration, and --dry-run options are mutually exclusive.');
+        if ($force && $migration) {
+            $io->error('The --force and --migration options are mutually exclusive.');
 
             return Command::FAILURE;
         }
@@ -117,14 +108,6 @@ final class SetupDeduplicationCommand extends Command
 
     private function executeMigrationMode(SymfonyStyle $io): int
     {
-        if (!class_exists(AbstractMigration::class)) {
-            $io->error(
-                'The --migration option requires doctrine/doctrine-migrations-bundle. Install it with: composer require doctrine/doctrine-migrations-bundle'
-            );
-
-            return Command::FAILURE;
-        }
-
         if ($this->migrationsConfiguration === null) {
             $io->error(
                 'Could not determine migrations configuration. Ensure doctrine/doctrine-migrations-bundle is properly configured.'
@@ -151,8 +134,19 @@ final class SetupDeduplicationCommand extends Command
             mkdir($migrationsDir, 0o755, true);
         }
 
+        if (file_exists($filePath)) {
+            $io->error(sprintf('Migration file already exists: %s', $filePath));
+
+            return Command::FAILURE;
+        }
+
         $content = $this->generateMigrationContent($namespace, $className, $this->tableName);
-        file_put_contents($filePath, $content);
+
+        if (file_put_contents($filePath, $content) === false) {
+            $io->error(sprintf('Failed to write migration file: %s', $filePath));
+
+            return Command::FAILURE;
+        }
 
         $io->success(sprintf('Migration file generated: %s', $filePath));
 
@@ -176,7 +170,6 @@ final class SetupDeduplicationCommand extends Command
             'notnull' => true,
         ]);
         $table->setPrimaryKey(['message_id']);
-        $table->addIndex(['message_name'], 'idx_dedup_message_name');
         $table->addIndex(['processed_at'], 'idx_dedup_processed_at');
 
         return $table;
@@ -219,7 +212,6 @@ final class SetupDeduplicationCommand extends Command
                         'notnull' => true,
                     ]);
                     \$table->setPrimaryKey(['message_id']);
-                    \$table->addIndex(['message_name'], 'idx_dedup_message_name');
                     \$table->addIndex(['processed_at'], 'idx_dedup_processed_at');
                 }
 

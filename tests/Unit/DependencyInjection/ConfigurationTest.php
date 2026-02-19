@@ -64,6 +64,33 @@ final class ConfigurationTest extends TestCase
         ]);
     }
 
+    public function testDeduplicationTableNameRejectsSpecialCharacters(): void
+    {
+        $this->expectException(\Symfony\Component\Config\Definition\Exception\InvalidConfigurationException::class);
+        $this->expectExceptionMessage('Table name must contain only alphanumeric characters and underscores');
+
+        $this->processConfig([
+            'inbox' => [
+                'deduplication' => [
+                    'table_name' => "'; DROP TABLE --",
+                ],
+            ],
+        ]);
+    }
+
+    public function testDeduplicationTableNameRejectsHyphens(): void
+    {
+        $this->expectException(\Symfony\Component\Config\Definition\Exception\InvalidConfigurationException::class);
+
+        $this->processConfig([
+            'inbox' => [
+                'deduplication' => [
+                    'table_name' => 'my-table-name',
+                ],
+            ],
+        ]);
+    }
+
     public function testDeduplicationDefaultsAreApplied(): void
     {
         $config = $this->processConfig([

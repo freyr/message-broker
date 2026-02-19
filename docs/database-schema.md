@@ -98,8 +98,7 @@ CREATE TABLE message_broker_deduplication (
     message_id BINARY(16) NOT NULL PRIMARY KEY COMMENT '(DC2Type:id_binary)',
     message_name VARCHAR(255) NOT NULL,
     processed_at DATETIME NOT NULL,
-    INDEX idx_message_name (message_name),
-    INDEX idx_processed_at (processed_at)
+    INDEX idx_dedup_processed_at (processed_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
@@ -107,6 +106,7 @@ CREATE TABLE message_broker_deduplication (
 - Binary UUID v7 from `MessageIdStamp` header
 - `message_name` stores PHP FQN (e.g., 'App\Message\OrderPlaced')
 - Primary key constraint enforces deduplication
+- No index on `message_name` (YAGNI — no queries filter by it; add when needed)
 - Used by `DeduplicationMiddleware`
 - INSERT attempted within transaction (priority -10)
 - Duplicate key violation → skip handler
@@ -184,8 +184,7 @@ final class Version20250103000001 extends AbstractMigration
                 message_id BINARY(16) NOT NULL PRIMARY KEY COMMENT '(DC2Type:id_binary)',
                 message_name VARCHAR(255) NOT NULL,
                 processed_at DATETIME NOT NULL,
-                INDEX idx_message_name (message_name),
-                INDEX idx_processed_at (processed_at)
+                INDEX idx_dedup_processed_at (processed_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
     }
@@ -293,8 +292,7 @@ services:
 
 **message_broker_deduplication:**
 - Primary key on `message_id` - Enforces uniqueness
-- `idx_message_name` - Monitoring by message type
-- `idx_processed_at` - Efficient cleanup
+- `idx_dedup_processed_at` - Efficient cleanup
 
 **messenger_messages:**
 - `idx_queue_name` - Failed message filtering

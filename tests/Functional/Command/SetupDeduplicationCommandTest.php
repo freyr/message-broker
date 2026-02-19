@@ -92,8 +92,6 @@ final class SetupDeduplicationCommandTest extends FunctionalTestCase
 
         $display = $this->commandTester->getDisplay();
         $this->assertSame(Command::SUCCESS, $exitCode, 'Command failed with output: '.$display);
-
-        $display = $this->commandTester->getDisplay();
         $this->assertStringContainsString('Migration file generated', $display);
 
         // Extract file path from output (SymfonyStyle wraps with whitespace/borders)
@@ -110,7 +108,7 @@ final class SetupDeduplicationCommandTest extends FunctionalTestCase
         $this->assertStringContainsString('Types::STRING', $content);
         $this->assertStringContainsString('Types::DATETIME_MUTABLE', $content);
         $this->assertStringContainsString("'message_broker_deduplication'", $content);
-        $this->assertStringContainsString('idx_dedup_message_name', $content);
+        $this->assertStringNotContainsString('idx_dedup_message_name', $content);
         $this->assertStringContainsString('idx_dedup_processed_at', $content);
         $this->assertStringContainsString('(DC2Type:id_binary)', $content);
         $this->assertStringContainsString('dropTable', $content);
@@ -165,8 +163,7 @@ final class SetupDeduplicationCommandTest extends FunctionalTestCase
                     message_id BINARY(16) NOT NULL PRIMARY KEY COMMENT '(DC2Type:id_binary)',
                     message_name VARCHAR(255) NOT NULL,
                     processed_at DATETIME NOT NULL,
-                    INDEX idx_message_name (message_name),
-                    INDEX idx_processed_at (processed_at)
+                    INDEX idx_dedup_processed_at (processed_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ");
         }
