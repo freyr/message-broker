@@ -8,13 +8,13 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\Migrations\AbstractMigration;
+use Doctrine\Migrations\Configuration\Configuration as MigrationsConfiguration;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
-use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 
 #[AsCommand(name: 'message-broker:setup-deduplication', description: 'Create the deduplication table from configuration')]
 final class SetupDeduplicationCommand extends Command
@@ -22,7 +22,7 @@ final class SetupDeduplicationCommand extends Command
     public function __construct(
         private readonly Connection $connection,
         private readonly string $tableName,
-        private readonly ParameterBagInterface $parameterBag,
+        private readonly ?MigrationsConfiguration $migrationsConfiguration = null,
     ) {
         parent::__construct();
     }
@@ -115,16 +115,21 @@ final class SetupDeduplicationCommand extends Command
             return Command::FAILURE;
         }
 
-        if (!$this->parameterBag->has('doctrine_migrations.dir_name') || !$this->parameterBag->has('doctrine_migrations.namespace')) {
+        if ($this->migrationsConfiguration === null) {
             $io->error('Could not determine migrations configuration. Ensure doctrine/doctrine-migrations-bundle is properly configured.');
 
             return Command::FAILURE;
         }
 
-        /** @var string $migrationsDir */
-        $migrationsDir = $this->parameterBag->get('doctrine_migrations.dir_name');
-        /** @var string $namespace */
-        $namespace = $this->parameterBag->get('doctrine_migrations.namespace');
+        $migrationDirectories = $this->migrationsConfiguration->getMigrationDirectories();
+        if ($migrationDirectories === []) {
+            $io->error('No migration directories configured. Add migrations_paths to your doctrine_migrations configuration.');
+
+            return Command::FAILURE;
+        }
+
+        $namespace = array_key_first($migrationDirectories);
+        $migrationsDir = $migrationDirectories[$namespace];
         $className = 'Version' . date('YmdHis');
         $filePath = rtrim($migrationsDir, '/') . '/' . $className . '.php';
 

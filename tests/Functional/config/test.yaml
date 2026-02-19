@@ -102,6 +102,10 @@ doctrine:
                 prefix: 'Freyr\MessageBroker\Tests\Functional\Entity'
                 alias: FreyrMessageBroker
 
+doctrine_migrations:
+    migrations_paths:
+        'DoctrineMigrations': '%kernel.project_dir%/tests/Functional/migrations'
+
 message_broker:
     inbox:
         message_types:

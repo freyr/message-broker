@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Doctrine\Bundle\DoctrineBundle\DoctrineBundle;
+use Doctrine\Bundle\MigrationsBundle\DoctrineMigrationsBundle;
 use Freyr\MessageBroker\FreyrMessageBrokerBundle;
 use Symfony\Bundle\FrameworkBundle\FrameworkBundle;
 use Symfony\Bundle\FrameworkBundle\Kernel\MicroKernelTrait;
@@ -27,7 +28,13 @@ final class TestKernel extends Kernel
     /** @return array<\Symfony\Component\HttpKernel\Bundle\BundleInterface> */
     public function registerBundles(): array
     {
-        return [new FrameworkBundle(), new DoctrineBundle(), new FreyrMessageBrokerBundle()];
+        $bundles = [new FrameworkBundle(), new DoctrineBundle(), new FreyrMessageBrokerBundle()];
+
+        if (class_exists(DoctrineMigrationsBundle::class)) {
+            $bundles[] = new DoctrineMigrationsBundle();
+        }
+
+        return $bundles;
     }
 
     public function getProjectDir(): string

@@ -83,5 +83,5 @@ services:
         arguments:
             $connection: '@doctrine.dbal.default_connection'
             $tableName: '%message_broker.inbox.deduplication.table_name%'
-            $parameterBag: '@parameter_bag'
+            $migrationsConfiguration: '@?doctrine.migrations.configuration'
         tags: ['console.command']

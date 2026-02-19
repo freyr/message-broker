@@ -44,7 +44,11 @@
         "symfony/phpunit-bridge": "^6.4|^7.0",
         "symfony/framework-bundle": "^6.4|^7.0",
         "symfony/yaml": "^6.4|^7.0",
-        "doctrine/doctrine-bundle": "^2.0"
+        "doctrine/doctrine-bundle": "^2.0",
+        "doctrine/doctrine-migrations-bundle": "^3.0"
+    },
+    "suggest": {
+        "doctrine/doctrine-migrations-bundle": "Required for --migration flag in message-broker:setup-deduplication"
     },
     "autoload": {
         "psr-4": {
