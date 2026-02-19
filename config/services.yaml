@@ -76,3 +76,12 @@ services:
             $connection: '@doctrine.dbal.default_connection'
             $tableName: '%message_broker.inbox.deduplication.table_name%'
         tags: ['console.command']
+
+    # Deduplication Setup Command
+    # Creates the deduplication table from configuration
+    Freyr\MessageBroker\Command\SetupDeduplicationCommand:
+        arguments:
+            $connection: '@doctrine.dbal.default_connection'
+            $tableName: '%message_broker.inbox.deduplication.table_name%'
+            $parameterBag: '@parameter_bag'
+        tags: ['console.command']

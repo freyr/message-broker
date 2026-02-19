@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace DoctrineMigrations;
 
 use Doctrine\DBAL\Schema\Schema;
+use Doctrine\DBAL\Types\Types;
 use Doctrine\Migrations\AbstractMigration;
 
 /**
@@ -12,7 +13,7 @@ use Doctrine\Migrations\AbstractMigration;
  *
  * Creates deduplication tracking table with binary UUID v7 for middleware-based deduplication.
  *
- * The table name must match the `message_broker.inbox.deduplication_table_name`
+ * The table name must match the `message_broker.inbox.deduplication.table_name`
  * configuration value (defaults to 'message_broker_deduplication').
  */
 final class Version20250103000001 extends AbstractMigration
@@ -24,20 +25,27 @@ final class Version20250103000001 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        // Create message_broker_deduplication table with binary UUID v7
-        $this->addSql("
-            CREATE TABLE message_broker_deduplication (
-                message_id BINARY(16) NOT NULL PRIMARY KEY COMMENT '(DC2Type:id_binary)',
-                message_name VARCHAR(255) NOT NULL,
-                processed_at DATETIME NOT NULL,
-                INDEX idx_message_name (message_name),
-                INDEX idx_processed_at (processed_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        ");
+        $table = $schema->createTable('message_broker_deduplication');
+        $table->addColumn('message_id', Types::BINARY, [
+            'length' => 16,
+            'fixed' => true,
+            'notnull' => true,
+            'comment' => '(DC2Type:id_binary)',
+        ]);
+        $table->addColumn('message_name', Types::STRING, [
+            'length' => 255,
+            'notnull' => true,
+        ]);
+        $table->addColumn('processed_at', Types::DATETIME_MUTABLE, [
+            'notnull' => true,
+        ]);
+        $table->setPrimaryKey(['message_id']);
+        $table->addIndex(['message_name'], 'idx_dedup_message_name');
+        $table->addIndex(['processed_at'], 'idx_dedup_processed_at');
     }
 
     public function down(Schema $schema): void
     {
-        $this->addSql('DROP TABLE message_broker_deduplication');
+        $schema->dropTable('message_broker_deduplication');
     }
 }
