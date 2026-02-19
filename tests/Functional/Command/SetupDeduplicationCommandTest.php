@@ -94,10 +94,11 @@ final class SetupDeduplicationCommandTest extends FunctionalTestCase
         $this->assertSame(Command::SUCCESS, $exitCode, 'Command failed with output: '.$display);
         $this->assertStringContainsString('Migration file generated', $display);
 
-        // Extract file path from output (SymfonyStyle wraps with whitespace/borders)
-        preg_match('/Migration file generated:\s*(.+\.php)/', $display, $matches);
+        // SymfonyStyle wraps long paths across lines in CI — collapse line breaks to extract the path
+        $normalised = (string) preg_replace('/\n\s*/', '', $display);
+        preg_match('/Migration file generated:\s*(\S+\.php)/', $normalised, $matches);
         $this->assertNotEmpty($matches[1] ?? '', 'Could not extract file path from: '.$display);
-        $filePath = trim($matches[1]);
+        $filePath = $matches[1];
 
         // Verify file exists and contains correct content
         $this->assertFileExists($filePath);
