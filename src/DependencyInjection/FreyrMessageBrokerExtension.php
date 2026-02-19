@@ -19,11 +19,11 @@ final class FreyrMessageBrokerExtension extends Extension
         $configuration = new Configuration();
         $config = $this->processConfiguration($configuration, $configs);
 
-        /** @var array{inbox: array{message_types: array<string, string>, deduplication_table_name: string}} $config */
+        /** @var array{inbox: array{message_types: array<string, string>, deduplication: array{table_name: string}}} $config */
         $container->setParameter('message_broker.inbox.message_types', $config['inbox']['message_types']);
         $container->setParameter(
-            'message_broker.inbox.deduplication_table_name',
-            $config['inbox']['deduplication_table_name'],
+            'message_broker.inbox.deduplication.table_name',
+            $config['inbox']['deduplication']['table_name'],
         );
 
         $loader = new YamlFileLoader($container, new FileLocator(__DIR__.'/../../config'));

@@ -127,7 +127,7 @@ services:
         public: true
         arguments:
             $connection: '@doctrine.dbal.default_connection'
-            $tableName: '%message_broker.inbox.deduplication_table_name%'
+            $tableName: '%message_broker.inbox.deduplication.table_name%'
             $logger: '@logger'
 
     # Test Outbox Publisher (publishes to AMQP for functional tests)

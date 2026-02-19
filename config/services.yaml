@@ -36,7 +36,7 @@ services:
         class: Freyr\MessageBroker\Inbox\DeduplicationDbalStore
         arguments:
             $connection: '@doctrine.dbal.default_connection'
-            $tableName: '%message_broker.inbox.deduplication_table_name%'
+            $tableName: '%message_broker.inbox.deduplication.table_name%'
             $logger: '@logger'
 
     # Deduplication Middleware (inbox pattern)
@@ -74,5 +74,5 @@ services:
     Freyr\MessageBroker\Command\DeduplicationStoreCleanup:
         arguments:
             $connection: '@doctrine.dbal.default_connection'
-            $tableName: '%message_broker.inbox.deduplication_table_name%'
+            $tableName: '%message_broker.inbox.deduplication.table_name%'
         tags: ['console.command']
