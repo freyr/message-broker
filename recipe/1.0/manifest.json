@@ -3,8 +3,7 @@
         "Freyr\\MessageBroker\\FreyrMessageBrokerBundle": ["all"]
     },
     "copy-from-recipe": {
-        "config/": "%CONFIG_DIR%/",
-        "migrations/": "%MIGRATIONS_DIR%/"
+        "config/": "%CONFIG_DIR%/"
     },
     "env": {
         "MESSENGER_AMQP_DSN": "amqp://guest:guest@localhost:5672/%2f"
@@ -16,7 +15,6 @@
         "",
         "  <fg=green>✓</> Bundle registered",
         "  <fg=green>✓</> Configuration files created",
-        "  <fg=green>✓</> Database migrations created",
         "",
         "<comment>Next steps:</>",
         "",
@@ -24,20 +22,28 @@
         "",
         "  2. Replace <info>your_</> placeholders in <info>config/packages/messenger.yaml</>",
         "",
-        "  3. Run database migrations:",
+        "  3. (Optional) Customise the deduplication table name in <info>config/packages/message_broker.yaml</>:",
+        "     The default is <info>message_broker_deduplication</>.",
+        "",
+        "  4. Create the deduplication table:",
+        "",
+        "     <comment>If you have doctrine/doctrine-migrations-bundle:</>",
+        "     <info>php bin/console message-broker:setup-deduplication --migration</>",
         "     <info>php bin/console doctrine:migrations:migrate</>",
         "",
-        "  4. Start workers (one terminal per worker):",
+        "     <comment>If you do NOT have doctrine-migrations-bundle:</>",
+        "     <info>php bin/console message-broker:setup-deduplication --force</>",
+        "",
+        "     Run without flags to preview the SQL first:",
+        "     <info>php bin/console message-broker:setup-deduplication</>",
+        "",
+        "  5. Start workers (one terminal per worker):",
         "     <info>php bin/console messenger:consume outbox -vv</>",
         "     <info>php bin/console messenger:consume amqp_your_inbox -vv</>",
         "",
         "<comment>Documentation:</>",
         "  • README: <info>vendor/freyr/message-broker/README.md</>",
         "  • Docs: <info>vendor/freyr/message-broker/docs/</>",
-        "",
-        "<comment>Example usage:</>",
-        "  • Outbox: <info>vendor/freyr/message-broker/docs/outbox-pattern.md</>",
-        "  • Inbox: <info>vendor/freyr/message-broker/docs/inbox-implementation.md</>",
         ""
     ]
 }

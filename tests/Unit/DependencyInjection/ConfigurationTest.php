@@ -18,7 +18,7 @@ final class ConfigurationTest extends TestCase
         $config = $this->processConfig([]);
 
         $this->assertSame([], $config['inbox']['message_types']);
-        $this->assertSame('message_broker_deduplication', $config['inbox']['deduplication_table_name']);
+        $this->assertSame('message_broker_deduplication', $config['inbox']['deduplication']['table_name']);
     }
 
     public function testInboxMessageTypes(): void
@@ -42,11 +42,13 @@ final class ConfigurationTest extends TestCase
     {
         $config = $this->processConfig([
             'inbox' => [
-                'deduplication_table_name' => 'custom_dedup_table',
+                'deduplication' => [
+                    'table_name' => 'custom_dedup_table',
+                ],
             ],
         ]);
 
-        $this->assertSame('custom_dedup_table', $config['inbox']['deduplication_table_name']);
+        $this->assertSame('custom_dedup_table', $config['inbox']['deduplication']['table_name']);
     }
 
     public function testDeduplicationTableNameCannotBeEmpty(): void
@@ -55,21 +57,61 @@ final class ConfigurationTest extends TestCase
 
         $this->processConfig([
             'inbox' => [
-                'deduplication_table_name' => '',
+                'deduplication' => [
+                    'table_name' => '',
+                ],
             ],
         ]);
+    }
+
+    public function testDeduplicationTableNameRejectsSpecialCharacters(): void
+    {
+        $this->expectException(\Symfony\Component\Config\Definition\Exception\InvalidConfigurationException::class);
+        $this->expectExceptionMessage('Table name must contain only alphanumeric characters and underscores');
+
+        $this->processConfig([
+            'inbox' => [
+                'deduplication' => [
+                    'table_name' => "'; DROP TABLE --",
+                ],
+            ],
+        ]);
+    }
+
+    public function testDeduplicationTableNameRejectsHyphens(): void
+    {
+        $this->expectException(\Symfony\Component\Config\Definition\Exception\InvalidConfigurationException::class);
+
+        $this->processConfig([
+            'inbox' => [
+                'deduplication' => [
+                    'table_name' => 'my-table-name',
+                ],
+            ],
+        ]);
+    }
+
+    public function testDeduplicationDefaultsAreApplied(): void
+    {
+        $config = $this->processConfig([
+            'inbox' => [
+                'deduplication' => [],
+            ],
+        ]);
+
+        $this->assertSame('message_broker_deduplication', $config['inbox']['deduplication']['table_name']);
     }
 
     /**
      * @param array<string, mixed> $config
      *
-     * @return array{inbox: array{message_types: array<string, string>, deduplication_table_name: string}}
+     * @return array{inbox: array{message_types: array<string, string>, deduplication: array{table_name: string}}}
      */
     private function processConfig(array $config): array
     {
         $processor = new Processor();
 
-        /** @var array{inbox: array{message_types: array<string, string>, deduplication_table_name: string}} */
+        /** @var array{inbox: array{message_types: array<string, string>, deduplication: array{table_name: string}}} */
         return $processor->processConfiguration(new Configuration(), [$config]);
     }
 }

@@ -7,8 +7,9 @@ message_broker:
             # 'order.placed': 'App\Message\OrderPlaced'
             # 'user.registered': 'App\Message\UserRegistered'
 
-        # Table name for deduplication tracking (must match migration)
-        # deduplication_table_name: 'message_broker_deduplication'
+        # Deduplication settings
+        # deduplication:
+        #     table_name: 'message_broker_deduplication'
 
     # AMQP topology: declare exchanges, queues, and bindings from configuration.
     # Run: php bin/console message-broker:setup-amqp

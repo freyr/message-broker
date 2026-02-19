@@ -102,6 +102,10 @@ doctrine:
                 prefix: 'Freyr\MessageBroker\Tests\Functional\Entity'
                 alias: FreyrMessageBroker
 
+doctrine_migrations:
+    migrations_paths:
+        'DoctrineMigrations': '%kernel.project_dir%/tests/Functional/migrations'
+
 message_broker:
     inbox:
         message_types:
@@ -127,7 +131,7 @@ services:
         public: true
         arguments:
             $connection: '@doctrine.dbal.default_connection'
-            $tableName: '%message_broker.inbox.deduplication_table_name%'
+            $tableName: '%message_broker.inbox.deduplication.table_name%'
             $logger: '@logger'
 
     # Test Outbox Publisher (publishes to AMQP for functional tests)
