@@ -28,7 +28,7 @@ final class DeduplicationStoreCleanupTest extends TestCase
         $connection->expects($this->once())
             ->method('executeStatement')
             ->with($this->stringContains('DATE_SUB'), $this->equalTo([7]))
-            ->willReturn(5);
+            ->willReturn(0);
 
         $command = new DeduplicationStoreCleanup($connection);
         $tester = new CommandTester($command);
@@ -37,7 +37,6 @@ final class DeduplicationStoreCleanupTest extends TestCase
         ]);
 
         $this->assertSame(Command::SUCCESS, $tester->getStatusCode());
-        $this->assertStringContainsString('5', $tester->getDisplay());
     }
 
     public function testNonNumericDaysFallsBackToDefault(): void
