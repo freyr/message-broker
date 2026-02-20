@@ -21,6 +21,7 @@ use Symfony\Component\Config\Definition\Processor;
  * - Rejects SQL injection characters in table name
  * - Rejects table name starting with number
  * - Accepts valid table names (alphanumeric + underscore)
+ * Note: testEmptyConfigIsValid already covers default deduplication settings
  */
 #[CoversClass(Configuration::class)]
 final class ConfigurationTest extends TestCase
@@ -101,17 +102,6 @@ final class ConfigurationTest extends TestCase
                 ],
             ],
         ]);
-    }
-
-    public function testDeduplicationDefaultsAreApplied(): void
-    {
-        $config = $this->processConfig([
-            'inbox' => [
-                'deduplication' => [],
-            ],
-        ]);
-
-        $this->assertSame('message_broker_deduplication', $config['inbox']['deduplication']['table_name']);
     }
 
     /**

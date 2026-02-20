@@ -35,6 +35,8 @@ use Symfony\Component\Messenger\Stamp\ReceivedStamp;
 #[CoversClass(OutboxPublishingMiddleware::class)]
 final class OutboxPublishingMiddlewareTest extends TestCase
 {
+    private const TEST_MESSAGE_ID = '01234567-89ab-7def-8000-000000000001';
+
     public function testNonOutboxMessagePassesThrough(): void
     {
         $middleware = $this->createMiddleware([]);
@@ -49,7 +51,7 @@ final class OutboxPublishingMiddlewareTest extends TestCase
     public function testOutboxMessageWithoutReceivedStampPassesThrough(): void
     {
         $middleware = $this->createMiddleware([
-            'outbox' => $this->createMockPublisher(),
+            'outbox' => $this->createFakePublisher(),
         ]);
         $envelope = new Envelope(TestOutboxEvent::random());
 
@@ -73,11 +75,11 @@ final class OutboxPublishingMiddlewareTest extends TestCase
     public function testThrowsWhenMessageNameStampMissing(): void
     {
         $middleware = $this->createMiddleware([
-            'outbox' => $this->createMockPublisher(),
+            'outbox' => $this->createFakePublisher(),
         ]);
         $envelope = new Envelope(TestOutboxEvent::random(), [
             new ReceivedStamp('outbox'),
-            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
+            new MessageIdStamp(Id::fromString(self::TEST_MESSAGE_ID)),
         ]);
 
         $this->expectException(RuntimeException::class);
@@ -89,7 +91,7 @@ final class OutboxPublishingMiddlewareTest extends TestCase
     public function testThrowsWhenMessageIdStampMissing(): void
     {
         $middleware = $this->createMiddleware([
-            'outbox' => $this->createMockPublisher(),
+            'outbox' => $this->createFakePublisher(),
         ]);
         $envelope = new Envelope(TestOutboxEvent::random(), [
             new ReceivedStamp('outbox'),
@@ -105,14 +107,14 @@ final class OutboxPublishingMiddlewareTest extends TestCase
     public function testDelegatesToPublisherWithCleanEnvelope(): void
     {
         $publishedEnvelope = null;
-        $publisher = $this->createMockPublisher(function (Envelope $envelope) use (&$publishedEnvelope): void {
+        $publisher = $this->createFakePublisher(function (Envelope $envelope) use (&$publishedEnvelope): void {
             $publishedEnvelope = $envelope;
         });
 
         $middleware = $this->createMiddleware([
             'outbox' => $publisher,
         ]);
-        $messageId = '01234567-89ab-7def-8000-000000000001';
+        $messageId = self::TEST_MESSAGE_ID;
         $envelope = new Envelope(TestOutboxEvent::random(), [
             new ReceivedStamp('outbox'),
             new MessageIdStamp(Id::fromString($messageId)),
@@ -140,11 +142,11 @@ final class OutboxPublishingMiddlewareTest extends TestCase
     public function testShortCircuitsAfterPublishing(): void
     {
         $middleware = $this->createMiddleware([
-            'outbox' => $this->createMockPublisher(),
+            'outbox' => $this->createFakePublisher(),
         ]);
         $envelope = new Envelope(TestOutboxEvent::random(), [
             new ReceivedStamp('outbox'),
-            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
+            new MessageIdStamp(Id::fromString(self::TEST_MESSAGE_ID)),
             new MessageNameStamp('test.event.sent'),
         ]);
 
@@ -157,11 +159,11 @@ final class OutboxPublishingMiddlewareTest extends TestCase
     public function testReturnsOriginalEnvelopeAfterPublishing(): void
     {
         $middleware = $this->createMiddleware([
-            'outbox' => $this->createMockPublisher(),
+            'outbox' => $this->createFakePublisher(),
         ]);
         $envelope = new Envelope(TestOutboxEvent::random(), [
             new ReceivedStamp('outbox'),
-            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
+            new MessageIdStamp(Id::fromString(self::TEST_MESSAGE_ID)),
             new MessageNameStamp('test.event.sent'),
         ]);
 
@@ -186,7 +188,7 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         );
     }
 
-    private function createMockPublisher(?callable $callback = null): OutboxPublisherInterface
+    private function createFakePublisher(?callable $callback = null): OutboxPublisherInterface
     {
         return new class($callback) implements OutboxPublisherInterface {
             /** @var callable|null */

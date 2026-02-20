@@ -111,6 +111,9 @@ final class DeduplicationMiddlewareTest extends TestCase
             new MessageIdStamp($messageId),
         ]);
 
-        $middleware->handle($envelope, MiddlewareStackFactory::createPassThrough());
+        $nextCalled = false;
+        $middleware->handle($envelope, MiddlewareStackFactory::createTracking($nextCalled));
+
+        $this->assertTrue($nextCalled, 'New message should be forwarded to next middleware');
     }
 }

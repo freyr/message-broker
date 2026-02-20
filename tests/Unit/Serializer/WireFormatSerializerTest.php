@@ -38,6 +38,8 @@ use Symfony\Component\Serializer\Serializer;
 #[CoversClass(WireFormatSerializer::class)]
 final class WireFormatSerializerTest extends TestCase
 {
+    private const TEST_MESSAGE_ID = '01234567-89ab-7def-8000-000000000001';
+
     private WireFormatSerializer $serializer;
 
     protected function setUp(): void
@@ -86,7 +88,7 @@ final class WireFormatSerializerTest extends TestCase
     public function testEncodeThrowsWhenMessageNameStampMissing(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random(), [
-            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
+            new MessageIdStamp(Id::fromString(self::TEST_MESSAGE_ID)),
         ]);
 
         $this->expectException(RuntimeException::class);
@@ -135,7 +137,7 @@ final class WireFormatSerializerTest extends TestCase
         $timestamp = CarbonImmutable::now();
         $message = new TestOutboxEvent(eventId: $id, payload: 'Round-trip Test', occurredAt: $timestamp);
         $envelope = new Envelope($message, [
-            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
+            new MessageIdStamp(Id::fromString(self::TEST_MESSAGE_ID)),
             new MessageNameStamp('test.event.sent'),
         ]);
 
@@ -151,7 +153,7 @@ final class WireFormatSerializerTest extends TestCase
     private function createStampedEnvelope(): Envelope
     {
         return new Envelope(TestOutboxEvent::random(), [
-            new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
+            new MessageIdStamp(Id::fromString(self::TEST_MESSAGE_ID)),
             new MessageNameStamp('test.event.sent'),
         ]);
     }

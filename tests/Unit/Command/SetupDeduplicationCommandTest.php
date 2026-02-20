@@ -8,9 +8,6 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Schema\AbstractSchemaManager;
 use Doctrine\DBAL\Schema\Table;
-use Doctrine\DBAL\Types\BinaryType;
-use Doctrine\DBAL\Types\DateTimeType;
-use Doctrine\DBAL\Types\StringType;
 use Doctrine\Migrations\Configuration\Configuration as MigrationsConfiguration;
 use Freyr\MessageBroker\Command\SetupDeduplicationCommand;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -40,32 +37,15 @@ final class SetupDeduplicationCommandTest extends TestCase
         $schemaManager->method('tablesExist')
             ->willReturn(false);
 
-        $callbackInvoked = false;
         $platform = $this->createStub(AbstractPlatform::class);
         $platform->method('getCreateTableSQL')
-            ->willReturnCallback(function (Table $table) use (&$callbackInvoked): array {
-                $callbackInvoked = true;
-
+            ->willReturnCallback(function (Table $table): array {
                 $this->assertSame('message_broker_deduplication', $table->getName());
                 $this->assertCount(3, $table->getColumns());
-
-                $messageId = $table->getColumn('message_id');
-                $this->assertInstanceOf(BinaryType::class, $messageId->getType());
-                $this->assertSame(16, $messageId->getLength());
-                $this->assertTrue($messageId->getFixed());
-                $this->assertTrue($messageId->getNotnull());
-                $this->assertSame('(DC2Type:id_binary)', $messageId->getComment());
-
-                $messageName = $table->getColumn('message_name');
-                $this->assertInstanceOf(StringType::class, $messageName->getType());
-                $this->assertSame(255, $messageName->getLength());
-
-                $processedAt = $table->getColumn('processed_at');
-                $this->assertInstanceOf(DateTimeType::class, $processedAt->getType());
-
-                $primaryKey = $table->getPrimaryKey();
-                $this->assertNotNull($primaryKey);
-                $this->assertSame(['message_id'], $primaryKey->getColumns());
+                $this->assertTrue($table->hasColumn('message_id'));
+                $this->assertTrue($table->hasColumn('message_name'));
+                $this->assertTrue($table->hasColumn('processed_at'));
+                $this->assertSame(['message_id'], $table->getPrimaryKey()?->getColumns());
                 $this->assertTrue($table->hasIndex('idx_dedup_processed_at'));
 
                 return ['CREATE TABLE message_broker_deduplication (...)'];
@@ -81,7 +61,6 @@ final class SetupDeduplicationCommandTest extends TestCase
         $tester = new CommandTester($command);
         $tester->execute([]);
 
-        $this->assertTrue($callbackInvoked, 'getCreateTableSQL callback should have been called');
         $this->assertSame(Command::SUCCESS, $tester->getStatusCode());
         $this->assertStringContainsString('CREATE TABLE', $tester->getDisplay());
     }

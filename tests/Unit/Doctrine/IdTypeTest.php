@@ -20,6 +20,7 @@ use PHPUnit\Framework\TestCase;
  * - Passes through Id instance unchanged
  * - Throws on invalid types (both directions)
  * - Converts Id to binary string (database value)
+ * - Returns correct SQL declaration, name, and comment hint
  */
 #[CoversClass(IdType::class)]
 final class IdTypeTest extends TestCase
@@ -88,5 +89,20 @@ final class IdTypeTest extends TestCase
         $this->expectExceptionMessage('Expected Id instance');
 
         $this->type->convertToDatabaseValue('not-an-id', $this->platform);
+    }
+
+    public function testGetSQLDeclarationReturnsBinary16(): void
+    {
+        $this->assertSame('BINARY(16)', $this->type->getSQLDeclaration([], $this->platform));
+    }
+
+    public function testGetNameReturnsIdBinary(): void
+    {
+        $this->assertSame('id_binary', $this->type->getName());
+    }
+
+    public function testRequiresSQLCommentHint(): void
+    {
+        $this->assertTrue($this->type->requiresSQLCommentHint($this->platform));
     }
 }
