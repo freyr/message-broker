@@ -5,12 +5,24 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Unit\DependencyInjection;
 
 use Freyr\MessageBroker\DependencyInjection\Configuration;
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\Config\Definition\Processor;
 
 /**
- * Unit tests for Configuration tree builder.
+ * Unit test for Configuration tree builder.
+ *
+ * Tests that the configuration:
+ * - Accepts empty config with defaults
+ * - Accepts custom message_types mapping
+ * - Accepts custom table name
+ * - Rejects empty table name
+ * - Rejects SQL injection characters in table name
+ * - Rejects table name starting with number
+ * - Accepts valid table names (alphanumeric + underscore)
  */
+#[CoversClass(Configuration::class)]
 final class ConfigurationTest extends TestCase
 {
     public function testEmptyConfigIsValid(): void
@@ -53,7 +65,7 @@ final class ConfigurationTest extends TestCase
 
     public function testDeduplicationTableNameCannotBeEmpty(): void
     {
-        $this->expectException(\Symfony\Component\Config\Definition\Exception\InvalidConfigurationException::class);
+        $this->expectException(InvalidConfigurationException::class);
 
         $this->processConfig([
             'inbox' => [
@@ -66,7 +78,7 @@ final class ConfigurationTest extends TestCase
 
     public function testDeduplicationTableNameRejectsSpecialCharacters(): void
     {
-        $this->expectException(\Symfony\Component\Config\Definition\Exception\InvalidConfigurationException::class);
+        $this->expectException(InvalidConfigurationException::class);
         $this->expectExceptionMessage('Table name must contain only alphanumeric characters and underscores');
 
         $this->processConfig([
@@ -78,14 +90,14 @@ final class ConfigurationTest extends TestCase
         ]);
     }
 
-    public function testDeduplicationTableNameRejectsHyphens(): void
+    public function testDeduplicationTableNameRejectsStartingWithNumber(): void
     {
-        $this->expectException(\Symfony\Component\Config\Definition\Exception\InvalidConfigurationException::class);
+        $this->expectException(InvalidConfigurationException::class);
 
         $this->processConfig([
             'inbox' => [
                 'deduplication' => [
-                    'table_name' => 'my-table-name',
+                    'table_name' => '1invalid_table',
                 ],
             ],
         ]);

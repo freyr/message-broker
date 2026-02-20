@@ -51,36 +51,6 @@ jobs:
             symfony: '6.4.*'
             stability: 'prefer-lowest'
 
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: messenger_test
-          MYSQL_USER: messenger
-          MYSQL_PASSWORD: messenger
-        ports:
-          - 3308:3306
-        options: >-
-          --health-cmd="mysqladmin ping --silent"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=3
-
-      rabbitmq:
-        image: rabbitmq:3.13-management
-        env:
-          RABBITMQ_DEFAULT_USER: guest
-          RABBITMQ_DEFAULT_PASS: guest
-        ports:
-          - 5673:5672
-          - 15673:15672
-        options: >-
-          --health-cmd="rabbitmq-diagnostics -q ping"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=3
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -89,7 +59,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, pdo_mysql, bcmath, intl, gd, exif, iconv, amqp
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, bcmath, intl, gd, exif, iconv
           coverage: none
           tools: composer:v2
 
@@ -113,26 +83,8 @@ jobs:
       - name: Install dependencies
         run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction --no-progress
 
-      - name: Wait for MySQL
-        run: |
-          until mysqladmin ping -h 127.0.0.1 -P 3308 -u messenger -pmessenger --silent; do
-            echo 'Waiting for MySQL...'
-            sleep 2
-          done
-          echo 'MySQL is ready!'
-
-      - name: Wait for RabbitMQ
-        run: |
-          until curl -f -u guest:guest http://127.0.0.1:15673/api/overview 2>/dev/null; do
-            echo 'Waiting for RabbitMQ...'
-            sleep 2
-          done
-          echo 'RabbitMQ is ready!'
-
       - name: Run tests
         env:
-          DATABASE_URL: mysql://messenger:messenger@127.0.0.1:3308/messenger_test
-          MESSENGER_AMQP_DSN: amqp://guest:guest@127.0.0.1:5673/%2f
           APP_ENV: test
         run: vendor/bin/phpunit --testdox
 

@@ -6,8 +6,9 @@ namespace Freyr\MessageBroker\Tests\Unit\DependencyInjection\Compiler;
 
 use Freyr\MessageBroker\DependencyInjection\Compiler\OutboxPublisherPass;
 use Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware;
-use Freyr\MessageBroker\Tests\Unit\Fixtures\TestPublisher;
+use Freyr\MessageBroker\Tests\Fixtures\TestPublisher;
 use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
@@ -15,17 +16,43 @@ use Symfony\Component\DependencyInjection\Reference;
 
 /**
  * Unit test for OutboxPublisherPass compiler pass.
+ *
+ * Tests that the compiler pass:
+ * - Collects tagged publishers into a service locator
+ * - Returns early when middleware is not defined
+ * - Handles tagged service with valid transport
+ * - Throws on missing transport attribute
+ * - Throws on duplicate transport
+ * - Throws when service does not implement OutboxPublisherInterface
  */
+#[CoversClass(OutboxPublisherPass::class)]
 final class OutboxPublisherPassTest extends TestCase
 {
-    public function testCollectsTaggedPublishersIntoServiceLocator(): void
+    public function testHandlesNoPublishersGracefully(): void
+    {
+        $container = $this->createContainerWithMiddleware();
+
+        $pass = new OutboxPublisherPass();
+        $pass->process($container);
+
+        $middlewareDef = $container->getDefinition(OutboxPublishingMiddleware::class);
+        $locatorArg = $middlewareDef->getArgument('$publisherLocator');
+        $this->assertInstanceOf(Reference::class, $locatorArg);
+    }
+
+    public function testEarlyReturnWhenMiddlewareNotDefined(): void
     {
         $container = new ContainerBuilder();
 
-        $middlewareDef = new Definition(OutboxPublishingMiddleware::class);
-        $middlewareDef->setArgument('$publisherLocator', null);
-        $middlewareDef->setArgument('$logger', new Reference('logger'));
-        $container->setDefinition(OutboxPublishingMiddleware::class, $middlewareDef);
+        $pass = new OutboxPublisherPass();
+        $pass->process($container);
+
+        $this->assertFalse($container->hasDefinition(OutboxPublishingMiddleware::class));
+    }
+
+    public function testCollectsTaggedPublishersIntoServiceLocator(): void
+    {
+        $container = $this->createContainerWithMiddleware();
 
         $publisherDef = new Definition(TestPublisher::class);
         $publisherDef->addTag('message_broker.outbox_publisher', [
@@ -36,19 +63,14 @@ final class OutboxPublisherPassTest extends TestCase
         $pass = new OutboxPublisherPass();
         $pass->process($container);
 
-        // Verify the publisher locator argument was set (it's a Reference to a generated service locator)
+        $middlewareDef = $container->getDefinition(OutboxPublishingMiddleware::class);
         $locatorArg = $middlewareDef->getArgument('$publisherLocator');
         $this->assertInstanceOf(Reference::class, $locatorArg);
     }
 
     public function testThrowsOnMissingTransportAttribute(): void
     {
-        $container = new ContainerBuilder();
-
-        $middlewareDef = new Definition(OutboxPublishingMiddleware::class);
-        $middlewareDef->setArgument('$publisherLocator', null);
-        $middlewareDef->setArgument('$logger', new Reference('logger'));
-        $container->setDefinition(OutboxPublishingMiddleware::class, $middlewareDef);
+        $container = $this->createContainerWithMiddleware();
 
         $publisherDef = new Definition(TestPublisher::class);
         $publisherDef->addTag('message_broker.outbox_publisher');
@@ -63,12 +85,7 @@ final class OutboxPublisherPassTest extends TestCase
 
     public function testThrowsOnDuplicateTransportName(): void
     {
-        $container = new ContainerBuilder();
-
-        $middlewareDef = new Definition(OutboxPublishingMiddleware::class);
-        $middlewareDef->setArgument('$publisherLocator', null);
-        $middlewareDef->setArgument('$logger', new Reference('logger'));
-        $container->setDefinition(OutboxPublishingMiddleware::class, $middlewareDef);
+        $container = $this->createContainerWithMiddleware();
 
         $publisher1 = new Definition(TestPublisher::class);
         $publisher1->addTag('message_broker.outbox_publisher', [
@@ -91,12 +108,7 @@ final class OutboxPublisherPassTest extends TestCase
 
     public function testThrowsWhenServiceDoesNotImplementInterface(): void
     {
-        $container = new ContainerBuilder();
-
-        $middlewareDef = new Definition(OutboxPublishingMiddleware::class);
-        $middlewareDef->setArgument('$publisherLocator', null);
-        $middlewareDef->setArgument('$logger', new Reference('logger'));
-        $container->setDefinition(OutboxPublishingMiddleware::class, $middlewareDef);
+        $container = $this->createContainerWithMiddleware();
 
         $publisherDef = new Definition(\stdClass::class);
         $publisherDef->addTag('message_broker.outbox_publisher', [
@@ -111,18 +123,7 @@ final class OutboxPublisherPassTest extends TestCase
         $pass->process($container);
     }
 
-    public function testEarlyReturnWhenMiddlewareNotDefined(): void
-    {
-        $container = new ContainerBuilder();
-
-        $pass = new OutboxPublisherPass();
-        // Should not throw — and should not define the middleware service
-        $pass->process($container);
-
-        $this->assertFalse($container->hasDefinition(OutboxPublishingMiddleware::class));
-    }
-
-    public function testHandlesNoPublishersGracefully(): void
+    private function createContainerWithMiddleware(): ContainerBuilder
     {
         $container = new ContainerBuilder();
 
@@ -131,11 +132,6 @@ final class OutboxPublisherPassTest extends TestCase
         $middlewareDef->setArgument('$logger', new Reference('logger'));
         $container->setDefinition(OutboxPublishingMiddleware::class, $middlewareDef);
 
-        $pass = new OutboxPublisherPass();
-        $pass->process($container);
-
-        // Should still set the locator argument (empty service locator)
-        $locatorArg = $middlewareDef->getArgument('$publisherLocator');
-        $this->assertInstanceOf(Reference::class, $locatorArg);
+        return $container;
     }
 }

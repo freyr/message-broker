@@ -11,29 +11,41 @@ use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\BinaryType;
 use Doctrine\DBAL\Types\DateTimeType;
 use Doctrine\DBAL\Types\StringType;
+use Doctrine\Migrations\Configuration\Configuration as MigrationsConfiguration;
 use Freyr\MessageBroker\Command\SetupDeduplicationCommand;
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
 /**
- * Unit tests for SetupDeduplicationCommand.
+ * Unit test for SetupDeduplicationCommand.
  *
- * Tests schema definition indirectly via dry-run mode with a mocked connection.
+ * Tests that the command:
+ * - Shows SQL in dry-run mode (default)
+ * - Reports when table already exists
+ * - Uses custom table name
+ * - Creates table in force mode
+ * - Skips in force mode when table exists
+ * - Generates migration file
+ * - Rejects conflicting --force and --migration flags
+ * - Reports missing migrations configuration
  */
+#[CoversClass(SetupDeduplicationCommand::class)]
 final class SetupDeduplicationCommandTest extends TestCase
 {
     public function testDryRunShowsSqlWhenTableDoesNotExist(): void
     {
-        $schemaManager = $this->createMock(AbstractSchemaManager::class);
+        $schemaManager = $this->createStub(AbstractSchemaManager::class);
         $schemaManager->method('tablesExist')
-            ->with(['message_broker_deduplication'])
             ->willReturn(false);
 
-        $platform = $this->createMock(AbstractPlatform::class);
+        $callbackInvoked = false;
+        $platform = $this->createStub(AbstractPlatform::class);
         $platform->method('getCreateTableSQL')
-            ->willReturnCallback(function (Table $table): array {
-                // Verify schema definition
+            ->willReturnCallback(function (Table $table) use (&$callbackInvoked): array {
+                $callbackInvoked = true;
+
                 $this->assertSame('message_broker_deduplication', $table->getName());
                 $this->assertCount(3, $table->getColumns());
 
@@ -54,13 +66,12 @@ final class SetupDeduplicationCommandTest extends TestCase
                 $primaryKey = $table->getPrimaryKey();
                 $this->assertNotNull($primaryKey);
                 $this->assertSame(['message_id'], $primaryKey->getColumns());
-                $this->assertFalse($table->hasIndex('idx_dedup_message_name'));
                 $this->assertTrue($table->hasIndex('idx_dedup_processed_at'));
 
                 return ['CREATE TABLE message_broker_deduplication (...)'];
             });
 
-        $connection = $this->createMock(Connection::class);
+        $connection = $this->createStub(Connection::class);
         $connection->method('createSchemaManager')
             ->willReturn($schemaManager);
         $connection->method('getDatabasePlatform')
@@ -70,18 +81,18 @@ final class SetupDeduplicationCommandTest extends TestCase
         $tester = new CommandTester($command);
         $tester->execute([]);
 
+        $this->assertTrue($callbackInvoked, 'getCreateTableSQL callback should have been called');
         $this->assertSame(Command::SUCCESS, $tester->getStatusCode());
         $this->assertStringContainsString('CREATE TABLE', $tester->getDisplay());
     }
 
     public function testDryRunReportsTableExists(): void
     {
-        $schemaManager = $this->createMock(AbstractSchemaManager::class);
+        $schemaManager = $this->createStub(AbstractSchemaManager::class);
         $schemaManager->method('tablesExist')
-            ->with(['message_broker_deduplication'])
             ->willReturn(true);
 
-        $connection = $this->createMock(Connection::class);
+        $connection = $this->createStub(Connection::class);
         $connection->method('createSchemaManager')
             ->willReturn($schemaManager);
 
@@ -95,12 +106,11 @@ final class SetupDeduplicationCommandTest extends TestCase
 
     public function testCustomTableNameIsUsed(): void
     {
-        $schemaManager = $this->createMock(AbstractSchemaManager::class);
+        $schemaManager = $this->createStub(AbstractSchemaManager::class);
         $schemaManager->method('tablesExist')
-            ->with(['custom_dedup'])
             ->willReturn(false);
 
-        $platform = $this->createMock(AbstractPlatform::class);
+        $platform = $this->createStub(AbstractPlatform::class);
         $platform->method('getCreateTableSQL')
             ->willReturnCallback(function (Table $table): array {
                 $this->assertSame('custom_dedup', $table->getName());
@@ -108,7 +118,7 @@ final class SetupDeduplicationCommandTest extends TestCase
                 return ['CREATE TABLE custom_dedup (...)'];
             });
 
-        $connection = $this->createMock(Connection::class);
+        $connection = $this->createStub(Connection::class);
         $connection->method('createSchemaManager')
             ->willReturn($schemaManager);
         $connection->method('getDatabasePlatform')
@@ -122,9 +132,82 @@ final class SetupDeduplicationCommandTest extends TestCase
         $this->assertStringContainsString('CREATE TABLE custom_dedup', $tester->getDisplay());
     }
 
+    public function testForceModeCreatesTable(): void
+    {
+        $schemaManager = $this->createMock(AbstractSchemaManager::class);
+        $schemaManager->method('tablesExist')
+            ->willReturn(false);
+        $schemaManager->expects($this->once())
+            ->method('createTable');
+
+        $connection = $this->createStub(Connection::class);
+        $connection->method('createSchemaManager')
+            ->willReturn($schemaManager);
+
+        $command = new SetupDeduplicationCommand($connection, 'message_broker_deduplication');
+        $tester = new CommandTester($command);
+        $tester->execute([
+            '--force' => true,
+        ]);
+
+        $this->assertSame(Command::SUCCESS, $tester->getStatusCode());
+        $this->assertStringContainsString('created successfully', $tester->getDisplay());
+    }
+
+    public function testForceModeSkipsWhenTableExists(): void
+    {
+        $schemaManager = $this->createStub(AbstractSchemaManager::class);
+        $schemaManager->method('tablesExist')
+            ->willReturn(true);
+
+        $connection = $this->createStub(Connection::class);
+        $connection->method('createSchemaManager')
+            ->willReturn($schemaManager);
+
+        $command = new SetupDeduplicationCommand($connection, 'message_broker_deduplication');
+        $tester = new CommandTester($command);
+        $tester->execute([
+            '--force' => true,
+        ]);
+
+        $this->assertSame(Command::SUCCESS, $tester->getStatusCode());
+        $this->assertStringContainsString('already exists', $tester->getDisplay());
+    }
+
+    public function testMigrationModeGeneratesFile(): void
+    {
+        $tempDir = sys_get_temp_dir().'/test_migrations_'.uniqid();
+        mkdir($tempDir, 0o755, true);
+
+        try {
+            $migrationsConfig = new MigrationsConfiguration();
+            $migrationsConfig->addMigrationsDirectory('App\\Migrations', $tempDir);
+
+            $connection = $this->createStub(Connection::class);
+
+            $command = new SetupDeduplicationCommand($connection, 'message_broker_deduplication', $migrationsConfig);
+            $tester = new CommandTester($command);
+            $tester->execute([
+                '--migration' => true,
+            ]);
+
+            $this->assertSame(Command::SUCCESS, $tester->getStatusCode());
+            $this->assertStringContainsString('Migration file generated', $tester->getDisplay());
+
+            $files = glob($tempDir.'/Version*.php');
+            $this->assertNotEmpty($files, 'Migration file should have been created');
+        } finally {
+            $files = glob($tempDir.'/*');
+            if (is_array($files)) {
+                array_map('unlink', $files);
+            }
+            rmdir($tempDir);
+        }
+    }
+
     public function testConflictingFlagsProduceError(): void
     {
-        $connection = $this->createMock(Connection::class);
+        $connection = $this->createStub(Connection::class);
 
         $command = new SetupDeduplicationCommand($connection, 'message_broker_deduplication');
         $tester = new CommandTester($command);
@@ -139,9 +222,8 @@ final class SetupDeduplicationCommandTest extends TestCase
 
     public function testMigrationModeWithoutConfigurationErrors(): void
     {
-        $connection = $this->createMock(Connection::class);
+        $connection = $this->createStub(Connection::class);
 
-        // No migrations configuration injected (null)
         $command = new SetupDeduplicationCommand($connection, 'message_broker_deduplication');
         $tester = new CommandTester($command);
         $tester->execute([

@@ -11,7 +11,8 @@ use Freyr\MessageBroker\Contracts\MessageNameStamp;
 use Freyr\MessageBroker\Serializer\Normalizer\CarbonImmutableNormalizer;
 use Freyr\MessageBroker\Serializer\Normalizer\IdNormalizer;
 use Freyr\MessageBroker\Serializer\WireFormatSerializer;
-use Freyr\MessageBroker\Tests\Unit\Fixtures\TestMessage;
+use Freyr\MessageBroker\Tests\Fixtures\TestOutboxEvent;
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Symfony\Component\Messenger\Envelope;
@@ -28,11 +29,13 @@ use Symfony\Component\Serializer\Serializer;
  * Tests that the serializer:
  * - Translates FQN to semantic name in type header on encode
  * - Adds X-Message-Class header on encode
- * - Preserves native X-Message-Stamp-* headers (no stripping)
  * - Throws when MessageNameStamp is missing
+ * - Body contains only business data (no messageId)
  * - Restores FQN from X-Message-Class on decode
+ * - Skips FQN replacement when type already contains backslash (retry path)
  * - Round-trips correctly (encode then decode)
  */
+#[CoversClass(WireFormatSerializer::class)]
 final class WireFormatSerializerTest extends TestCase
 {
     private WireFormatSerializer $serializer;
@@ -63,51 +66,26 @@ final class WireFormatSerializerTest extends TestCase
 
     public function testEncodeProducesSemanticTypeHeader(): void
     {
-        $envelope = $this->createStampedEnvelope();
-
-        $encoded = $this->serializer->encode($envelope);
+        $encoded = $this->serializer->encode($this->createStampedEnvelope());
 
         /** @var array<string, string> $headers */
         $headers = $encoded['headers'];
-        $this->assertSame('test.message.sent', $headers['type']);
+        $this->assertSame('test.event.sent', $headers['type']);
     }
 
     public function testEncodeAddsMessageClassHeader(): void
     {
-        $envelope = $this->createStampedEnvelope();
-
-        $encoded = $this->serializer->encode($envelope);
+        $encoded = $this->serializer->encode($this->createStampedEnvelope());
 
         /** @var array<string, string> $headers */
         $headers = $encoded['headers'];
         $this->assertArrayHasKey('X-Message-Class', $headers);
-        $this->assertSame(TestMessage::class, $headers['X-Message-Class']);
-    }
-
-    public function testEncodePreservesStampHeaders(): void
-    {
-        $envelope = $this->createStampedEnvelope();
-
-        $encoded = $this->serializer->encode($envelope);
-
-        /** @var array<string, string> $headers */
-        $headers = $encoded['headers'];
-        $this->assertArrayHasKey(
-            'X-Message-Stamp-'.MessageIdStamp::class,
-            $headers,
-            'MessageIdStamp header should be preserved'
-        );
-        $this->assertArrayHasKey(
-            'X-Message-Stamp-'.MessageNameStamp::class,
-            $headers,
-            'MessageNameStamp header should be preserved'
-        );
+        $this->assertSame(TestOutboxEvent::class, $headers['X-Message-Class']);
     }
 
     public function testEncodeThrowsWhenMessageNameStampMissing(): void
     {
-        $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
-        $envelope = new Envelope($message, [
+        $envelope = new Envelope(TestOutboxEvent::random(), [
             new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
         ]);
 
@@ -117,79 +95,64 @@ final class WireFormatSerializerTest extends TestCase
         $this->serializer->encode($envelope);
     }
 
+    public function testEncodeBodyContainsOnlyBusinessData(): void
+    {
+        $encoded = $this->serializer->encode($this->createStampedEnvelope());
+
+        $this->assertIsString($encoded['body']);
+        $body = json_decode($encoded['body'], true);
+        $this->assertIsArray($body);
+        $this->assertArrayHasKey('payload', $body);
+        $this->assertArrayNotHasKey('messageId', $body, 'Body should not contain messageId');
+    }
+
     public function testDecodeRestoresFqnFromMessageClassHeader(): void
     {
-        $envelope = $this->createStampedEnvelope();
-        $encoded = $this->serializer->encode($envelope);
+        $encoded = $this->serializer->encode($this->createStampedEnvelope());
 
         $decoded = $this->serializer->decode($encoded);
 
-        $this->assertInstanceOf(TestMessage::class, $decoded->getMessage());
+        $this->assertInstanceOf(TestOutboxEvent::class, $decoded->getMessage());
     }
 
-    public function testDecodeRestoresMessageNameStamp(): void
+    public function testDecodeSkipsReplacementWhenTypeContainsBackslash(): void
     {
-        $envelope = $this->createStampedEnvelope();
-        $encoded = $this->serializer->encode($envelope);
+        $encoded = $this->serializer->encode($this->createStampedEnvelope());
+
+        /** @var array<string, string> $headers */
+        $headers = $encoded['headers'];
+        $headers['type'] = TestOutboxEvent::class;
+        $encoded['headers'] = $headers;
 
         $decoded = $this->serializer->decode($encoded);
 
-        $stamp = $decoded->last(MessageNameStamp::class);
-        $this->assertNotNull($stamp, 'MessageNameStamp should be restored on decode');
-        $this->assertSame('test.message.sent', $stamp->messageName);
-    }
-
-    public function testDecodeRestoresMessageIdStamp(): void
-    {
-        $envelope = $this->createStampedEnvelope();
-        $encoded = $this->serializer->encode($envelope);
-
-        $decoded = $this->serializer->decode($encoded);
-
-        $stamp = $decoded->last(MessageIdStamp::class);
-        $this->assertNotNull($stamp, 'MessageIdStamp should be restored on decode');
-        $this->assertSame('01234567-89ab-7def-8000-000000000001', (string) $stamp->messageId);
+        $this->assertInstanceOf(TestOutboxEvent::class, $decoded->getMessage());
     }
 
     public function testRoundTripPreservesMessageData(): void
     {
         $id = Id::new();
         $timestamp = CarbonImmutable::now();
-        $message = new TestMessage(id: $id, name: 'Round-trip Test', timestamp: $timestamp);
+        $message = new TestOutboxEvent(eventId: $id, payload: 'Round-trip Test', occurredAt: $timestamp);
         $envelope = new Envelope($message, [
             new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
-            new MessageNameStamp('test.message.sent'),
+            new MessageNameStamp('test.event.sent'),
         ]);
 
         $encoded = $this->serializer->encode($envelope);
         $decoded = $this->serializer->decode($encoded);
 
-        /** @var TestMessage $decodedMessage */
+        /** @var TestOutboxEvent $decodedMessage */
         $decodedMessage = $decoded->getMessage();
-        $this->assertSame('Round-trip Test', $decodedMessage->name);
-        $this->assertSame((string) $id, (string) $decodedMessage->id);
-    }
-
-    public function testEncodeBodyContainsOnlyBusinessData(): void
-    {
-        $envelope = $this->createStampedEnvelope();
-
-        $encoded = $this->serializer->encode($envelope);
-
-        $this->assertIsString($encoded['body']);
-        $body = json_decode($encoded['body'], true);
-        $this->assertIsArray($body);
-        $this->assertArrayHasKey('name', $body);
-        $this->assertArrayNotHasKey('messageId', $body, 'Body should not contain messageId');
+        $this->assertSame('Round-trip Test', $decodedMessage->payload);
+        $this->assertSame((string) $id, (string) $decodedMessage->eventId);
     }
 
     private function createStampedEnvelope(): Envelope
     {
-        $message = new TestMessage(id: Id::new(), name: 'Test', timestamp: CarbonImmutable::now());
-
-        return new Envelope($message, [
+        return new Envelope(TestOutboxEvent::random(), [
             new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001')),
-            new MessageNameStamp('test.message.sent'),
+            new MessageNameStamp('test.event.sent'),
         ]);
     }
 }

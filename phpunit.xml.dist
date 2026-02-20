@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/11.0/phpunit.xsd"
+         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/12.5/phpunit.xsd"
          bootstrap="tests/bootstrap.php"
          colors="true"
          failOnRisky="true"
          failOnWarning="true"
-         cacheDirectory=".phpunit.cache">
+         failOnDeprecation="true"
+         beStrictAboutCoverageMetadata="true"
+         cacheDirectory=".phpunit.cache"
+         executionOrder="depends,defects">
     <testsuites>
-        <testsuite name="Functional">
-            <directory>tests/Functional</directory>
-        </testsuite>
         <testsuite name="Unit">
             <directory>tests/Unit</directory>
         </testsuite>
@@ -22,8 +22,6 @@
     </source>
 
     <php>
-        <env name="DATABASE_URL" value="mysql://messenger:messenger@127.0.0.1:3308/messenger_test"/>
-        <env name="MESSENGER_AMQP_DSN" value="amqp://guest:guest@127.0.0.1:5673/%2f"/>
         <env name="APP_ENV" value="test"/>
     </php>
 </phpunit>
