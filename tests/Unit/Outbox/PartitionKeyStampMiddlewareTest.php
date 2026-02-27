@@ -44,9 +44,7 @@ final class PartitionKeyStampMiddlewareTest extends TestCase
 
     public function testOutboxMessageWithPartitionKeyStampPassesThrough(): void
     {
-        $envelope = new Envelope(TestOutboxEvent::random(), [
-            new PartitionKeyStamp('order-123'),
-        ]);
+        $envelope = new Envelope(TestOutboxEvent::random(), [new PartitionKeyStamp('order-123')]);
 
         $nextCalled = false;
         $result = $this->middleware->handle($envelope, MiddlewareStackFactory::createTracking($nextCalled));
@@ -69,9 +67,7 @@ final class PartitionKeyStampMiddlewareTest extends TestCase
 
     public function testOutboxMessageWithReceivedStampSkipsValidation(): void
     {
-        $envelope = new Envelope(TestOutboxEvent::random(), [
-            new ReceivedStamp('outbox'),
-        ]);
+        $envelope = new Envelope(TestOutboxEvent::random(), [new ReceivedStamp('outbox')]);
 
         $nextCalled = false;
         $this->middleware->handle($envelope, MiddlewareStackFactory::createTracking($nextCalled));

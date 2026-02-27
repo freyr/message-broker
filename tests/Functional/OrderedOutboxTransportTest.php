@@ -71,9 +71,7 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
 
     public function testSendStoresPartitionKey(): void
     {
-        $envelope = new Envelope(TestOutboxEvent::random(), [
-            new PartitionKeyStamp('order-abc'),
-        ]);
+        $envelope = new Envelope(TestOutboxEvent::random(), [new PartitionKeyStamp('order-abc')]);
 
         $result = $this->transport->send($envelope);
 
@@ -154,6 +152,7 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $this->transport->ack($fetched[0]);
 
         $count = self::$connection->fetchOne(sprintf('SELECT COUNT(*) FROM %s', self::TABLE));
+        $this->assertIsNumeric($count);
         $this->assertSame(0, (int) $count);
     }
 
@@ -167,6 +166,7 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $this->transport->reject($fetched[0]);
 
         $count = self::$connection->fetchOne(sprintf('SELECT COUNT(*) FROM %s', self::TABLE));
+        $this->assertIsNumeric($count);
         $this->assertSame(0, (int) $count);
     }
 
@@ -257,8 +257,11 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $result = $this->transport->send($envelope);
 
         $stamp = $result->last(TransportMessageIdStamp::class);
-        $this->assertNotNull($stamp);
+        $this->assertInstanceOf(TransportMessageIdStamp::class, $stamp);
 
-        return (string) $stamp->getId();
+        $id = $stamp->getId();
+        $this->assertIsString($id);
+
+        return $id;
     }
 }

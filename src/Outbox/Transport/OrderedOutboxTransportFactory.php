@@ -30,8 +30,14 @@ final readonly class OrderedOutboxTransportFactory implements TransportFactoryIn
         private ConnectionRegistry $registry,
     ) {}
 
-    public function createTransport(#[\SensitiveParameter] string $dsn, array $options, SerializerInterface $serializer): TransportInterface
-    {
+    /**
+     * @param array<string, mixed> $options
+     */
+    public function createTransport(
+        #[\SensitiveParameter] string $dsn,
+        array $options,
+        SerializerInterface $serializer,
+    ): TransportInterface {
         $params = parse_url($dsn);
 
         if ($params === false || !isset($params['host'])) {
@@ -57,16 +63,25 @@ final readonly class OrderedOutboxTransportFactory implements TransportFactoryIn
             ), 0, $e);
         }
 
+        $tableName = \is_string($configuration['table_name']) ? $configuration['table_name'] : 'messenger_messages';
+        $queueName = \is_string($configuration['queue_name']) ? $configuration['queue_name'] : 'default';
+        $rawTimeout = $configuration['redeliver_timeout'];
+        $redeliverTimeout = \is_int($rawTimeout) ? $rawTimeout : (\is_numeric($rawTimeout) ? (int) $rawTimeout : 3600);
+
+        /** @var \Doctrine\DBAL\Connection $driverConnection */
         return new OrderedOutboxTransport(
-            connection: $driverConnection, // @phpstan-ignore argument.type (ConnectionRegistry returns object, we need DBAL Connection)
+            connection: $driverConnection,
             serializer: $serializer,
-            tableName: $configuration['table_name'],
-            queueName: $configuration['queue_name'],
-            redeliverTimeout: (int) $configuration['redeliver_timeout'],
-            autoSetup: $configuration['auto_setup'],
+            tableName: $tableName,
+            queueName: $queueName,
+            redeliverTimeout: $redeliverTimeout,
+            autoSetup: (bool) $configuration['auto_setup'],
         );
     }
 
+    /**
+     * @param array<string, mixed> $options
+     */
     public function supports(#[\SensitiveParameter] string $dsn, array $options): bool
     {
         return str_starts_with($dsn, 'ordered-doctrine://');

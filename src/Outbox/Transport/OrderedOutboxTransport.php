@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Outbox\Transport;
 
 use Doctrine\DBAL\Connection;
-use Doctrine\DBAL\Schema\Column;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Types;
 use Freyr\MessageBroker\Outbox\PartitionKeyStamp;
@@ -38,7 +37,8 @@ final class OrderedOutboxTransport implements TransportInterface, SetupableTrans
 
     public function send(Envelope $envelope): Envelope
     {
-        $partitionKey = $envelope->last(PartitionKeyStamp::class)?->partitionKey ?? '';
+        $stamp = $envelope->last(PartitionKeyStamp::class);
+        $partitionKey = $stamp instanceof PartitionKeyStamp ? $stamp->partitionKey : '';
         $encoded = $this->serializer->encode($envelope);
         $now = new \DateTimeImmutable();
 
@@ -74,13 +74,13 @@ final class OrderedOutboxTransport implements TransportInterface, SetupableTrans
 
             $sql = sprintf(
                 'SELECT m.* FROM %s m '
-                . 'WHERE m.id IN ('
-                . '  SELECT MIN(sub.id) FROM %s sub'
-                . '  WHERE sub.queue_name = ?'
-                . '    AND (sub.delivered_at IS NULL OR sub.delivered_at < ?)'
-                . '    AND sub.available_at <= ?'
-                . '  GROUP BY sub.partition_key'
-                . ') LIMIT 1 FOR UPDATE SKIP LOCKED',
+                .'WHERE m.id IN ('
+                .'  SELECT MIN(sub.id) FROM %s sub'
+                .'  WHERE sub.queue_name = ?'
+                .'    AND (sub.delivered_at IS NULL OR sub.delivered_at < ?)'
+                .'    AND sub.available_at <= ?'
+                .'  GROUP BY sub.partition_key'
+                .') LIMIT 1 FOR UPDATE SKIP LOCKED',
                 $this->tableName,
                 $this->tableName,
             );
@@ -89,11 +89,7 @@ final class OrderedOutboxTransport implements TransportInterface, SetupableTrans
                 $this->queueName,
                 $redeliverLimit,
                 $now,
-            ], [
-                Types::STRING,
-                Types::DATETIME_IMMUTABLE,
-                Types::DATETIME_IMMUTABLE,
-            ]);
+            ], [Types::STRING, Types::DATETIME_IMMUTABLE, Types::DATETIME_IMMUTABLE]);
 
             $row = $result->fetchAssociative();
 
@@ -105,9 +101,15 @@ final class OrderedOutboxTransport implements TransportInterface, SetupableTrans
 
             $this->connection->update(
                 $this->tableName,
-                ['delivered_at' => $now],
-                ['id' => $row['id']],
-                ['delivered_at' => Types::DATETIME_IMMUTABLE],
+                [
+                    'delivered_at' => $now,
+                ],
+                [
+                    'id' => $row['id'],
+                ],
+                [
+                    'delivered_at' => Types::DATETIME_IMMUTABLE,
+                ],
             );
 
             $this->connection->commit();
@@ -117,14 +119,21 @@ final class OrderedOutboxTransport implements TransportInterface, SetupableTrans
             throw $e;
         }
 
-        $headers = json_decode($row['headers'], true, 512, JSON_THROW_ON_ERROR);
+        $body = \is_string($row['body']) ? $row['body'] : '';
+        $headersJson = \is_string($row['headers']) ? $row['headers'] : '{}';
+        /** @var array<string, string> $headers */
+        $headers = json_decode($headersJson, true, 512, JSON_THROW_ON_ERROR);
 
         $envelope = $this->serializer->decode([
-            'body' => $row['body'],
+            'body' => $body,
             'headers' => $headers,
         ]);
 
-        yield $envelope->with(new TransportMessageIdStamp((string) $row['id']));
+        $id = isset($row['id']) && (\is_string($row['id']) || \is_int($row['id']))
+            ? (string) $row['id']
+            : '0';
+
+        yield $envelope->with(new TransportMessageIdStamp($id));
     }
 
     public function ack(Envelope $envelope): void
@@ -135,7 +144,9 @@ final class OrderedOutboxTransport implements TransportInterface, SetupableTrans
             return;
         }
 
-        $this->connection->delete($this->tableName, ['id' => $stamp->getId()]);
+        $this->connection->delete($this->tableName, [
+            'id' => $stamp->getId(),
+        ]);
     }
 
     public function reject(Envelope $envelope): void
@@ -153,9 +164,15 @@ final class OrderedOutboxTransport implements TransportInterface, SetupableTrans
 
         $this->connection->update(
             $this->tableName,
-            ['delivered_at' => new \DateTimeImmutable()],
-            ['id' => $stamp->getId()],
-            ['delivered_at' => Types::DATETIME_IMMUTABLE],
+            [
+                'delivered_at' => new \DateTimeImmutable(),
+            ],
+            [
+                'id' => $stamp->getId(),
+            ],
+            [
+                'delivered_at' => Types::DATETIME_IMMUTABLE,
+            ],
         );
     }
 
@@ -175,15 +192,25 @@ final class OrderedOutboxTransport implements TransportInterface, SetupableTrans
         ]);
         $table->addColumn('body', Types::TEXT);
         $table->addColumn('headers', Types::TEXT);
-        $table->addColumn('queue_name', Types::STRING, ['length' => 190]);
+        $table->addColumn('queue_name', Types::STRING, [
+            'length' => 190,
+        ]);
         $table->addColumn('created_at', Types::DATETIME_IMMUTABLE);
         $table->addColumn('available_at', Types::DATETIME_IMMUTABLE);
-        $table->addColumn('delivered_at', Types::DATETIME_IMMUTABLE, ['notnull' => false]);
-        $table->addColumn('partition_key', Types::STRING, ['length' => 255, 'default' => '']);
+        $table->addColumn('delivered_at', Types::DATETIME_IMMUTABLE, [
+            'notnull' => false,
+        ]);
+        $table->addColumn('partition_key', Types::STRING, [
+            'length' => 255,
+            'default' => '',
+        ]);
 
         $table->setPrimaryKey(['id']);
         $table->addIndex(['queue_name', 'available_at', 'delivered_at', 'id'], 'idx_outbox_available');
-        $table->addIndex(['queue_name', 'partition_key', 'available_at', 'delivered_at', 'id'], 'idx_outbox_partition_order');
+        $table->addIndex(
+            ['queue_name', 'partition_key', 'available_at', 'delivered_at', 'id'],
+            'idx_outbox_partition_order'
+        );
 
         $schemaManager->createTable($table);
     }

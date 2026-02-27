@@ -17,27 +17,21 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
 {
     public function testSupportsOrderedDoctrineDsn(): void
     {
-        $factory = new OrderedOutboxTransportFactory(
-            $this->createMock(ConnectionRegistry::class),
-        );
+        $factory = new OrderedOutboxTransportFactory($this->createMock(ConnectionRegistry::class));
 
         $this->assertTrue($factory->supports('ordered-doctrine://default', []));
     }
 
     public function testDoesNotSupportStandardDoctrineDsn(): void
     {
-        $factory = new OrderedOutboxTransportFactory(
-            $this->createMock(ConnectionRegistry::class),
-        );
+        $factory = new OrderedOutboxTransportFactory($this->createMock(ConnectionRegistry::class));
 
         $this->assertFalse($factory->supports('doctrine://default', []));
     }
 
     public function testDoesNotSupportAmqpDsn(): void
     {
-        $factory = new OrderedOutboxTransportFactory(
-            $this->createMock(ConnectionRegistry::class),
-        );
+        $factory = new OrderedOutboxTransportFactory($this->createMock(ConnectionRegistry::class));
 
         $this->assertFalse($factory->supports('amqp://guest:guest@localhost', []));
     }
@@ -89,27 +83,17 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         $factory = new OrderedOutboxTransportFactory($registry);
         $serializer = $this->createMock(SerializerInterface::class);
 
-        $transport = $factory->createTransport(
-            'ordered-doctrine://default?auto_setup=true',
-            [],
-            $serializer,
-        );
+        $transport = $factory->createTransport('ordered-doctrine://default?auto_setup=true', [], $serializer);
 
         $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
     }
 
     public function testCreateTransportThrowsOnInvalidDsn(): void
     {
-        $factory = new OrderedOutboxTransportFactory(
-            $this->createMock(ConnectionRegistry::class),
-        );
+        $factory = new OrderedOutboxTransportFactory($this->createMock(ConnectionRegistry::class));
 
         $this->expectException(\InvalidArgumentException::class);
 
-        $factory->createTransport(
-            '://invalid',
-            [],
-            $this->createMock(SerializerInterface::class),
-        );
+        $factory->createTransport('://invalid', [], $this->createMock(SerializerInterface::class));
     }
 }

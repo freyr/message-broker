@@ -21,21 +21,23 @@ final readonly class PartitionKeyStampMiddleware implements MiddlewareInterface
     public function handle(Envelope $envelope, StackInterface $stack): Envelope
     {
         if (!$envelope->getMessage() instanceof OutboxMessage) {
-            return $stack->next()->handle($envelope, $stack);
+            return $stack->next()
+                ->handle($envelope, $stack);
         }
 
         if ($envelope->last(ReceivedStamp::class) !== null) {
-            return $stack->next()->handle($envelope, $stack);
+            return $stack->next()
+                ->handle($envelope, $stack);
         }
 
         if ($envelope->last(PartitionKeyStamp::class) === null) {
             throw new \LogicException(sprintf(
-                'OutboxMessage "%s" must have a PartitionKeyStamp. '
-                . 'Dispatch with: $bus->dispatch($event, [new PartitionKeyStamp($key)])',
+                'OutboxMessage "%s" must have a PartitionKeyStamp. Dispatch with: $bus->dispatch($event, [new PartitionKeyStamp($key)])',
                 $envelope->getMessage()::class,
             ));
         }
 
-        return $stack->next()->handle($envelope, $stack);
+        return $stack->next()
+            ->handle($envelope, $stack);
     }
 }

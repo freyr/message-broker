@@ -33,10 +33,13 @@ final class OrderedOutboxTransportTest extends TestCase
         $event = TestOutboxEvent::random();
         $envelope = new Envelope($event, [new PartitionKeyStamp('order-abc')]);
 
-        $this->serializer->method('encode')->willReturn([
-            'body' => '{"payload":"Test"}',
-            'headers' => ['type' => 'test.event.sent'],
-        ]);
+        $this->serializer->method('encode')
+            ->willReturn([
+                'body' => '{"payload":"Test"}',
+                'headers' => [
+                    'type' => 'test.event.sent',
+                ],
+            ]);
 
         $this->connection->expects($this->once())
             ->method('insert')
@@ -54,7 +57,8 @@ final class OrderedOutboxTransportTest extends TestCase
                 $this->anything(),
             );
 
-        $this->connection->method('lastInsertId')->willReturn('42');
+        $this->connection->method('lastInsertId')
+            ->willReturn('42');
 
         $transport = $this->createTransport();
         $result = $transport->send($envelope);
@@ -68,10 +72,11 @@ final class OrderedOutboxTransportTest extends TestCase
     {
         $envelope = new Envelope(TestOutboxEvent::random());
 
-        $this->serializer->method('encode')->willReturn([
-            'body' => '{}',
-            'headers' => [],
-        ]);
+        $this->serializer->method('encode')
+            ->willReturn([
+                'body' => '{}',
+                'headers' => [],
+            ]);
 
         $this->connection->expects($this->once())
             ->method('insert')
@@ -81,7 +86,8 @@ final class OrderedOutboxTransportTest extends TestCase
                 $this->anything(),
             );
 
-        $this->connection->method('lastInsertId')->willReturn('1');
+        $this->connection->method('lastInsertId')
+            ->willReturn('1');
 
         $transport = $this->createTransport();
         $transport->send($envelope);
@@ -92,22 +98,29 @@ final class OrderedOutboxTransportTest extends TestCase
         $event = TestOutboxEvent::random();
         $envelope = new Envelope($event);
 
-        $this->connection->expects($this->once())->method('beginTransaction');
-        $this->connection->expects($this->once())->method('commit');
+        $this->connection->expects($this->once())
+            ->method('beginTransaction');
+        $this->connection->expects($this->once())
+            ->method('commit');
 
         $result = $this->createMock(Result::class);
-        $result->method('fetchAssociative')->willReturn([
-            'id' => '7',
-            'body' => '{"payload":"Hello"}',
-            'headers' => '{"type":"test.event.sent"}',
-        ]);
+        $result->method('fetchAssociative')
+            ->willReturn([
+                'id' => '7',
+                'body' => '{"payload":"Hello"}',
+                'headers' => '{"type":"test.event.sent"}',
+            ]);
 
-        $this->connection->method('executeQuery')->willReturn($result);
+        $this->connection->method('executeQuery')
+            ->willReturn($result);
         $this->connection->expects($this->once())
             ->method('update')
-            ->with('messenger_outbox', $this->anything(), ['id' => '7'], $this->anything());
+            ->with('messenger_outbox', $this->anything(), [
+                'id' => '7',
+            ], $this->anything());
 
-        $this->serializer->method('decode')->willReturn($envelope);
+        $this->serializer->method('decode')
+            ->willReturn($envelope);
 
         $transport = $this->createTransport();
         $envelopes = iterator_to_array($transport->get());
@@ -120,13 +133,17 @@ final class OrderedOutboxTransportTest extends TestCase
 
     public function testGetReturnsEmptyWhenNoMessagesAvailable(): void
     {
-        $this->connection->expects($this->once())->method('beginTransaction');
-        $this->connection->expects($this->once())->method('commit');
+        $this->connection->expects($this->once())
+            ->method('beginTransaction');
+        $this->connection->expects($this->once())
+            ->method('commit');
 
         $result = $this->createMock(Result::class);
-        $result->method('fetchAssociative')->willReturn(false);
+        $result->method('fetchAssociative')
+            ->willReturn(false);
 
-        $this->connection->method('executeQuery')->willReturn($result);
+        $this->connection->method('executeQuery')
+            ->willReturn($result);
 
         $transport = $this->createTransport();
         $envelopes = iterator_to_array($transport->get());
@@ -136,13 +153,13 @@ final class OrderedOutboxTransportTest extends TestCase
 
     public function testAckDeletesRowById(): void
     {
-        $envelope = new Envelope(TestOutboxEvent::random(), [
-            new TransportMessageIdStamp('99'),
-        ]);
+        $envelope = new Envelope(TestOutboxEvent::random(), [new TransportMessageIdStamp('99')]);
 
         $this->connection->expects($this->once())
             ->method('delete')
-            ->with('messenger_outbox', ['id' => '99']);
+            ->with('messenger_outbox', [
+                'id' => '99',
+            ]);
 
         $transport = $this->createTransport();
         $transport->ack($envelope);
@@ -150,13 +167,13 @@ final class OrderedOutboxTransportTest extends TestCase
 
     public function testRejectDeletesRowById(): void
     {
-        $envelope = new Envelope(TestOutboxEvent::random(), [
-            new TransportMessageIdStamp('55'),
-        ]);
+        $envelope = new Envelope(TestOutboxEvent::random(), [new TransportMessageIdStamp('55')]);
 
         $this->connection->expects($this->once())
             ->method('delete')
-            ->with('messenger_outbox', ['id' => '55']);
+            ->with('messenger_outbox', [
+                'id' => '55',
+            ]);
 
         $transport = $this->createTransport();
         $transport->reject($envelope);
@@ -164,16 +181,16 @@ final class OrderedOutboxTransportTest extends TestCase
 
     public function testKeepaliveUpdatesDeliveredAt(): void
     {
-        $envelope = new Envelope(TestOutboxEvent::random(), [
-            new TransportMessageIdStamp('33'),
-        ]);
+        $envelope = new Envelope(TestOutboxEvent::random(), [new TransportMessageIdStamp('33')]);
 
         $this->connection->expects($this->once())
             ->method('update')
             ->with(
                 'messenger_outbox',
                 $this->callback(fn (array $data): bool => isset($data['delivered_at'])),
-                ['id' => '33'],
+                [
+                    'id' => '33',
+                ],
                 $this->anything(),
             );
 
@@ -185,7 +202,8 @@ final class OrderedOutboxTransportTest extends TestCase
     {
         $envelope = new Envelope(TestOutboxEvent::random());
 
-        $this->connection->expects($this->never())->method('update');
+        $this->connection->expects($this->never())
+            ->method('update');
 
         $transport = $this->createTransport();
         $transport->keepalive($envelope);
