@@ -162,14 +162,14 @@ The subquery needs an efficient `MIN(id) GROUP BY partition_key` with WHERE filt
 
 ### Phase 1: PartitionKeyStamp + PartitionKeyStampMiddleware
 
-- [ ] `PartitionKeyStamp` — `final readonly class` implementing `StampInterface`, property `string $partitionKey`
-- [ ] `PartitionKeyStampMiddleware` — validates stamp presence at dispatch time
+- [x] `PartitionKeyStamp` — `final readonly class` implementing `StampInterface`, property `string $partitionKey`
+- [x] `PartitionKeyStampMiddleware` — validates stamp presence at dispatch time
   - Follows existing middleware guard pattern (3 checks)
   - Only validates at dispatch time (skips when `ReceivedStamp` present)
   - Only validates `OutboxMessage` envelopes
   - Throws `\LogicException` if `OutboxMessage` lacks `PartitionKeyStamp`
-- [ ] Unit tests for stamp (trivial)
-- [ ] Unit tests for middleware following `MessageIdStampMiddlewareTest` pattern:
+- [x] Unit tests for stamp (trivial)
+- [x] Unit tests for middleware following `MessageIdStampMiddlewareTest` pattern:
   - `testOutboxMessageWithoutPartitionKeyStampThrows`
   - `testOutboxMessageWithPartitionKeyStampPassesThrough`
   - `testNonOutboxMessagePassesThroughWithoutValidation`
@@ -215,14 +215,14 @@ final readonly class PartitionKeyStampMiddleware implements MiddlewareInterface
 
 The core of the feature. Standalone transport implementation (~150-200 lines).
 
-- [ ] Implements `TransportInterface`, `SetupableTransportInterface`, `KeepaliveReceiverInterface`
-- [ ] `send()` — serialises envelope, extracts `PartitionKeyStamp`, INSERTs with `partition_key` column
-- [ ] `get()` — partition-aware head-of-line query with redelivery condition, deserialises envelope
-- [ ] `ack()` — DELETEs row by ID
-- [ ] `reject()` — DELETEs row by ID
-- [ ] `setup()` — creates table with `partition_key` column, indexes, and `BIGINT AUTO_INCREMENT` id
-- [ ] `keepalive()` — refreshes `delivered_at` to prevent false redeliver timeout
-- [ ] Unit tests for each method (mocked DBAL connection)
+- [x] Implements `TransportInterface`, `SetupableTransportInterface`, `KeepaliveReceiverInterface`
+- [x] `send()` — serialises envelope, extracts `PartitionKeyStamp`, INSERTs with `partition_key` column
+- [x] `get()` — partition-aware head-of-line query with redelivery condition, deserialises envelope
+- [x] `ack()` — DELETEs row by ID
+- [x] `reject()` — DELETEs row by ID
+- [x] `setup()` — creates table with `partition_key` column, indexes, and `BIGINT AUTO_INCREMENT` id
+- [x] `keepalive()` — refreshes `delivered_at` to prevent false redeliver timeout
+- [x] Unit tests for each method (mocked DBAL connection)
 
 #### src/Outbox/Transport/OrderedOutboxTransport.php
 
@@ -348,14 +348,14 @@ public function keepalive(Envelope $envelope): void
 
 ### Phase 3: OrderedOutboxTransportFactory + Service Registration
 
-- [ ] `OrderedOutboxTransportFactory` implementing `TransportFactoryInterface`
-- [ ] Supports `ordered-doctrine://` DSN scheme
-- [ ] Parses DSN for connection name, table name, queue name, redeliver timeout, auto_setup
-- [ ] Creates `OrderedOutboxTransport` with resolved DBAL connection
-- [ ] Register factory in `config/services.yaml` with `messenger.transport_factory` tag
-- [ ] Register `PartitionKeyStampMiddleware` in `config/services.yaml`
-- [ ] Update recipe `messenger.yaml` with commented `ordered-doctrine://` DSN option
-- [ ] Unit tests for factory
+- [x] `OrderedOutboxTransportFactory` implementing `TransportFactoryInterface`
+- [x] Supports `ordered-doctrine://` DSN scheme
+- [x] Parses DSN for connection name, table name, queue name, redeliver timeout, auto_setup
+- [x] Creates `OrderedOutboxTransport` with resolved DBAL connection
+- [x] Register factory in `config/services.yaml` with `messenger.transport_factory` tag
+- [x] Register `PartitionKeyStampMiddleware` in `config/services.yaml`
+- [x] Update recipe `messenger.yaml` with commented `ordered-doctrine://` DSN option
+- [x] Unit tests for factory
 
 #### src/Outbox/Transport/OrderedOutboxTransportFactory.php
 
@@ -431,7 +431,7 @@ Freyr\MessageBroker\Outbox\PartitionKeyStampMiddleware:
 - [ ] Create `docs/ordered-delivery.md` — full guide with examples
 - [ ] Update `CLAUDE.md` — add ordered outbox architecture section
 - [ ] Update `README.md` — mention ordered delivery feature
-- [ ] Update recipe comments
+- [x] Update recipe comments
 
 ---
 
@@ -469,7 +469,7 @@ A bundle configuration flag to enable ordered delivery.
 - [ ] Events with different partition keys are processed in parallel across workers
 - [ ] `PartitionKeyStampMiddleware` throws `LogicException` if `OutboxMessage` lacks `PartitionKeyStamp`
 - [ ] Crashed worker's message is eventually redelivered (redeliver timeout) without stalling the partition
-- [ ] `keepalive()` refreshes `delivered_at` to prevent false redeliver timeout during long operations
+- [x] `keepalive()` refreshes `delivered_at` to prevent false redeliver timeout during long operations
 - [ ] Empty partition key (`''`) means no ordering constraint
 - [ ] Auto-setup creates the outbox table with `partition_key` column
 - [ ] Feature is opt-in via `ordered-doctrine://` DSN; `doctrine://` continues to work as before
