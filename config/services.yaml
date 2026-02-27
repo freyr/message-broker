@@ -69,6 +69,22 @@ services:
         tags:
             - { name: 'messenger.middleware' }
 
+    # Ordered Outbox Transport Factory
+    # Creates OrderedOutboxTransport from ordered-doctrine:// DSN.
+    # Always registered — inert unless the DSN matches.
+    Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransportFactory:
+        arguments:
+            $registry: '@doctrine'
+        tags:
+            - { name: 'messenger.transport_factory' }
+
+    # PartitionKeyStamp Middleware
+    # Validates that OutboxMessage envelopes carry a PartitionKeyStamp at dispatch time.
+    # Required when using ordered-doctrine:// transport for per-partition FIFO ordering.
+    Freyr\MessageBroker\Outbox\PartitionKeyStampMiddleware:
+        tags:
+            - { name: 'messenger.middleware' }
+
     # Deduplication Store Cleanup Command
     # Removes old deduplication records
     Freyr\MessageBroker\Command\DeduplicationStoreCleanup:

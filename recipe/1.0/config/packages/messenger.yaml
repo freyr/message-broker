@@ -20,6 +20,8 @@ framework:
                     allow_no_handlers: false
                 middleware:
                     - 'Freyr\MessageBroker\Outbox\MessageIdStampMiddleware'
+                    # Add PartitionKeyStampMiddleware when using ordered-doctrine:// transport:
+                    # - 'Freyr\MessageBroker\Outbox\PartitionKeyStampMiddleware'
                     - doctrine_transaction
                     - 'Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware'
                     # DeduplicationMiddleware is registered via service tag (priority -10)
@@ -28,6 +30,8 @@ framework:
         transports:
             # Outbox: stores domain events in the database within your business transaction.
             # Consumed by OutboxPublishingMiddleware, which delegates to transport-specific publishers.
+            #
+            # Standard outbox (no ordering guarantee):
             outbox:
                 dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
                 options:
@@ -36,6 +40,15 @@ framework:
                 #     max_retries: 3
                 #     delay: 1000
                 #     multiplier: 2
+
+            # Ordered outbox (per-aggregate causal ordering):
+            # Change dsn to ordered-doctrine:// to enable partition-aware FIFO ordering.
+            # Events with the same partition key are delivered to AMQP in insertion order.
+            # Dispatch with: $bus->dispatch($event, [new PartitionKeyStamp($aggregateId)])
+            # outbox:
+            #     dsn: 'ordered-doctrine://default?table_name=messenger_outbox&queue_name=outbox'
+            #     options:
+            #         auto_setup: true
 
             # AMQP publish: AmqpOutboxPublisher publishes events here.
             # Uses OutboxSerializer to translate PHP class names to semantic message names.
