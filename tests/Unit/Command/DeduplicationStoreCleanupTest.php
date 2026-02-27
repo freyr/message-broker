@@ -27,8 +27,7 @@ final class DeduplicationStoreCleanupTest extends TestCase
         $connection = $this->createMock(Connection::class);
         $connection->expects($this->once())
             ->method('executeStatement')
-            ->with($this->stringContains('DATE_SUB'), $this->equalTo([7]))
-            ->willReturn(0);
+            ->with($this->stringContains('DATE_SUB'), $this->equalTo([7]));
 
         $command = new DeduplicationStoreCleanup($connection);
         $tester = new CommandTester($command);
@@ -44,8 +43,7 @@ final class DeduplicationStoreCleanupTest extends TestCase
         $connection = $this->createMock(Connection::class);
         $connection->expects($this->once())
             ->method('executeStatement')
-            ->with($this->stringContains('DATE_SUB'), $this->equalTo([30]))
-            ->willReturn(0);
+            ->with($this->stringContains('DATE_SUB'), $this->equalTo([30]));
 
         $command = new DeduplicationStoreCleanup($connection);
         $tester = new CommandTester($command);
@@ -61,8 +59,7 @@ final class DeduplicationStoreCleanupTest extends TestCase
         $connection = $this->createMock(Connection::class);
         $connection->expects($this->once())
             ->method('executeStatement')
-            ->with($this->stringContains('custom_dedup_table'), $this->anything())
-            ->willReturn(3);
+            ->with($this->stringContains('custom_dedup_table'), $this->anything());
 
         $command = new DeduplicationStoreCleanup($connection, 'custom_dedup_table');
         $tester = new CommandTester($command);

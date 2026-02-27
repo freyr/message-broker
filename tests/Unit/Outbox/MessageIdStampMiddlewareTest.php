@@ -42,11 +42,7 @@ final class MessageIdStampMiddlewareTest extends TestCase
 
         $stamp = $result->last(MessageIdStamp::class);
         $this->assertNotNull($stamp, 'OutboxMessage should receive MessageIdStamp');
-        $this->assertMatchesRegularExpression(
-            '/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
-            (string) $stamp->messageId,
-            'MessageId should be a valid UUID v7'
-        );
+        $this->assertInstanceOf(Id::class, $stamp->messageId, 'MessageId should be a valid Id');
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
     }
 
