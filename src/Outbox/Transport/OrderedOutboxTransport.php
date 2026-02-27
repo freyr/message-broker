@@ -80,7 +80,7 @@ final class OrderedOutboxTransport implements TransportInterface, SetupableTrans
                 . '    AND (sub.delivered_at IS NULL OR sub.delivered_at < ?)'
                 . '    AND sub.available_at <= ?'
                 . '  GROUP BY sub.partition_key'
-                . ') FOR UPDATE SKIP LOCKED LIMIT 1',
+                . ') LIMIT 1 FOR UPDATE SKIP LOCKED',
                 $this->tableName,
                 $this->tableName,
             );
