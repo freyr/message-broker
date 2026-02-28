@@ -18,34 +18,34 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
 {
     public function testSupportsOrderedDoctrineDsn(): void
     {
-        $factory = new OrderedOutboxTransportFactory($this->createMock(ConnectionRegistry::class));
+        $factory = new OrderedOutboxTransportFactory($this->createStub(ConnectionRegistry::class));
 
         $this->assertTrue($factory->supports('ordered-doctrine://default', []));
     }
 
     public function testDoesNotSupportStandardDoctrineDsn(): void
     {
-        $factory = new OrderedOutboxTransportFactory($this->createMock(ConnectionRegistry::class));
+        $factory = new OrderedOutboxTransportFactory($this->createStub(ConnectionRegistry::class));
 
         $this->assertFalse($factory->supports('doctrine://default', []));
     }
 
     public function testDoesNotSupportAmqpDsn(): void
     {
-        $factory = new OrderedOutboxTransportFactory($this->createMock(ConnectionRegistry::class));
+        $factory = new OrderedOutboxTransportFactory($this->createStub(ConnectionRegistry::class));
 
         $this->assertFalse($factory->supports('amqp://guest:guest@localhost', []));
     }
 
     public function testCreateTransportReturnsOrderedOutboxTransport(): void
     {
-        $registry = $this->createMock(ConnectionRegistry::class);
+        $registry = $this->createStub(ConnectionRegistry::class);
         $registry->method('getConnection')
             ->with('default')
-            ->willReturn($this->createMock(Connection::class));
+            ->willReturn($this->createStub(Connection::class));
 
         $factory = new OrderedOutboxTransportFactory($registry);
-        $serializer = $this->createMock(SerializerInterface::class);
+        $serializer = $this->createStub(SerializerInterface::class);
 
         $transport = $factory->createTransport(
             'ordered-doctrine://default?table_name=messenger_outbox&queue_name=outbox',
@@ -58,13 +58,13 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
 
     public function testCreateTransportWithCustomOptions(): void
     {
-        $registry = $this->createMock(ConnectionRegistry::class);
+        $registry = $this->createStub(ConnectionRegistry::class);
         $registry->method('getConnection')
             ->with('events')
-            ->willReturn($this->createMock(Connection::class));
+            ->willReturn($this->createStub(Connection::class));
 
         $factory = new OrderedOutboxTransportFactory($registry);
-        $serializer = $this->createMock(SerializerInterface::class);
+        $serializer = $this->createStub(SerializerInterface::class);
 
         $transport = $factory->createTransport(
             'ordered-doctrine://events?table_name=my_outbox&queue_name=my_queue&redeliver_timeout=7200',
@@ -77,12 +77,12 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
 
     public function testCreateTransportWithAutoSetup(): void
     {
-        $registry = $this->createMock(ConnectionRegistry::class);
+        $registry = $this->createStub(ConnectionRegistry::class);
         $registry->method('getConnection')
-            ->willReturn($this->createMock(Connection::class));
+            ->willReturn($this->createStub(Connection::class));
 
         $factory = new OrderedOutboxTransportFactory($registry);
-        $serializer = $this->createMock(SerializerInterface::class);
+        $serializer = $this->createStub(SerializerInterface::class);
 
         $transport = $factory->createTransport('ordered-doctrine://default?auto_setup=true', [], $serializer);
 
@@ -91,18 +91,18 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
 
     public function testCreateTransportThrowsOnInvalidDsn(): void
     {
-        $factory = new OrderedOutboxTransportFactory($this->createMock(ConnectionRegistry::class));
+        $factory = new OrderedOutboxTransportFactory($this->createStub(ConnectionRegistry::class));
 
         $this->expectException(\InvalidArgumentException::class);
 
-        $factory->createTransport('://invalid', [], $this->createMock(SerializerInterface::class));
+        $factory->createTransport('://invalid', [], $this->createStub(SerializerInterface::class));
     }
 
     public function testCreateTransportRejectsInvalidTableName(): void
     {
-        $registry = $this->createMock(ConnectionRegistry::class);
+        $registry = $this->createStub(ConnectionRegistry::class);
         $registry->method('getConnection')
-            ->willReturn($this->createMock(Connection::class));
+            ->willReturn($this->createStub(Connection::class));
 
         $factory = new OrderedOutboxTransportFactory($registry);
 
@@ -112,15 +112,15 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         $factory->createTransport(
             'ordered-doctrine://default?table_name=drop%20table%20users',
             [],
-            $this->createMock(SerializerInterface::class),
+            $this->createStub(SerializerInterface::class),
         );
     }
 
     public function testCreateTransportRejectsTableNameStartingWithDigit(): void
     {
-        $registry = $this->createMock(ConnectionRegistry::class);
+        $registry = $this->createStub(ConnectionRegistry::class);
         $registry->method('getConnection')
-            ->willReturn($this->createMock(Connection::class));
+            ->willReturn($this->createStub(Connection::class));
 
         $factory = new OrderedOutboxTransportFactory($registry);
 
@@ -129,13 +129,13 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         $factory->createTransport(
             'ordered-doctrine://default?table_name=1invalid',
             [],
-            $this->createMock(SerializerInterface::class),
+            $this->createStub(SerializerInterface::class),
         );
     }
 
     public function testCreateTransportWrapsConnectionNotFoundInTransportException(): void
     {
-        $registry = $this->createMock(ConnectionRegistry::class);
+        $registry = $this->createStub(ConnectionRegistry::class);
         $registry->method('getConnection')
             ->willThrowException(new \InvalidArgumentException('No connection named "missing"'));
 
@@ -147,15 +147,15 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         $factory->createTransport(
             'ordered-doctrine://missing',
             [],
-            $this->createMock(SerializerInterface::class),
+            $this->createStub(SerializerInterface::class),
         );
     }
 
     public function testDsnQueryOverridesOptionsWhichOverrideDefaults(): void
     {
-        $registry = $this->createMock(ConnectionRegistry::class);
+        $registry = $this->createStub(ConnectionRegistry::class);
         $registry->method('getConnection')
-            ->willReturn($this->createMock(Connection::class));
+            ->willReturn($this->createStub(Connection::class));
 
         $factory = new OrderedOutboxTransportFactory($registry);
 
@@ -166,7 +166,7 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
             [
                 'table_name' => 'from_options',
             ],
-            $this->createMock(SerializerInterface::class),
+            $this->createStub(SerializerInterface::class),
         );
 
         $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
@@ -174,16 +174,16 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
 
     public function testCreateTransportWithNoQueryStringUsesDefaults(): void
     {
-        $registry = $this->createMock(ConnectionRegistry::class);
+        $registry = $this->createStub(ConnectionRegistry::class);
         $registry->method('getConnection')
-            ->willReturn($this->createMock(Connection::class));
+            ->willReturn($this->createStub(Connection::class));
 
         $factory = new OrderedOutboxTransportFactory($registry);
 
         $transport = $factory->createTransport(
             'ordered-doctrine://default',
             [],
-            $this->createMock(SerializerInterface::class),
+            $this->createStub(SerializerInterface::class),
         );
 
         $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);

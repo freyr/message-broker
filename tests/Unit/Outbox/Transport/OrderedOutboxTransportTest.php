@@ -9,8 +9,10 @@ use Doctrine\DBAL\Result;
 use Freyr\MessageBroker\Outbox\PartitionKeyStamp;
 use Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransport;
 use Freyr\MessageBroker\Tests\Fixtures\TestOutboxEvent;
+use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\MockObject\MockObject;
+use PHPUnit\Framework\MockObject\Stub;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Stamp\TransportMessageIdStamp;
@@ -20,12 +22,12 @@ use Symfony\Component\Messenger\Transport\Serialization\SerializerInterface;
 final class OrderedOutboxTransportTest extends TestCase
 {
     private Connection&MockObject $connection;
-    private SerializerInterface&MockObject $serializer;
+    private SerializerInterface&Stub $serializer;
 
     protected function setUp(): void
     {
         $this->connection = $this->createMock(Connection::class);
-        $this->serializer = $this->createMock(SerializerInterface::class);
+        $this->serializer = $this->createStub(SerializerInterface::class);
     }
 
     public function testSendExtractsPartitionKeyAndInsertsRow(): void
@@ -103,7 +105,7 @@ final class OrderedOutboxTransportTest extends TestCase
         $this->connection->expects($this->once())
             ->method('commit');
 
-        $result = $this->createMock(Result::class);
+        $result = $this->createStub(Result::class);
         $result->method('fetchAssociative')
             ->willReturn([
                 'id' => '7',
@@ -138,7 +140,7 @@ final class OrderedOutboxTransportTest extends TestCase
         $this->connection->expects($this->once())
             ->method('commit');
 
-        $result = $this->createMock(Result::class);
+        $result = $this->createStub(Result::class);
         $result->method('fetchAssociative')
             ->willReturn(false);
 
@@ -229,6 +231,7 @@ final class OrderedOutboxTransportTest extends TestCase
         iterator_to_array($transport->get());
     }
 
+    #[AllowMockObjectsWithoutExpectations]
     public function testSendPreservesExistingStamps(): void
     {
         $partitionStamp = new PartitionKeyStamp('order-99');
@@ -240,10 +243,17 @@ final class OrderedOutboxTransportTest extends TestCase
                 'body' => '{}',
                 'headers' => [],
             ]);
-        $this->connection->method('lastInsertId')
+
+        $connection = $this->createStub(Connection::class);
+        $connection->method('lastInsertId')
             ->willReturn('10');
 
-        $transport = $this->createTransport();
+        $transport = new OrderedOutboxTransport(
+            connection: $connection,
+            serializer: $this->serializer,
+            tableName: 'messenger_outbox',
+            queueName: 'outbox',
+        );
         $result = $transport->send($envelope);
 
         $this->assertNotNull($result->last(PartitionKeyStamp::class), 'PartitionKeyStamp must be preserved');

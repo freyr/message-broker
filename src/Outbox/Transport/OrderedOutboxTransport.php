@@ -10,10 +10,17 @@ use Doctrine\DBAL\Types\Types;
 use Freyr\MessageBroker\Outbox\PartitionKeyStamp;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Stamp\TransportMessageIdStamp;
-use Symfony\Component\Messenger\Transport\Receiver\KeepaliveReceiverInterface;
 use Symfony\Component\Messenger\Transport\Serialization\SerializerInterface;
 use Symfony\Component\Messenger\Transport\SetupableTransportInterface;
 use Symfony\Component\Messenger\Transport\TransportInterface;
+
+if (interface_exists(\Symfony\Component\Messenger\Transport\Receiver\KeepaliveReceiverInterface::class)) {
+    /** @internal Compatibility shim — Symfony >=7.1 adds KeepaliveReceiverInterface. */
+    interface OrderedOutboxTransportKeepaliveCompat extends TransportInterface, SetupableTransportInterface, \Symfony\Component\Messenger\Transport\Receiver\KeepaliveReceiverInterface {}
+} else {
+    /** @internal Compatibility shim — Symfony <7.1 where KeepaliveReceiverInterface does not exist. */
+    interface OrderedOutboxTransportKeepaliveCompat extends TransportInterface, SetupableTransportInterface {}
+}
 
 /**
  * Ordered outbox transport with per-partition FIFO delivery.
@@ -24,7 +31,7 @@ use Symfony\Component\Messenger\Transport\TransportInterface;
  *
  * Activate by using the `ordered-doctrine://` DSN scheme.
  */
-final class OrderedOutboxTransport implements TransportInterface, SetupableTransportInterface, KeepaliveReceiverInterface
+final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCompat
 {
     public function __construct(
         private readonly Connection $connection,
