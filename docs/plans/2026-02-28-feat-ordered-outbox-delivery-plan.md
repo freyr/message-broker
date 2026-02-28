@@ -550,7 +550,7 @@ For existing production systems:
 ### Institutional Learnings Applied
 
 - `messenger_outbox.id` MUST be `BIGINT AUTO_INCREMENT` (Symfony requirement) — `docs/solutions/database-issues/migration-schema-mismatch-ci-vs-local.md`
-- Middleware tagged with `messenger.middleware` is NOT auto-added to bus — must be explicit — `docs/solutions/test-failures/doctrine-transaction-middleware-orm-configuration.md`
+- Middleware tagged with `messenger.middleware` IS auto-registered into bus — use `priority` for ordering — `docs/solutions/test-failures/doctrine-transaction-middleware-orm-configuration.md`
 - Full namespace required for stamp headers — `docs/solutions/test-failures/phase-1-test-implementation-discoveries.md`
 - Schema setup in `setUpBeforeClass()`, check table existence before truncating — `docs/solutions/ci-issues/hidden-schema-failures-fresh-environment.md`
 

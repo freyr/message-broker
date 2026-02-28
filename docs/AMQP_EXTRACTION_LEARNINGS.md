@@ -70,34 +70,13 @@ abstract class FunctionalTestCase extends KernelTestCase
 
 **File:** `/Users/michal/code/freyr/message-broker/docs/solutions/test-failures/doctrine-transaction-middleware-orm-configuration.md`
 
-**Applies to AMQP extraction:** CRITICAL for middleware registration understanding
+**Applies to AMQP extraction:** Middleware registration understanding
 
-**Key Issue Discovered:**
-> "Middleware tagged with `messenger.middleware` is NOT automatically added to bus middleware stacks. The tag only makes the middleware **available** to be referenced, but it must still be **explicitly listed** in the bus configuration."
-
-**Critical Quote:**
-```yaml
-# ❌ WRONG - Service tag alone doesn't register middleware to buses
-Freyr\MessageBroker\Inbox\DeduplicationMiddleware:
-    tags:
-        - { name: 'messenger.middleware', priority: -10 }
-
-# ✅ CORRECT - Must explicitly list in bus configuration
-framework:
-    messenger:
-        buses:
-            messenger.bus.default:
-                middleware:
-                    - doctrine_transaction  # Priority 0
-                    - 'Freyr\MessageBroker\Inbox\DeduplicationMiddleware'  # Priority -10
-```
+**Corrected understanding (2026-02-28):** The `messenger.middleware` tag DOES auto-register middleware into buses. The original claim that it did not was a misdiagnosis. Explicit listing in bus configuration is useful when ordering matters, but the tag itself handles registration.
 
 **Why This Matters for AMQP Extraction:**
 
-The AMQP package contains **no middleware**, but this learning reveals a critical DI pattern:
-- Service tags alone don't auto-register components to bus/container
-- Explicit configuration is required in `FreyrMessageBrokerAmqpExtension`
-- This applies directly to `message_broker.outbox_publisher` tag registration
+The AMQP package contains **no middleware**. The `message_broker.outbox_publisher` tag registration uses a compiler pass (`OutboxPublisherPass`) for service locator population — this is a different pattern from middleware auto-registration.
 
 **Application to `AmqpOutboxPublisher` Service Registration:**
 

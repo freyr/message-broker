@@ -52,11 +52,9 @@ symfony/var-exporter 8.0 **removed the `ProxyHelper::generateLazyGhost()` method
 - Doctrine ORM 3.6.1 - still checks for LazyGhost by default
 - PHP 8.4.17 - has native lazy object support
 
-### Issue 3: Middleware Tag vs Explicit Configuration
+### Issue 3: Middleware Ordering When Overriding the Default Stack
 
-Middleware tagged with `messenger.middleware` is NOT automatically added to bus middleware stacks. The tag only makes the middleware **available** to be referenced, but it must still be **explicitly listed** in the bus configuration.
-
-**This is by design**: Symfony Messenger requires explicit middleware ordering to ensure correct priority/execution order.
+When the `middleware` key is explicitly defined in bus configuration, the listed middleware is added alongside the default stack. Middleware tagged with `messenger.middleware` IS auto-registered into the bus. The original issue was caused by a configuration change that affected ordering, not by the tag failing to register the middleware.
 
 ## Investigation Steps
 
@@ -167,9 +165,7 @@ $ phpunit tests/Functional/InboxFlowTest.php --testdox
 +            # DeduplicationMiddleware (priority -10) registered via service tag
 ```
 
-**FOUND IT**: We removed `DeduplicationMiddleware` from the explicit middleware list, assuming the service tag would auto-add it.
-
-**This assumption was wrong**: The `messenger.middleware` tag does NOT automatically add middleware to bus stacks.
+**FOUND IT**: We removed `DeduplicationMiddleware` from the explicit middleware list. The configuration change affected middleware ordering.
 
 ## Complete Solution
 
@@ -237,11 +233,10 @@ framework:
                     - 'Freyr\MessageBroker\Inbox\DeduplicationMiddleware'  # Priority -10
 ```
 
-**Why explicit listing is required**:
-- The `messenger.middleware` service tag does NOT auto-add middleware to buses
-- The tag only makes middleware **available** for reference
-- Explicit listing ensures correct execution order
+**Why explicit listing can be useful**:
+- Explicit listing ensures correct execution order when ordering matters
 - `doctrine_transaction` must run BEFORE `DeduplicationMiddleware`
+- The `messenger.middleware` tag DOES auto-register middleware into buses
 
 ### 3. Keep Middleware Service Tagged (for DI)
 
@@ -250,7 +245,6 @@ framework:
 ```yaml
 services:
     # Deduplication Middleware
-    # Tag is for service discovery, NOT automatic bus registration
     Freyr\MessageBroker\Inbox\DeduplicationMiddleware:
         arguments:
             $store: '@Freyr\MessageBroker\Inbox\DeduplicationStore'
@@ -258,7 +252,7 @@ services:
             - { name: 'messenger.middleware', priority: -10 }
 ```
 
-**Important**: Keep the tag - it's needed for the service container, but it doesn't automatically add the middleware to buses.
+**Important**: The tag auto-registers the middleware into buses. The priority attribute controls execution order.
 
 ## Verification
 
@@ -418,7 +412,7 @@ final class ConfigurationValidationTest extends KernelTestCase
 1. **`doctrine_transaction` requires ORM** - Even in DBAL-only projects, configure ORM for test environments
 2. **PHP 8.4 native lazy objects** - Use `enable_native_lazy_objects: true` instead of `enable_lazy_ghost_objects`
 3. **symfony/var-exporter 8.0 compatibility** - Removed LazyGhost support, use native PHP 8.4 feature
-4. **Middleware tags don't auto-add to buses** - Always explicitly list middleware in bus configuration
+4. **Middleware tags DO auto-register into buses** - The `messenger.middleware` tag auto-adds middleware; use `priority` to control ordering
 5. **Middleware ordering matters** - `doctrine_transaction` must run before `DeduplicationMiddleware`
 6. **Empty entity directory is fine** - ORM requires mappings config even if no entities exist
 

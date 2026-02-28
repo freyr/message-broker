@@ -216,9 +216,7 @@ Worker → messenger:consume amqp_orders
 
 ### Middleware ordering
 
-**The `messenger.middleware` tag priority has no effect in standard Symfony.** Middleware ordering is determined solely by the explicit order in the `middleware:` config array (confirmed by `FrameworkExtension` source and `MessengerPass` compiler pass). The tag registers the service as a middleware factory, but does not auto-insert it into any bus.
-
-**Institutional learning** (from `docs/solutions/test-failures/deduplication-middleware-not-running-in-tests.md`): Middleware must be explicitly listed in the bus `middleware` config. Tag-only registration causes silent failures where middleware is registered but never executes.
+**Corrected (2026-02-28):** The `messenger.middleware` tag DOES auto-register middleware into buses. The `priority` attribute on the tag controls execution order. Explicit listing in the bus `middleware` config is useful when you need precise ordering alongside built-in middleware like `doctrine_transaction`.
 
 User-facing `messenger.yaml` configuration:
 ```yaml
