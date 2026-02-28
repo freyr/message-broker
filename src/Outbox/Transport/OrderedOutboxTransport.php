@@ -37,6 +37,11 @@ final class OrderedOutboxTransport implements TransportInterface, SetupableTrans
 
     public function send(Envelope $envelope): Envelope
     {
+        if ($this->autoSetup) {
+            $this->setup();
+            $this->autoSetup = false;
+        }
+
         $stamp = $envelope->last(PartitionKeyStamp::class);
         $partitionKey = $stamp instanceof PartitionKeyStamp ? $stamp->partitionKey : '';
         $encoded = $this->serializer->encode($envelope);
@@ -181,6 +186,8 @@ final class OrderedOutboxTransport implements TransportInterface, SetupableTrans
         $schemaManager = $this->connection->createSchemaManager();
 
         if ($schemaManager->tablesExist([$this->tableName])) {
+            $this->addPartitionKeyColumnIfMissing($schemaManager);
+
             return;
         }
 
@@ -213,5 +220,27 @@ final class OrderedOutboxTransport implements TransportInterface, SetupableTrans
         );
 
         $schemaManager->createTable($table);
+    }
+
+    /**
+     * @param \Doctrine\DBAL\Schema\AbstractSchemaManager<\Doctrine\DBAL\Platforms\AbstractPlatform> $schemaManager
+     */
+    private function addPartitionKeyColumnIfMissing(\Doctrine\DBAL\Schema\AbstractSchemaManager $schemaManager): void
+    {
+        $columns = $schemaManager->listTableColumns($this->tableName);
+
+        if (isset($columns['partition_key'])) {
+            return;
+        }
+
+        $this->connection->executeStatement(sprintf(
+            'ALTER TABLE %s ADD COLUMN partition_key VARCHAR(255) NOT NULL DEFAULT \'\'',
+            $this->tableName,
+        ));
+
+        $this->connection->executeStatement(sprintf(
+            'CREATE INDEX idx_outbox_partition_order ON %s (queue_name, partition_key, available_at, delivered_at, id)',
+            $this->tableName,
+        ));
     }
 }

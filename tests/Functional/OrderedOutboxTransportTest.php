@@ -144,7 +144,7 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
 
     public function testAckDeletesRow(): void
     {
-        $id = $this->sendEvent('partition-a', 'data');
+        $this->sendEvent('partition-a', 'data');
 
         $fetched = iterator_to_array($this->transport->get());
         $this->assertCount(1, $fetched);

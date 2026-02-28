@@ -65,6 +65,13 @@ final readonly class OrderedOutboxTransportFactory implements TransportFactoryIn
 
         $tableName = \is_string($configuration['table_name']) ? $configuration['table_name'] : 'messenger_messages';
         $queueName = \is_string($configuration['queue_name']) ? $configuration['queue_name'] : 'default';
+
+        if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $tableName) !== 1) {
+            throw new \InvalidArgumentException(sprintf(
+                'Table name must contain only alphanumeric characters and underscores. Got: %s',
+                $tableName,
+            ));
+        }
         $rawTimeout = $configuration['redeliver_timeout'];
         $redeliverTimeout = \is_int($rawTimeout) ? $rawTimeout : (\is_numeric($rawTimeout) ? (int) $rawTimeout : 3600);
 
