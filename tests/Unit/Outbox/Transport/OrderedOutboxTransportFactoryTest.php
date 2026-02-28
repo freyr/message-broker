@@ -10,6 +10,7 @@ use Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransport;
 use Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransportFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Messenger\Exception\TransportException;
 use Symfony\Component\Messenger\Transport\Serialization\SerializerInterface;
 
 #[CoversClass(OrderedOutboxTransportFactory::class)]
@@ -95,5 +96,96 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
 
         $factory->createTransport('://invalid', [], $this->createMock(SerializerInterface::class));
+    }
+
+    public function testCreateTransportRejectsInvalidTableName(): void
+    {
+        $registry = $this->createMock(ConnectionRegistry::class);
+        $registry->method('getConnection')
+            ->willReturn($this->createMock(Connection::class));
+
+        $factory = new OrderedOutboxTransportFactory($registry);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Table name must contain only alphanumeric characters');
+
+        $factory->createTransport(
+            'ordered-doctrine://default?table_name=drop%20table%20users',
+            [],
+            $this->createMock(SerializerInterface::class),
+        );
+    }
+
+    public function testCreateTransportRejectsTableNameStartingWithDigit(): void
+    {
+        $registry = $this->createMock(ConnectionRegistry::class);
+        $registry->method('getConnection')
+            ->willReturn($this->createMock(Connection::class));
+
+        $factory = new OrderedOutboxTransportFactory($registry);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        $factory->createTransport(
+            'ordered-doctrine://default?table_name=1invalid',
+            [],
+            $this->createMock(SerializerInterface::class),
+        );
+    }
+
+    public function testCreateTransportWrapsConnectionNotFoundInTransportException(): void
+    {
+        $registry = $this->createMock(ConnectionRegistry::class);
+        $registry->method('getConnection')
+            ->willThrowException(new \InvalidArgumentException('No connection named "missing"'));
+
+        $factory = new OrderedOutboxTransportFactory($registry);
+
+        $this->expectException(TransportException::class);
+        $this->expectExceptionMessage('Could not find Doctrine connection "missing"');
+
+        $factory->createTransport(
+            'ordered-doctrine://missing',
+            [],
+            $this->createMock(SerializerInterface::class),
+        );
+    }
+
+    public function testDsnQueryOverridesOptionsWhichOverrideDefaults(): void
+    {
+        $registry = $this->createMock(ConnectionRegistry::class);
+        $registry->method('getConnection')
+            ->willReturn($this->createMock(Connection::class));
+
+        $factory = new OrderedOutboxTransportFactory($registry);
+
+        // DSN has table_name=from_dsn, options have table_name=from_options
+        // DSN should win
+        $transport = $factory->createTransport(
+            'ordered-doctrine://default?table_name=from_dsn',
+            [
+                'table_name' => 'from_options',
+            ],
+            $this->createMock(SerializerInterface::class),
+        );
+
+        $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
+    }
+
+    public function testCreateTransportWithNoQueryStringUsesDefaults(): void
+    {
+        $registry = $this->createMock(ConnectionRegistry::class);
+        $registry->method('getConnection')
+            ->willReturn($this->createMock(Connection::class));
+
+        $factory = new OrderedOutboxTransportFactory($registry);
+
+        $transport = $factory->createTransport(
+            'ordered-doctrine://default',
+            [],
+            $this->createMock(SerializerInterface::class),
+        );
+
+        $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
     }
 }

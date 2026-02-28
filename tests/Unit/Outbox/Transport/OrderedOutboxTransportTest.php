@@ -209,6 +209,49 @@ final class OrderedOutboxTransportTest extends TestCase
         $transport->keepalive($envelope);
     }
 
+    public function testGetRollsBackTransactionOnException(): void
+    {
+        $this->connection->expects($this->once())
+            ->method('beginTransaction');
+        $this->connection->expects($this->once())
+            ->method('rollBack');
+        $this->connection->expects($this->never())
+            ->method('commit');
+
+        $this->connection->method('executeQuery')
+            ->willThrowException(new \RuntimeException('DB gone'));
+
+        $transport = $this->createTransport();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('DB gone');
+
+        iterator_to_array($transport->get());
+    }
+
+    public function testSendPreservesExistingStamps(): void
+    {
+        $partitionStamp = new PartitionKeyStamp('order-99');
+        $existingStamp = new TransportMessageIdStamp('old-id');
+        $envelope = new Envelope(TestOutboxEvent::random(), [$partitionStamp, $existingStamp]);
+
+        $this->serializer->method('encode')
+            ->willReturn([
+                'body' => '{}',
+                'headers' => [],
+            ]);
+        $this->connection->method('lastInsertId')
+            ->willReturn('10');
+
+        $transport = $this->createTransport();
+        $result = $transport->send($envelope);
+
+        $this->assertNotNull($result->last(PartitionKeyStamp::class), 'PartitionKeyStamp must be preserved');
+
+        $transportStamps = $result->all(TransportMessageIdStamp::class);
+        $this->assertCount(2, $transportStamps, 'Both old and new TransportMessageIdStamp must be present');
+    }
+
     private function createTransport(): OrderedOutboxTransport
     {
         return new OrderedOutboxTransport(

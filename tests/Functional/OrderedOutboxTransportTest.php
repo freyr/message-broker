@@ -243,6 +243,100 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $shortTimeoutTransport->ack($refetched[0]);
     }
 
+    public function testSetupMigratesExistingTableWithoutPartitionKey(): void
+    {
+        // Create a table WITHOUT partition_key (simulating pre-migration state)
+        self::$connection->executeStatement(sprintf('DROP TABLE IF EXISTS %s', self::TABLE));
+        self::$connection->executeStatement(sprintf(
+            'CREATE TABLE %s ('
+            .'  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,'
+            .'  body LONGTEXT NOT NULL,'
+            .'  headers LONGTEXT NOT NULL,'
+            .'  queue_name VARCHAR(190) NOT NULL,'
+            .'  created_at DATETIME NOT NULL,'
+            .'  available_at DATETIME NOT NULL,'
+            .'  delivered_at DATETIME DEFAULT NULL'
+            .') ENGINE=InnoDB',
+            self::TABLE,
+        ));
+
+        $columns = self::$connection->createSchemaManager()->listTableColumns(self::TABLE);
+        $this->assertArrayNotHasKey('partition_key', $columns, 'Pre-condition: no partition_key column');
+
+        // Call setup() — should add the missing column
+        $this->transport->setup();
+
+        $columns = self::$connection->createSchemaManager()->listTableColumns(self::TABLE);
+        $this->assertArrayHasKey('partition_key', $columns, 'setup() must add partition_key column');
+    }
+
+    public function testSetupIsIdempotentOnMigratedTable(): void
+    {
+        // setup() was already called in setUp() — call it again
+        $this->transport->setup();
+
+        // No exception should be thrown, table should still be valid
+        $columns = self::$connection->createSchemaManager()->listTableColumns(self::TABLE);
+        $this->assertArrayHasKey('partition_key', $columns);
+    }
+
+    public function testAutoSetupTriggersOnSend(): void
+    {
+        // Drop the table so auto-setup must create it
+        self::$connection->executeStatement(sprintf('DROP TABLE IF EXISTS %s', self::TABLE));
+
+        $autoSetupTransport = new OrderedOutboxTransport(
+            connection: self::$connection,
+            serializer: new PhpSerializer(),
+            tableName: self::TABLE,
+            queueName: 'outbox',
+            autoSetup: true,
+        );
+
+        // send() should trigger setup() automatically
+        $envelope = new Envelope(TestOutboxEvent::random(), [new PartitionKeyStamp('auto-key')]);
+        $result = $autoSetupTransport->send($envelope);
+
+        $this->assertNotNull($result->last(TransportMessageIdStamp::class));
+
+        // Verify table was created with partition_key column
+        $columns = self::$connection->createSchemaManager()->listTableColumns(self::TABLE);
+        $this->assertArrayHasKey('partition_key', $columns);
+    }
+
+    public function testMultipleRedeliveriesBeforeAck(): void
+    {
+        $this->sendEvent('partition-multi', 'data');
+
+        $shortTimeoutTransport = new OrderedOutboxTransport(
+            connection: self::$connection,
+            serializer: new PhpSerializer(),
+            tableName: self::TABLE,
+            queueName: 'outbox',
+            redeliverTimeout: 1,
+        );
+
+        // First delivery — claim but don't ack (simulate crash)
+        $first = iterator_to_array($shortTimeoutTransport->get());
+        $this->assertCount(1, $first);
+        sleep(2);
+
+        // Second delivery — claim but don't ack again (simulate another crash)
+        $second = iterator_to_array($shortTimeoutTransport->get());
+        $this->assertCount(1, $second, 'Message must be redelivered after first timeout');
+        sleep(2);
+
+        // Third delivery — this time ack it
+        $third = iterator_to_array($shortTimeoutTransport->get());
+        $this->assertCount(1, $third, 'Message must be redelivered after second timeout');
+        $shortTimeoutTransport->ack($third[0]);
+
+        // Verify table is empty
+        $count = self::$connection->fetchOne(sprintf('SELECT COUNT(*) FROM %s', self::TABLE));
+        $this->assertIsNumeric($count);
+        $this->assertSame(0, (int) $count);
+    }
+
     /**
      * Sends a test event and returns its transport message ID.
      */

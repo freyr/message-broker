@@ -74,4 +74,33 @@ final class PartitionKeyStampMiddlewareTest extends TestCase
 
         $this->assertTrue($nextCalled, 'Consumed messages must skip validation');
     }
+
+    public function testExceptionMessageIncludesClassName(): void
+    {
+        $envelope = new Envelope(TestOutboxEvent::random());
+
+        try {
+            $this->middleware->handle($envelope, MiddlewareStackFactory::createPassThrough());
+            $this->fail('Expected LogicException');
+        } catch (\LogicException $e) {
+            $this->assertStringContainsString(
+                TestOutboxEvent::class,
+                $e->getMessage(),
+                'Exception message must include the event class name',
+            );
+        }
+    }
+
+    public function testOutboxMessageWithEmptyPartitionKeyPassesThrough(): void
+    {
+        $envelope = new Envelope(TestOutboxEvent::random(), [new PartitionKeyStamp('')]);
+
+        $nextCalled = false;
+        $result = $this->middleware->handle($envelope, MiddlewareStackFactory::createTracking($nextCalled));
+
+        $this->assertTrue($nextCalled, 'Empty partition key is valid and must pass through');
+        $stamp = $result->last(PartitionKeyStamp::class);
+        $this->assertNotNull($stamp);
+        $this->assertSame('', $stamp->partitionKey);
+    }
 }
