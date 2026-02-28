@@ -10,9 +10,9 @@ dependencies: []
 
 ## Problem Statement
 
-PR #25 deletes `docs/solutions/test-failures/deduplication-middleware-not-running-in-tests.md` (460 lines) in commit `9db6457` without explanation. This file is a compound-engineering pipeline artifact documenting a previously solved problem. The deletion was bundled into an unrelated commit ("add core abstraction layer and consolidate namespaces") with no mention in the commit message.
+PR #25 deletes `../docs/solutions/test-failures/deduplication-middleware-not-running-in-tests.md` (460 lines) in commit `9db6457` without explanation. This file is a compound-engineering pipeline artifact documenting a previously solved problem. The deletion was bundled into an unrelated commit ("add core abstraction layer and consolidate namespaces") with no mention in the commit message.
 
-Per project conventions in `CLAUDE.md`, files in `docs/solutions/` are institutional knowledge and should not be removed without deliberation.
+Per project conventions in `CLAUDE.md`, files in `../docs/solutions/` are institutional knowledge and should not be removed without deliberation.
 
 ## Findings
 
@@ -23,7 +23,7 @@ Per project conventions in `CLAUDE.md`, files in `docs/solutions/` are instituti
 
 ### Option A: Restore the file (Recommended)
 
-Restore from git: `git checkout main -- docs/solutions/test-failures/deduplication-middleware-not-running-in-tests.md`
+Restore from git: `git checkout main -- ../docs/solutions/test-failures/deduplication-middleware-not-running-in-tests.md`
 
 **Pros:** Preserves institutional knowledge. Simple.
 **Cons:** None.
@@ -41,7 +41,7 @@ If the document is genuinely outdated, delete it in a separate `docs:` commit wi
 
 ## Technical Details
 
-- **Affected file:** `docs/solutions/test-failures/deduplication-middleware-not-running-in-tests.md`
+- **Affected file:** `../docs/solutions/test-failures/deduplication-middleware-not-running-in-tests.md`
 - **Deleted in commit:** `9db6457`
 
 ## Acceptance Criteria

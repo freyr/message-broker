@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Ordered outbox delivery** — per-partition FIFO delivery with multiple concurrent workers
+  - `OrderedOutboxTransport` — head-of-line SQL query groups by `partition_key`, claims oldest message per partition with `FOR UPDATE SKIP LOCKED`
+  - `OrderedOutboxTransportFactory` — registers `ordered-doctrine://` DSN scheme with configurable table name, queue name, and redeliver timeout
+  - `PartitionKeyStamp` — carries partition key (e.g., aggregate ID) for causal ordering
+  - `PartitionKeyStampMiddleware` — validates `PartitionKeyStamp` presence on `OutboxMessage` envelopes at dispatch time
+  - Service registration in `services.yaml` with `messenger.transport_factory` tag
+- `SetupDeduplicationCommand` (`message-broker:setup-deduplication`) — creates `message_broker_deduplication` table with three modes:
+  - Dry-run (default): shows SQL without executing
+  - `--force`: creates table directly
+  - `--migration`: generates Doctrine migration file
+- Minimal functional test suite against real MySQL (deduplication store, ordered transport, ID type round-trip, commands)
+- Tier 1 and Tier 2 test coverage for ordered outbox transport
+
+### Fixed
+
+- Symfony 6.4 compatibility for `KeepaliveReceiverInterface` — conditionally implemented only when interface exists (Symfony 7.1+)
+
+### Changed
+
+- Test suite restructured — Phase 1 pure unit tests with proper isolation, removed circular mock assertions
+
 ## [0.3.0] - 2026-02-15
 
 ### Changed

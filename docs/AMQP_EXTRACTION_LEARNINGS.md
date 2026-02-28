@@ -1,7 +1,7 @@
 # Institutional Learnings for AMQP Package Extraction
 
 **Search Date:** 2026-02-13
-**Plan Reference:** `docs/plans/2026-02-13-refactor-extract-amqp-package-plan.md`
+**Plan Reference:** `../docs/plans/2026-02-13-refactor-extract-amqp-package-plan.md`
 **Files Scanned:** 6 solution documents
 **Relevant Learnings:** 4 critical documents apply directly
 
@@ -22,7 +22,7 @@
 
 ## Critical Patterns - Always Check First
 
-**File:** `/Users/michal/code/freyr/message-broker/docs/solutions/patterns/critical-patterns.md`
+**File:** `/Users/michal/code/freyr/message-broker-set/docs/solutions/patterns/critical-patterns.md`
 
 ### Pattern 1: Test Environment Schema Setup (ALWAYS REQUIRED)
 
@@ -68,7 +68,7 @@ abstract class FunctionalTestCase extends KernelTestCase
 
 ### Learning 1: Doctrine Transaction Middleware Configuration
 
-**File:** `/Users/michal/code/freyr/message-broker/docs/solutions/test-failures/doctrine-transaction-middleware-orm-configuration.md`
+**File:** `/Users/michal/code/freyr/message-broker-set/docs/solutions/test-failures/doctrine-transaction-middleware-orm-configuration.md`
 
 **Applies to AMQP extraction:** Middleware registration understanding
 
@@ -106,7 +106,7 @@ This is the **critical dependency** - the core `freyr/message-broker` package MU
 
 ### Learning 2: Doctrine ORM Configuration for DBAL-Only Projects
 
-**File:** `/Users/michal/code/freyr/message-broker/docs/solutions/test-failures/doctrine-transaction-middleware-orm-configuration.md`
+**File:** `/Users/michal/code/freyr/message-broker-set/docs/solutions/test-failures/doctrine-transaction-middleware-orm-configuration.md`
 
 **Applies to AMQP extraction:** CONDITIONAL - Only if AMQP package adds functional tests
 
@@ -167,7 +167,7 @@ AMQP package will be **DBAL-only** (no entities):
 
 ### Learning 3: DI Configuration for Service Registration and Compiler Passes
 
-**File:** `/Users/michal/code/freyr/message-broker/docs/solutions/test-failures/phase-1-test-implementation-discoveries.md`
+**File:** `/Users/michal/code/freyr/message-broker-set/docs/solutions/test-failures/phase-1-test-implementation-discoveries.md`
 
 **Applies to AMQP extraction:** YES - Service and test bootstrap configuration
 
@@ -229,7 +229,7 @@ public function testAmqpOutboxPublisherCanResolveAmqpSender(): void
 
 ### Learning 4: Test Bootstrap and Fresh Environment Setup
 
-**File:** `/Users/michal/code/freyr/message-broker/docs/solutions/ci-issues/hidden-schema-failures-fresh-environment.md`
+**File:** `/Users/michal/code/freyr/message-broker-set/docs/solutions/ci-issues/hidden-schema-failures-fresh-environment.md`
 
 **Applies to AMQP extraction:** YES - Test infrastructure for new package
 
@@ -291,7 +291,7 @@ vendor/bin/phpunit --testdox       # No external deps needed
 
 ### Learning 5: Schema and Database-Related Patterns
 
-**File:** `/Users/michal/code/freyr/message-broker/docs/solutions/database-issues/migration-schema-mismatch-ci-vs-local.md`
+**File:** `/Users/michal/code/freyr/message-broker-set/docs/solutions/database-issues/migration-schema-mismatch-ci-vs-local.md`
 
 **Applies to AMQP extraction:** NO - AMQP package has no database requirements
 
@@ -450,32 +450,32 @@ Freyr\MessageBrokerAmqp\AmqpOutboxPublisher:
 
 ## References to Solution Documents
 
-1. **Critical Patterns:** `/Users/michal/code/freyr/message-broker/docs/solutions/patterns/critical-patterns.md`
+1. **Critical Patterns:** `/Users/michal/code/freyr/message-broker-set/docs/solutions/patterns/critical-patterns.md`
    - Test environment schema setup (not applicable to AMQP unit tests, but documented for reference)
 
-2. **Middleware Configuration:** `/Users/michal/code/freyr/message-broker/docs/solutions/test-failures/doctrine-transaction-middleware-orm-configuration.md`
+2. **Middleware Configuration:** `/Users/michal/code/freyr/message-broker-set/docs/solutions/test-failures/doctrine-transaction-middleware-orm-configuration.md`
    - Service tag registration patterns
    - DI configuration best practices
    - Why explicit configuration required (not auto-wired from tags)
 
-3. **Test Infrastructure:** `/Users/michal/code/freyr/message-broker/docs/solutions/ci-issues/hidden-schema-failures-fresh-environment.md`
+3. **Test Infrastructure:** `/Users/michal/code/freyr/message-broker-set/docs/solutions/ci-issues/hidden-schema-failures-fresh-environment.md`
    - Environment parity (local vs CI)
    - Fresh environment testing checklist
    - Fail-fast principles for infrastructure
 
-4. **Service Registration:** `/Users/michal/code/freyr/message-broker/docs/solutions/test-failures/phase-1-test-implementation-discoveries.md`
+4. **Service Registration:** `/Users/michal/code/freyr/message-broker-set/docs/solutions/test-failures/phase-1-test-implementation-discoveries.md`
    - Service locator key management
    - Bootstrap configuration patterns
    - Testing service registration
 
-5. **Database Schema (Reference):** `/Users/michal/code/freyr/message-broker/docs/solutions/database-issues/migration-schema-mismatch-ci-vs-local.md`
+5. **Database Schema (Reference):** `/Users/michal/code/freyr/message-broker-set/docs/solutions/database-issues/migration-schema-mismatch-ci-vs-local.md`
    - Context on core schema decisions (not applicable to AMQP, which has no database)
 
 ---
 
 ## Summary
 
-**Extraction Readiness:** The plan at `docs/plans/2026-02-13-refactor-extract-amqp-package-plan.md` is **well-designed** and aligns with institutional patterns.
+**Extraction Readiness:** The plan at `../docs/plans/2026-02-13-refactor-extract-amqp-package-plan.md` is **well-designed** and aligns with institutional patterns.
 
 **Key Patterns to Follow:**
 1. Service tag discovery must be processed by core compiler pass (not automatic)
@@ -491,5 +491,5 @@ Freyr\MessageBrokerAmqp\AmqpOutboxPublisher:
 ---
 
 **Generated:** 2026-02-13
-**Search Scope:** `/Users/michal/code/freyr/message-broker/docs/solutions/`
+**Search Scope:** `/Users/michal/code/freyr/message-broker-set/docs/solutions/`
 **Files Evaluated:** 6 total, 4 relevant
