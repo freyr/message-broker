@@ -324,16 +324,41 @@ Events are stored in a database table within the same transaction as business da
 Domain Event → Event Bus (Messenger)
 → MessageIdStampMiddleware (adds MessageIdStamp at dispatch time)
 → Outbox Transport (doctrine://) → messenger_outbox table (transactional)
-→ messenger:consume outbox → OutboxToAmqpBridge middleware (reads existing stamp)
-→ AMQP (with routing strategy, via direct SenderInterface)
+→ messenger:consume outbox → OutboxPublishingMiddleware (reads existing stamp)
+→ AMQP (via OutboxPublisherInterface, with routing strategy)
 ```
 
 **Key Features:**
 - **Stable Message ID:** `MessageIdStampMiddleware` generates UUID v7 at dispatch time, ensuring deduplication survives redelivery
-- **Middleware Bridge:** `OutboxToAmqpBridge` reads existing `MessageIdStamp` from envelope (never generates new ones)
-- **Direct Sender:** Bridge publishes via `SenderInterface` (no nested bus dispatch, no nested savepoints)
+- **Publishing Middleware:** `OutboxPublishingMiddleware` reads existing `MessageIdStamp` from envelope and delegates to transport-specific publishers
+- **Direct Sender:** Publisher publishes via `SenderInterface` (no nested bus dispatch, no nested savepoints)
 - **AMQP Routing Strategy:** Determines exchange, routing key, and headers
 - **Convention-Based Routing:** Automatic routing with attribute overrides
+
+### Ordered Outbox Delivery (Optional)
+Per-aggregate causal ordering for outbox events. Activated by changing the DSN to `ordered-doctrine://`:
+
+```
+Domain Event → Event Bus (Messenger)
+→ MessageIdStampMiddleware (adds MessageIdStamp)
+→ MessageNameStampMiddleware (adds MessageNameStamp)
+→ PartitionKeyStampMiddleware (validates PartitionKeyStamp present)
+→ doctrine_transaction
+→ OrderedOutboxTransport::send() (stores partition_key column)
+→ messenger:consume outbox → OrderedOutboxTransport::get()
+  → HEAD-OF-LINE QUERY: MIN(id) GROUP BY partition_key + SKIP LOCKED
+  → Only oldest message per partition can be claimed
+→ OutboxPublishingMiddleware → AMQP
+```
+
+**Key Features:**
+- **Per-Partition FIFO:** Events with the same partition key arrive at AMQP in insertion order
+- **Cross-Partition Parallelism:** Workers parallelise freely across different partitions
+- **DSN-Based Opt-In:** Change `doctrine://` to `ordered-doctrine://` to activate
+- **KeepaliveReceiverInterface:** Prevents false redeliver timeouts during long-running operations
+- **Auto-Migration:** `setup()` adds `partition_key` column to existing outbox tables
+
+See `docs/ordered-delivery.md` for full guide.
 
 ### Inbox Pattern (Consuming Events)
 Events are consumed from AMQP natively with deduplication using middleware-based approach:
@@ -379,6 +404,12 @@ messenger/
 │   │   │   ├── OutboxMessage.php          # Marker interface for outbox events
 │   │   │   └── OutboxToAmqpBridge.php     # Bridge middleware (reads existing MessageIdStamp)
 │   │   ├── MessageIdStampMiddleware.php   # Stamps OutboxMessage with MessageIdStamp at dispatch
+│   │   ├── MessageNameStampMiddleware.php # Stamps OutboxMessage with MessageNameStamp at dispatch
+│   │   ├── PartitionKeyStamp.php          # Stamp for ordered delivery partition key
+│   │   ├── PartitionKeyStampMiddleware.php # Validates PartitionKeyStamp at dispatch time
+│   │   ├── Transport/
+│   │   │   ├── OrderedOutboxTransport.php         # Partition-aware outbox transport
+│   │   │   └── OrderedOutboxTransportFactory.php  # Factory for ordered-doctrine:// DSN
 │   │   ├── Routing/
 │   │   │   ├── AmqpRoutingKey.php         # Attribute for custom routing key
 │   │   │   ├── AmqpRoutingStrategyInterface.php
@@ -962,6 +993,7 @@ final readonly class OutboxToAmqpBridge implements MiddlewareInterface
 - Run multiple AMQP consumers: one per queue (e.g., `messenger:consume amqp_orders`) - recommended approach
 - Run multiple outbox workers: `messenger:consume outbox`
 - All workers support horizontal scaling with SKIP LOCKED
+- **Ordered outbox:** Workers parallelise across partitions; each partition is processed serially by one worker at a time (by design)
 
 ## Important Implementation Details
 
@@ -1022,6 +1054,16 @@ final readonly class OutboxToAmqpBridge implements MiddlewareInterface
    - **Inbox**: Deduplication entry and handler changes are committed in the same transaction (atomicity)
 
 10. **At-Least-Once Delivery**: System guarantees events are delivered at least once; consumers must be idempotent (enforced by DeduplicationMiddleware).
+
+11. **Ordered Outbox Delivery (Optional)**: Per-aggregate causal ordering using `ordered-doctrine://` DSN:
+    - `PartitionKeyStamp` identifies the causal group (e.g. aggregate ID)
+    - `OrderedOutboxTransport` stores `partition_key` as a queryable column
+    - Head-of-line query: `MIN(id) GROUP BY partition_key` with `SKIP LOCKED`
+    - Only the oldest message per partition can be claimed by a worker
+    - `PartitionKeyStampMiddleware` validates stamp presence at dispatch time
+    - `KeepaliveReceiverInterface` prevents false redeliver timeouts
+    - `setup()` auto-migrates existing tables (adds `partition_key` column if missing)
+    - See `docs/ordered-delivery.md` for complete guide
 
 ## Namespace Convention
 

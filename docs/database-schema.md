@@ -86,6 +86,43 @@ CREATE TABLE messenger_outbox (
 php bin/console messenger:cleanup-outbox --days=7
 ```
 
+#### Ordered Outbox Variant (Optional)
+
+When using `ordered-doctrine://` DSN for per-aggregate causal ordering, the outbox table includes an additional `partition_key` column:
+
+```sql
+CREATE TABLE messenger_outbox (
+    id BIGINT UNSIGNED AUTO_INCREMENT NOT NULL PRIMARY KEY,
+    body LONGTEXT NOT NULL,
+    headers LONGTEXT NOT NULL,
+    queue_name VARCHAR(190) NOT NULL,
+    created_at DATETIME NOT NULL,
+    available_at DATETIME NOT NULL,
+    delivered_at DATETIME DEFAULT NULL,
+    partition_key VARCHAR(255) NOT NULL DEFAULT '',
+    INDEX idx_outbox_available (queue_name, available_at, delivered_at, id),
+    INDEX idx_outbox_partition_order (queue_name, partition_key, available_at, delivered_at, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+**Key Differences from Standard Outbox:**
+- `partition_key` column identifies the causal group (e.g. aggregate ID)
+- `idx_outbox_partition_order` covering index supports the head-of-line query
+- Table is auto-created by `OrderedOutboxTransport` when `auto_setup: true`
+- If migrating from standard outbox, `setup()` auto-adds the `partition_key` column
+
+**Migration from Standard Outbox:**
+```sql
+ALTER TABLE messenger_outbox
+    ADD COLUMN partition_key VARCHAR(255) NOT NULL DEFAULT '',
+    ALGORITHM=INPLACE, LOCK=NONE;
+
+CREATE INDEX idx_outbox_partition_order
+    ON messenger_outbox (queue_name, partition_key, available_at, delivered_at, id);
+```
+
+See `docs/ordered-delivery.md` for the full migration guide.
+
 ### 2. message_broker_deduplication (Application-Managed)
 
 **Purpose:** Tracks processed messages to prevent duplicate execution.
@@ -285,10 +322,14 @@ services:
 
 ## Index Optimisation
 
-**messenger_outbox:**
+**messenger_outbox (standard):**
 - `idx_queue_name` - Fast filtering by queue
 - `idx_available_at` - Efficient worker polling
 - `idx_delivered_at` - Quick cleanup queries
+
+**messenger_outbox (ordered):**
+- `idx_outbox_available` - Standard worker polling `(queue_name, available_at, delivered_at, id)`
+- `idx_outbox_partition_order` - Head-of-line query `(queue_name, partition_key, available_at, delivered_at, id)`
 
 **message_broker_deduplication:**
 - Primary key on `message_id` - Enforces uniqueness

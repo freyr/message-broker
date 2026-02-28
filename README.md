@@ -168,10 +168,40 @@ php bin/console messenger:consume outbox -vv
 php bin/console messenger:consume amqp_orders -vv
 ```
 
+## Ordered Outbox Delivery
+
+For per-aggregate causal ordering with multiple outbox workers, use the ordered transport:
+
+```yaml
+# config/packages/messenger.yaml
+framework:
+    messenger:
+        transports:
+            outbox:
+                dsn: 'ordered-doctrine://default?table_name=messenger_outbox&queue_name=outbox'
+                options:
+                    auto_setup: true
+```
+
+Add `PartitionKeyStampMiddleware` to your bus middleware and dispatch with a partition key:
+
+```php
+use Freyr\MessageBroker\Outbox\PartitionKeyStamp;
+
+$this->bus->dispatch($orderPlaced, [
+    new PartitionKeyStamp((string) $orderPlaced->orderId),
+]);
+```
+
+Events with the same partition key are delivered to AMQP in insertion order. Events with different partition keys are processed in parallel across workers.
+
+See [Ordered Delivery](docs/ordered-delivery.md) for the full guide.
+
 ## Documentation
 
 - [Database Schema](docs/database-schema.md) — table architecture, migrations, and cleanup strategies
 - [Outbox Pattern](docs/outbox-pattern.md) — transactional event publishing
+- [Ordered Delivery](docs/ordered-delivery.md) — per-aggregate causal ordering with partition keys
 - [Inbox Deduplication](docs/inbox-deduplication.md) — preventing duplicate message processing
 - [Message Serialisation](docs/message-serialization.md) — semantic naming and cross-language compatibility
 - [AMQP Routing](docs/amqp-routing.md) — convention-based routing with attribute overrides
