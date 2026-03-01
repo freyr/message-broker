@@ -35,7 +35,10 @@ use Symfony\Component\Messenger\Stamp\ReceivedStamp;
 #[CoversClass(OutboxPublishingMiddleware::class)]
 final class OutboxPublishingMiddlewareTest extends TestCase
 {
-    private const TEST_MESSAGE_ID = '01234567-89ab-7def-8000-000000000001';
+    private static function testMessageId(): Id
+    {
+        return Id::fromString('01ARYZ6S41TSV4RRFFQ69G5FAV');
+    }
 
     public function testNonOutboxMessagePassesThrough(): void
     {
@@ -79,7 +82,7 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         ]);
         $envelope = new Envelope(TestOutboxEvent::random(), [
             new ReceivedStamp('outbox'),
-            new MessageIdStamp(Id::fromString(self::TEST_MESSAGE_ID)),
+            new MessageIdStamp(self::testMessageId()),
         ]);
 
         $this->expectException(RuntimeException::class);
@@ -114,10 +117,10 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         $middleware = $this->createMiddleware([
             'outbox' => $publisher,
         ]);
-        $messageId = self::TEST_MESSAGE_ID;
+        $messageId = self::testMessageId();
         $envelope = new Envelope(TestOutboxEvent::random(), [
             new ReceivedStamp('outbox'),
-            new MessageIdStamp(Id::fromString($messageId)),
+            new MessageIdStamp($messageId),
             new MessageNameStamp('test.event.sent'),
         ]);
 
@@ -132,7 +135,7 @@ final class OutboxPublishingMiddlewareTest extends TestCase
 
         $idStamp = $publishedEnvelope->last(MessageIdStamp::class);
         $this->assertNotNull($idStamp);
-        $this->assertSame($messageId, (string) $idStamp->messageId);
+        $this->assertTrue($messageId->sameAs($idStamp->messageId));
 
         $nameStamp = $publishedEnvelope->last(MessageNameStamp::class);
         $this->assertNotNull($nameStamp);
@@ -146,7 +149,7 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         ]);
         $envelope = new Envelope(TestOutboxEvent::random(), [
             new ReceivedStamp('outbox'),
-            new MessageIdStamp(Id::fromString(self::TEST_MESSAGE_ID)),
+            new MessageIdStamp(self::testMessageId()),
             new MessageNameStamp('test.event.sent'),
         ]);
 
@@ -163,7 +166,7 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         ]);
         $envelope = new Envelope(TestOutboxEvent::random(), [
             new ReceivedStamp('outbox'),
-            new MessageIdStamp(Id::fromString(self::TEST_MESSAGE_ID)),
+            new MessageIdStamp(self::testMessageId()),
             new MessageNameStamp('test.event.sent'),
         ]);
 

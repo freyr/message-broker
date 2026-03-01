@@ -10,7 +10,7 @@
         "outbox-pattern",
         "event-driven",
         "deduplication",
-        "uuid-v7"
+        "ulid"
     ],
     "authors": [
         {
@@ -19,7 +19,7 @@
     ],
     "require": {
         "php": ">=8.2",
-        "freyr/message-broker-contracts": "^0.1",
+        "freyr/message-broker-contracts": "^0.3",
         "symfony/messenger": "^6.4|^7.0",
         "symfony/console": "^6.4|^7.0",
         "symfony/config": "^6.4|^7.0",
@@ -30,7 +30,7 @@
         "symfony/property-access": "^6.4|^7.0",
         "doctrine/dbal": "^3.0|^4.0",
         "doctrine/orm": "^3.0",
-        "freyr/identity": "^0.4",
+        "freyr/identity": "^1.0",
         "nesbot/carbon": "^2.0|^3.0",
         "ext-curl": "*"
     },

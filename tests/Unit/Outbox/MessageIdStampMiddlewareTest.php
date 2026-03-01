@@ -62,7 +62,8 @@ final class MessageIdStampMiddlewareTest extends TestCase
 
     public function testOutboxMessageWithExistingStampIsNotReStamped(): void
     {
-        $existingStamp = new MessageIdStamp(Id::fromString('01234567-89ab-7def-8000-000000000001'));
+        $existingId = Id::new();
+        $existingStamp = new MessageIdStamp($existingId);
         $envelope = new Envelope(TestOutboxEvent::random(), [$existingStamp]);
 
         $nextCalled = false;
@@ -70,9 +71,8 @@ final class MessageIdStampMiddlewareTest extends TestCase
 
         $stamp = $result->last(MessageIdStamp::class);
         $this->assertNotNull($stamp);
-        $this->assertSame(
-            '01234567-89ab-7def-8000-000000000001',
-            (string) $stamp->messageId,
+        $this->assertTrue(
+            $existingId->sameAs($stamp->messageId),
             'Existing MessageIdStamp should not be overwritten'
         );
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
