@@ -5,7 +5,7 @@ Core Symfony bundle: Inbox/Outbox patterns with transactional guarantees and aut
 ## Domain Rules
 
 - **OUTBOX001**: Every outbox event MUST have `#[MessageName('domain.action')]` AND implement `OutboxMessage`.
-- **OUTBOX002**: No `messageId` property on events — `MessageIdStampMiddleware` auto-generates UUID v7 at dispatch.
+- **OUTBOX002**: No `messageId` property on events — `MessageIdStampMiddleware` auto-generates ULID at dispatch.
 - **SCHEMA001**: Three-table architecture: `messenger_outbox`, `message_broker_deduplication`, `messenger_messages`.
 - **SERIAL001**: Split serializers — `WireFormatSerializer` (FQN→semantic for publishing), `InboxSerializer` (semantic→FQN for consumption).
 - **DEDUP001**: `DeduplicationMiddleware` runs at priority -10 (after `doctrine_transaction`). Atomic commit of dedup entry + handler changes.

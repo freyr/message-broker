@@ -12,7 +12,7 @@ use Symfony\Component\Console\Tester\CommandTester;
 /**
  * Functional test for DeduplicationStoreCleanup command against real MySQL.
  *
- * Verifies that the DATE_SUB SQL works correctly with binary UUID v7 schema,
+ * Verifies that the DATE_SUB SQL works correctly with binary ULID schema,
  * deleting old rows and keeping recent ones.
  */
 #[CoversClass(DeduplicationStoreCleanup::class)]

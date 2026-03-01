@@ -11,7 +11,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 /**
  * Functional test for DeduplicationDbalStore against real MySQL.
  *
- * Verifies that binary UUID v7 INSERT and unique constraint
+ * Verifies that binary ULID INSERT and unique constraint
  * duplicate detection work correctly with a real database.
  */
 #[CoversClass(DeduplicationDbalStore::class)]
@@ -67,6 +67,6 @@ final class DeduplicationDbalStoreTest extends FunctionalDatabaseTestCase
 
         $this->assertIsString($row['message_id']);
         $restored = Id::fromBinary($row['message_id']);
-        $this->assertTrue($id->sameAs($restored), 'Binary UUID v7 should round-trip correctly');
+        $this->assertTrue($id->sameAs($restored), 'Binary ULID should round-trip correctly');
     }
 }

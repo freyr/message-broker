@@ -10,7 +10,7 @@ use Symfony\Component\Serializer\Normalizer\DenormalizerInterface;
 use Symfony\Component\Serializer\Normalizer\NormalizerInterface;
 
 /**
- * Normalizes and denormalizes Id objects (UUID v7).
+ * Normalizes and denormalizes Id objects (ULID).
  */
 final readonly class IdNormalizer implements NormalizerInterface, DenormalizerInterface
 {

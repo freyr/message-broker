@@ -7,7 +7,7 @@ The Inbox pattern with deduplication ensures that each message is processed exac
 ## How It Works
 
 **Middleware-Based Deduplication:**
-1. Message arrives from AMQP with `MessageIdStamp` containing UUID v7
+1. Message arrives from AMQP with `MessageIdStamp` containing ULID
 2. `DeduplicationMiddleware` runs within database transaction (priority -10)
 3. Attempts to INSERT into `message_broker_deduplication` table
 4. If INSERT succeeds → new message → process handler
@@ -47,8 +47,8 @@ The Inbox pattern with deduplication ensures that each message is processed exac
 ## Key Components
 
 - **DeduplicationMiddleware** - Checks duplicates before handler execution
-- **MessageIdStamp** - Contains UUID v7 message identifier
-- **message_broker_deduplication table** - Binary UUID v7 primary key prevents duplicates
+- **MessageIdStamp** - Contains ULID message identifier
+- **message_broker_deduplication table** - Binary ULID primary key prevents duplicates
 - **ReceivedStamp** - Triggers deduplication check (only for consumed messages)
 
 **Note:** Deduplication uses MessageIdStamp + PHP class FQN. The PHP FQN is obtained from `$envelope->getMessage()::class`.
@@ -63,7 +63,7 @@ The Inbox pattern with deduplication ensures that each message is processed exac
 ## Deduplication Table
 
 **Structure:**
-- `message_id` (binary(16), primary key) - UUID v7 from MessageIdStamp
+- `message_id` (binary(16), primary key) - ULID from MessageIdStamp
 - `message_name` (varchar) - PHP FQN for monitoring (e.g., 'App\Message\OrderPlaced')
 - `processed_at` (datetime) - Timestamp for cleanup
 

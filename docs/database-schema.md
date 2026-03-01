@@ -27,7 +27,7 @@ These tables require manual migration (custom schema requirements):
 
 1. **`message_broker_deduplication`** - Inbox deduplication tracking
    - Created via `migrations/schema.sql` or recipe migration
-   - Custom schema: `BINARY(16)` UUID v7 primary key
+   - Custom schema: `BINARY(16)` ULID primary key
    - Required before running inbox consumers
 
 ## Overview
@@ -127,7 +127,7 @@ See `docs/ordered-delivery.md` for the full migration guide.
 
 **Purpose:** Tracks processed messages to prevent duplicate execution.
 
-**Management:** Manual migration required (custom schema with binary UUID v7)
+**Management:** Manual migration required (custom schema with binary ULID)
 
 **Schema:**
 ```sql
@@ -140,7 +140,7 @@ CREATE TABLE message_broker_deduplication (
 ```
 
 **Key Points:**
-- Binary UUID v7 from `MessageIdStamp` header
+- Binary ULID from `MessageIdStamp` header
 - `message_name` stores PHP FQN (e.g., 'App\Message\OrderPlaced')
 - Primary key constraint enforces deduplication
 - No index on `message_name` (YAGNI — no queries filter by it; add when needed)
@@ -359,7 +359,7 @@ services:
 
 ## Performance Considerations
 
-- **Binary UUID v7:** Chronologically sortable, better index performance than UUID v4
+- **Binary ULID:** Chronologically sortable, better index performance than UUID v4
 - **Separate tables:** Independent cleanup, optimised indexes per use case
 - **SKIP LOCKED:** Native support for horizontal scaling
 - **Transactional deduplication:** Atomic guarantees without distributed locks
@@ -373,13 +373,13 @@ This section documents the reasoning behind key database constraint decisions to
 **Decision:** Use `message_id BINARY(16) PRIMARY KEY` only, not composite `(message_id, message_name)`
 
 **Rationale:**
-- UUID v7 provides **global uniqueness** across all message types
-- 2^122 possible UUIDs → collision probability negligible
+- ULID provides **global uniqueness** across all message types
+- 2^128 possible ULIDs → collision probability negligible
 - `message_name` indexed for queries but not uniqueness enforcement
 - Composite key would be redundant (message_id alone guarantees uniqueness)
 
 **Trade-off:** Theoretical risk of same UUID across different message types, but:
-- UUID v7 generation ensures this never happens in practice
+- ULID generation ensures this never happens in practice
 - Simplifies queries (single-column lookup)
 - Reduces index size
 

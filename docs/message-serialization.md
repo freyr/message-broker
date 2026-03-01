@@ -9,7 +9,7 @@ Messages are serialized using semantic, language-agnostic names (`order.placed`)
 **Publishing (Outbox → AMQP):**
 1. Event has `#[MessageName('order.placed')]` attribute
 2. `OutboxSerializer` extracts semantic name and sets `type` header to `order.placed`
-3. `OutboxToAmqpBridge` generates messageId (UUID v7) and adds MessageIdStamp
+3. `OutboxToAmqpBridge` generates messageId (ULID) and adds MessageIdStamp
 4. Body contains JSON-serialised event payload (only business data)
 5. MessageId transported via MessageIdStamp in `X-Message-Stamp-*` header
 
@@ -75,7 +75,7 @@ message_types['order.placed'] → App\Message\OrderPlaced
 ## Custom Type Support
 
 **Built-in Normalizers:**
-- `IdNormalizer` - For UUID v7 (Freyr\Identity\Id)
+- `IdNormalizer` - For ULID (Freyr\Identity\Id)
 - `CarbonImmutableNormalizer` - For Carbon dates
 
 **Adding Custom Types:**

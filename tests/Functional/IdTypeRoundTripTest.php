@@ -10,10 +10,10 @@ use Freyr\MessageBroker\Doctrine\Type\IdType;
 use PHPUnit\Framework\Attributes\CoversClass;
 
 /**
- * Functional test for IdType binary UUID v7 storage and retrieval against real MySQL.
+ * Functional test for IdType binary ULID storage and retrieval against real MySQL.
  *
  * Uses a dedicated test table to verify that BINARY(16) storage
- * correctly round-trips UUID v7 values without corruption.
+ * correctly round-trips ULID values without corruption.
  */
 #[CoversClass(IdType::class)]
 final class IdTypeRoundTripTest extends FunctionalDatabaseTestCase
@@ -61,7 +61,7 @@ final class IdTypeRoundTripTest extends FunctionalDatabaseTestCase
         $restored = $type->convertToPHPValue($raw, $platform);
 
         $this->assertInstanceOf(Id::class, $restored);
-        $this->assertTrue($original->sameAs($restored), 'Binary UUID v7 should round-trip correctly');
+        $this->assertTrue($original->sameAs($restored), 'Binary ULID should round-trip correctly');
     }
 
     public function testMultipleIdsRoundTrip(): void
@@ -91,7 +91,7 @@ final class IdTypeRoundTripTest extends FunctionalDatabaseTestCase
             $this->assertInstanceOf(Id::class, $restored);
             $this->assertTrue(
                 $ids[$index]->sameAs($restored),
-                sprintf('UUID at index %d should round-trip correctly', $index)
+                sprintf('ULID at index %d should round-trip correctly', $index)
             );
         }
     }
