@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Unit\Outbox;
 
-use Freyr\MessageBroker\Outbox\PartitionKeyStamp;
+use Freyr\MessageBroker\Contracts\PartitionKeyStamp;
 use Freyr\MessageBroker\Outbox\PartitionKeyStampMiddleware;
 use Freyr\MessageBroker\Tests\Fixtures\TestOutboxEvent;
 use Freyr\MessageBroker\Tests\Unit\MiddlewareStackFactory;

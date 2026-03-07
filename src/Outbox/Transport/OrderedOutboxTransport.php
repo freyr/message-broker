@@ -7,7 +7,7 @@ namespace Freyr\MessageBroker\Outbox\Transport;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Types;
-use Freyr\MessageBroker\Outbox\PartitionKeyStamp;
+use Freyr\MessageBroker\Contracts\PartitionKeyStamp;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Stamp\TransportMessageIdStamp;
 use Symfony\Component\Messenger\Transport\Serialization\SerializerInterface;

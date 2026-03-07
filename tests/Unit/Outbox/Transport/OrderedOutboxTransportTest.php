@@ -6,7 +6,7 @@ namespace Freyr\MessageBroker\Tests\Unit\Outbox\Transport;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Result;
-use Freyr\MessageBroker\Outbox\PartitionKeyStamp;
+use Freyr\MessageBroker\Contracts\PartitionKeyStamp;
 use Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransport;
 use Freyr\MessageBroker\Tests\Fixtures\TestOutboxEvent;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
