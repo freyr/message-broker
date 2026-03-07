@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-07
+
 ### Added
 
 - **Ordered outbox delivery** — per-partition FIFO delivery with multiple concurrent workers
@@ -28,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING:** `freyr/identity` upgraded from `^0.4` to `^1.0` (UUID v7 replaced by ULID)
+- **BREAKING:** `freyr/message-broker-contracts` upgraded from `^0.1` to `^0.3`
+- Documentation normalized to American English spelling
 - Test suite restructured — Phase 1 pure unit tests with proper isolation, removed circular mock assertions
 
 ## [0.3.0] - 2026-02-15
@@ -232,6 +237,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Message Serialization - Semantic naming and cross-language compatibility
 - AMQP Routing - Convention-based routing with customization options
 
+[0.4.0]: https://github.com/freyr/message-broker/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/freyr/message-broker/releases/tag/v0.3.0
 [0.2.3]: https://github.com/freyr/message-broker/releases/tag/v0.2.3
 [0.2.2]: https://github.com/freyr/message-broker/releases/tag/v0.2.2
