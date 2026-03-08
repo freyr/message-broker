@@ -11,6 +11,7 @@ use Freyr\MessageBroker\Inbox\DeduplicationMiddleware;
 use Freyr\MessageBroker\Tests\Fixtures\TestInboxEvent;
 use Freyr\MessageBroker\Tests\Unit\MiddlewareStackFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Stamp\ReceivedStamp;
@@ -28,7 +29,8 @@ use Symfony\Component\Messenger\Stamp\ReceivedStamp;
 #[CoversClass(DeduplicationMiddleware::class)]
 final class DeduplicationMiddlewareTest extends TestCase
 {
-    public function testMessageWithoutReceivedStampPassesThrough(): void
+    #[Test]
+    public function itPassesThroughMessageWithoutReceivedStamp(): void
     {
         $store = $this->createMock(DeduplicationStore::class);
         $store->expects($this->never())
@@ -43,7 +45,8 @@ final class DeduplicationMiddlewareTest extends TestCase
         $this->assertTrue($nextCalled, 'Dispatch-path message should pass through');
     }
 
-    public function testReceivedMessageWithoutMessageIdStampPassesThrough(): void
+    #[Test]
+    public function itPassesThroughReceivedMessageWithoutMessageIdStamp(): void
     {
         $store = $this->createMock(DeduplicationStore::class);
         $store->expects($this->never())
@@ -58,7 +61,8 @@ final class DeduplicationMiddlewareTest extends TestCase
         $this->assertTrue($nextCalled, 'Message without MessageIdStamp should pass through');
     }
 
-    public function testNewMessageCallsNextMiddleware(): void
+    #[Test]
+    public function itCallsNextMiddlewareForNewMessage(): void
     {
         $store = $this->createStub(DeduplicationStore::class);
         $store->method('isDuplicate')
@@ -76,7 +80,8 @@ final class DeduplicationMiddlewareTest extends TestCase
         $this->assertTrue($nextCalled, 'New message should be forwarded to next middleware');
     }
 
-    public function testDuplicateMessageShortCircuits(): void
+    #[Test]
+    public function itShortCircuitsDuplicateMessage(): void
     {
         $store = $this->createStub(DeduplicationStore::class);
         $store->method('isDuplicate')
@@ -95,7 +100,8 @@ final class DeduplicationMiddlewareTest extends TestCase
         $this->assertSame($envelope, $result, 'Should return original envelope');
     }
 
-    public function testStoreReceivesMessageFqnAsMessageName(): void
+    #[Test]
+    public function itPassesMessageFqnAsMessageNameToStore(): void
     {
         $messageId = Id::new();
 

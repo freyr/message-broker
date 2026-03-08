@@ -9,6 +9,7 @@ use Freyr\MessageBroker\Outbox\PartitionKeyStampMiddleware;
 use Freyr\MessageBroker\Tests\Fixtures\TestOutboxEvent;
 use Freyr\MessageBroker\Tests\Unit\MiddlewareStackFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Stamp\ReceivedStamp;
@@ -32,7 +33,8 @@ final class PartitionKeyStampMiddlewareTest extends TestCase
         $this->middleware = new PartitionKeyStampMiddleware();
     }
 
-    public function testOutboxMessageWithoutPartitionKeyStampThrows(): void
+    #[Test]
+    public function itThrowsForOutboxMessageWithoutPartitionKeyStamp(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random());
 
@@ -42,7 +44,8 @@ final class PartitionKeyStampMiddlewareTest extends TestCase
         $this->middleware->handle($envelope, MiddlewareStackFactory::createPassThrough());
     }
 
-    public function testOutboxMessageWithPartitionKeyStampPassesThrough(): void
+    #[Test]
+    public function itPassesThroughOutboxMessageWithPartitionKeyStamp(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random(), [new PartitionKeyStamp('order-123')]);
 
@@ -55,7 +58,8 @@ final class PartitionKeyStampMiddlewareTest extends TestCase
         $this->assertSame('order-123', $stamp->partitionKey);
     }
 
-    public function testNonOutboxMessagePassesThroughWithoutValidation(): void
+    #[Test]
+    public function itPassesThroughNonOutboxMessageWithoutValidation(): void
     {
         $envelope = new Envelope(new \stdClass());
 
@@ -65,7 +69,8 @@ final class PartitionKeyStampMiddlewareTest extends TestCase
         $this->assertTrue($nextCalled, 'Non-OutboxMessage must pass through without validation');
     }
 
-    public function testOutboxMessageWithReceivedStampSkipsValidation(): void
+    #[Test]
+    public function itSkipsValidationForOutboxMessageWithReceivedStamp(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random(), [new ReceivedStamp('outbox')]);
 
@@ -75,7 +80,8 @@ final class PartitionKeyStampMiddlewareTest extends TestCase
         $this->assertTrue($nextCalled, 'Consumed messages must skip validation');
     }
 
-    public function testExceptionMessageIncludesClassName(): void
+    #[Test]
+    public function itIncludesClassNameInExceptionMessage(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random());
 
@@ -91,7 +97,8 @@ final class PartitionKeyStampMiddlewareTest extends TestCase
         }
     }
 
-    public function testOutboxMessageWithEmptyPartitionKeyPassesThrough(): void
+    #[Test]
+    public function itPassesThroughOutboxMessageWithEmptyPartitionKey(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random(), [new PartitionKeyStamp('')]);
 

@@ -11,6 +11,7 @@ use Doctrine\DBAL\Schema\Table;
 use Doctrine\Migrations\Configuration\Configuration as MigrationsConfiguration;
 use Freyr\MessageBroker\Command\SetupDeduplicationCommand;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -31,7 +32,8 @@ use Symfony\Component\Console\Tester\CommandTester;
 #[CoversClass(SetupDeduplicationCommand::class)]
 final class SetupDeduplicationCommandTest extends TestCase
 {
-    public function testDryRunShowsSqlWhenTableDoesNotExist(): void
+    #[Test]
+    public function itShowsSqlInDryRunWhenTableDoesNotExist(): void
     {
         $schemaManager = $this->createStub(AbstractSchemaManager::class);
         $schemaManager->method('tablesExist')
@@ -65,7 +67,8 @@ final class SetupDeduplicationCommandTest extends TestCase
         $this->assertStringContainsString('CREATE TABLE', $tester->getDisplay());
     }
 
-    public function testDryRunReportsTableExists(): void
+    #[Test]
+    public function itReportsTableExistsInDryRun(): void
     {
         $schemaManager = $this->createStub(AbstractSchemaManager::class);
         $schemaManager->method('tablesExist')
@@ -83,7 +86,8 @@ final class SetupDeduplicationCommandTest extends TestCase
         $this->assertStringContainsString('already exists', $tester->getDisplay());
     }
 
-    public function testCustomTableNameIsUsed(): void
+    #[Test]
+    public function itUsesCustomTableName(): void
     {
         $schemaManager = $this->createStub(AbstractSchemaManager::class);
         $schemaManager->method('tablesExist')
@@ -111,7 +115,8 @@ final class SetupDeduplicationCommandTest extends TestCase
         $this->assertStringContainsString('CREATE TABLE custom_dedup', $tester->getDisplay());
     }
 
-    public function testForceModeCreatesTable(): void
+    #[Test]
+    public function itCreatesTableInForceMode(): void
     {
         $schemaManager = $this->createMock(AbstractSchemaManager::class);
         $schemaManager->method('tablesExist')
@@ -133,7 +138,8 @@ final class SetupDeduplicationCommandTest extends TestCase
         $this->assertStringContainsString('created successfully', $tester->getDisplay());
     }
 
-    public function testForceModeSkipsWhenTableExists(): void
+    #[Test]
+    public function itSkipsInForceModeWhenTableExists(): void
     {
         $schemaManager = $this->createStub(AbstractSchemaManager::class);
         $schemaManager->method('tablesExist')
@@ -153,7 +159,8 @@ final class SetupDeduplicationCommandTest extends TestCase
         $this->assertStringContainsString('already exists', $tester->getDisplay());
     }
 
-    public function testMigrationModeGeneratesFile(): void
+    #[Test]
+    public function itGeneratesFileInMigrationMode(): void
     {
         $tempDir = sys_get_temp_dir().'/test_migrations_'.uniqid();
         mkdir($tempDir, 0o755, true);
@@ -184,7 +191,8 @@ final class SetupDeduplicationCommandTest extends TestCase
         }
     }
 
-    public function testConflictingFlagsProduceError(): void
+    #[Test]
+    public function itProducesErrorForConflictingFlags(): void
     {
         $connection = $this->createStub(Connection::class);
 
@@ -199,7 +207,8 @@ final class SetupDeduplicationCommandTest extends TestCase
         $this->assertStringContainsString('mutually exclusive', $tester->getDisplay());
     }
 
-    public function testMigrationModeWithoutConfigurationErrors(): void
+    #[Test]
+    public function itErrorsInMigrationModeWithoutConfiguration(): void
     {
         $connection = $this->createStub(Connection::class);
 

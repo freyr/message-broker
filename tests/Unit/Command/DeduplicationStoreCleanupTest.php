@@ -8,6 +8,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Types\Types;
 use Freyr\MessageBroker\Command\DeduplicationStoreCleanup;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -23,7 +24,8 @@ use Symfony\Component\Console\Tester\CommandTester;
 #[CoversClass(DeduplicationStoreCleanup::class)]
 final class DeduplicationStoreCleanupTest extends TestCase
 {
-    public function testUsesSpecifiedDaysValue(): void
+    #[Test]
+    public function itUsesSpecifiedDaysValue(): void
     {
         $connection = $this->createMock(Connection::class);
         $connection->expects($this->once())
@@ -51,7 +53,8 @@ final class DeduplicationStoreCleanupTest extends TestCase
         $this->assertSame(Command::SUCCESS, $tester->getStatusCode());
     }
 
-    public function testNonNumericDaysFallsBackToDefault(): void
+    #[Test]
+    public function itFallsBackToDefaultForNonNumericDays(): void
     {
         $connection = $this->createMock(Connection::class);
         $connection->expects($this->once())
@@ -75,7 +78,8 @@ final class DeduplicationStoreCleanupTest extends TestCase
         $this->assertSame(Command::SUCCESS, $tester->getStatusCode());
     }
 
-    public function testCustomTableNameFlowsIntoSql(): void
+    #[Test]
+    public function itFlowsCustomTableNameIntoSql(): void
     {
         $connection = $this->createMock(Connection::class);
         $connection->expects($this->once())

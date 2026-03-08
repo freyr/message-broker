@@ -10,6 +10,7 @@ use Freyr\MessageBroker\Outbox\MessageIdStampMiddleware;
 use Freyr\MessageBroker\Tests\Fixtures\TestOutboxEvent;
 use Freyr\MessageBroker\Tests\Unit\MiddlewareStackFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Stamp\ReceivedStamp;
@@ -33,7 +34,8 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $this->middleware = new MessageIdStampMiddleware();
     }
 
-    public function testOutboxMessageGetsStampedWithMessageIdStamp(): void
+    #[Test]
+    public function itStampsOutboxMessageWithMessageIdStamp(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random());
 
@@ -46,7 +48,8 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
     }
 
-    public function testNonOutboxMessagePassesThroughWithoutStamp(): void
+    #[Test]
+    public function itPassesThroughNonOutboxMessageWithoutStamp(): void
     {
         $envelope = new Envelope(new \stdClass());
 
@@ -60,7 +63,8 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
     }
 
-    public function testOutboxMessageWithExistingStampIsNotReStamped(): void
+    #[Test]
+    public function itDoesNotReStampOutboxMessageWithExistingStamp(): void
     {
         $existingId = Id::new();
         $existingStamp = new MessageIdStamp($existingId);
@@ -78,7 +82,8 @@ final class MessageIdStampMiddlewareTest extends TestCase
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
     }
 
-    public function testOutboxMessageWithReceivedStampIsNotStamped(): void
+    #[Test]
+    public function itDoesNotStampOutboxMessageWithReceivedStamp(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random(), [new ReceivedStamp('outbox')]);
 

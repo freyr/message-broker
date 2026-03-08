@@ -15,6 +15,7 @@ use Freyr\MessageBroker\Outbox\Transport\OutboxPlatformStrategy;
 use Freyr\MessageBroker\Outbox\Transport\PostgreSqlOutboxPlatformStrategy;
 use Freyr\MessageBroker\Tests\Fixtures\TestOutboxEvent;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Stamp\TransportMessageIdStamp;
 use Symfony\Component\Messenger\Transport\Serialization\PhpSerializer;
@@ -61,7 +62,8 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $this->transport->setup();
     }
 
-    public function testSetupCreatesTableWithPartitionKeyColumn(): void
+    #[Test]
+    public function itCreatesTableWithPartitionKeyColumnOnSetup(): void
     {
         $columns = self::$connection->createSchemaManager()->listTableColumns(self::TABLE);
 
@@ -77,7 +79,8 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $this->assertContains('partition_key', $columnNames);
     }
 
-    public function testSendStoresPartitionKey(): void
+    #[Test]
+    public function itStoresPartitionKeyOnSend(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random(), [new PartitionKeyStamp('order-abc')]);
 
@@ -96,7 +99,8 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $this->assertSame('outbox', $row['queue_name']);
     }
 
-    public function testGetReturnsOldestMessagePerPartition(): void
+    #[Test]
+    public function itReturnsOldestMessagePerPartitionOnGet(): void
     {
         // Insert 3 messages for partition "order-X": msg1(id=lowest), msg2, msg3
         $msg1 = $this->sendEvent('order-X', 'first');
@@ -150,7 +154,8 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $this->assertTrue($orderYProcessed, 'Partition order-Y must be processed');
     }
 
-    public function testAckDeletesRow(): void
+    #[Test]
+    public function itDeletesRowOnAck(): void
     {
         $this->sendEvent('partition-a', 'data');
 
@@ -164,7 +169,8 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $this->assertSame(0, (int) $count);
     }
 
-    public function testRejectDeletesRow(): void
+    #[Test]
+    public function itDeletesRowOnReject(): void
     {
         $this->sendEvent('partition-b', 'data');
 
@@ -178,7 +184,8 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $this->assertSame(0, (int) $count);
     }
 
-    public function testEmptyPartitionKeyGroupsMessagesIntoSinglePartition(): void
+    #[Test]
+    public function itGroupsMessagesWithEmptyPartitionKeyIntoSinglePartition(): void
     {
         // Messages without PartitionKeyStamp get partition_key = ''
         $this->sendEvent('', 'msg-a');
@@ -190,7 +197,8 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $this->assertCount(1, $fetched);
     }
 
-    public function testKeepaliveRefreshesDeliveredAt(): void
+    #[Test]
+    public function itRefreshesDeliveredAtOnKeepalive(): void
     {
         $this->sendEvent('partition-k', 'data');
 
@@ -223,7 +231,8 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $this->transport->ack($fetched[0]);
     }
 
-    public function testRedeliveryTimeoutReleasesMessage(): void
+    #[Test]
+    public function itReleasesMessageAfterRedeliveryTimeout(): void
     {
         $this->sendEvent('partition-r', 'data');
 
@@ -252,7 +261,8 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $shortTimeoutTransport->ack($refetched[0]);
     }
 
-    public function testSetupMigratesExistingTableWithoutPartitionKey(): void
+    #[Test]
+    public function itMigratesExistingTableWithoutPartitionKeyOnSetup(): void
     {
         // Create a table WITHOUT partition_key (simulating pre-migration state) using DBAL Schema API
         self::$connection->executeStatement(sprintf('DROP TABLE IF EXISTS %s', self::TABLE));
@@ -285,7 +295,8 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $this->assertArrayHasKey('partition_key', $columns, 'setup() must add partition_key column');
     }
 
-    public function testSetupIsIdempotentOnMigratedTable(): void
+    #[Test]
+    public function itIsIdempotentOnSetupForMigratedTable(): void
     {
         // setup() was already called in setUp() — call it again
         $this->transport->setup();
@@ -295,7 +306,8 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $this->assertArrayHasKey('partition_key', $columns);
     }
 
-    public function testAutoSetupTriggersOnSend(): void
+    #[Test]
+    public function itTriggersAutoSetupOnSend(): void
     {
         // Drop the table so auto-setup must create it
         self::$connection->executeStatement(sprintf('DROP TABLE IF EXISTS %s', self::TABLE));
@@ -320,7 +332,8 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $this->assertArrayHasKey('partition_key', $columns);
     }
 
-    public function testMultipleRedeliveriesBeforeAck(): void
+    #[Test]
+    public function itHandlesMultipleRedeliveriesBeforeAck(): void
     {
         $this->sendEvent('partition-multi', 'data');
 

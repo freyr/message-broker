@@ -10,6 +10,7 @@ use Doctrine\DBAL\ParameterType;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Inbox\DeduplicationDbalStore;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -25,7 +26,8 @@ use Psr\Log\LoggerInterface;
 #[CoversClass(DeduplicationDbalStore::class)]
 final class DeduplicationDbalStoreTest extends TestCase
 {
-    public function testReturnsFalseWhenInsertSucceeds(): void
+    #[Test]
+    public function itReturnsFalseWhenInsertSucceeds(): void
     {
         $messageId = Id::new();
 
@@ -48,7 +50,8 @@ final class DeduplicationDbalStoreTest extends TestCase
         $this->assertFalse($store->isDuplicate($messageId, 'App\\Message\\OrderPlaced'));
     }
 
-    public function testReturnsTrueWhenUniqueConstraintViolated(): void
+    #[Test]
+    public function itReturnsTrueWhenUniqueConstraintViolated(): void
     {
         $connection = $this->createStub(Connection::class);
         $connection->method('insert')
@@ -59,7 +62,8 @@ final class DeduplicationDbalStoreTest extends TestCase
         $this->assertTrue($store->isDuplicate(Id::new(), 'App\\Message\\OrderPlaced'));
     }
 
-    public function testLogsDuplicateDetection(): void
+    #[Test]
+    public function itLogsDuplicateDetection(): void
     {
         $messageId = Id::new();
 
@@ -85,7 +89,8 @@ final class DeduplicationDbalStoreTest extends TestCase
         $store->isDuplicate($messageId, 'App\\Message\\OrderPlaced');
     }
 
-    public function testUsesCustomTableName(): void
+    #[Test]
+    public function itUsesCustomTableName(): void
     {
         $connection = $this->createMock(Connection::class);
         $connection->expects($this->once())
@@ -97,7 +102,8 @@ final class DeduplicationDbalStoreTest extends TestCase
         $store->isDuplicate(Id::new(), 'App\\Message\\OrderPlaced');
     }
 
-    public function testInsertSpecifiesIdTypeForMessageId(): void
+    #[Test]
+    public function itSpecifiesIdTypeForMessageIdOnInsert(): void
     {
         $connection = $this->createMock(Connection::class);
         $connection->expects($this->once())

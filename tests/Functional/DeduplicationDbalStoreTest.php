@@ -7,6 +7,7 @@ namespace Freyr\MessageBroker\Tests\Functional;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Inbox\DeduplicationDbalStore;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 
 /**
  * Functional test for DeduplicationDbalStore against a real database (MySQL or PostgreSQL).
@@ -25,14 +26,16 @@ final class DeduplicationDbalStoreTest extends FunctionalDatabaseTestCase
         $this->store = new DeduplicationDbalStore(self::$connection);
     }
 
-    public function testNewMessageIsNotDuplicate(): void
+    #[Test]
+    public function itReturnsNotDuplicateForNewMessage(): void
     {
         $result = $this->store->isDuplicate(Id::new(), 'test.event');
 
         $this->assertFalse($result, 'First insert of a new message should not be a duplicate');
     }
 
-    public function testSameMessageIdIsDuplicate(): void
+    #[Test]
+    public function itDetectsDuplicateForSameMessageId(): void
     {
         $id = Id::new();
         $this->store->isDuplicate($id, 'test.event');
@@ -42,13 +45,15 @@ final class DeduplicationDbalStoreTest extends FunctionalDatabaseTestCase
         $this->assertTrue($result, 'Second insert with same message ID should be a duplicate');
     }
 
-    public function testDifferentMessageIdsAreNotDuplicates(): void
+    #[Test]
+    public function itReturnsNotDuplicateForDifferentMessageIds(): void
     {
         $this->assertFalse($this->store->isDuplicate(Id::new(), 'test.event'));
         $this->assertFalse($this->store->isDuplicate(Id::new(), 'test.event'));
     }
 
-    public function testRowIsPersistedWithCorrectData(): void
+    #[Test]
+    public function itPersistsRowWithCorrectData(): void
     {
         $id = Id::new();
         $messageName = 'order.placed';

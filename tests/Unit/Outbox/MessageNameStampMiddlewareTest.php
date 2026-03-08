@@ -10,6 +10,7 @@ use Freyr\MessageBroker\Outbox\MessageNameStampMiddleware;
 use Freyr\MessageBroker\Tests\Fixtures\TestOutboxEvent;
 use Freyr\MessageBroker\Tests\Unit\MiddlewareStackFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Symfony\Component\Messenger\Envelope;
@@ -35,7 +36,8 @@ final class MessageNameStampMiddlewareTest extends TestCase
         $this->middleware = new MessageNameStampMiddleware();
     }
 
-    public function testOutboxMessageGetsStampedWithMessageNameStamp(): void
+    #[Test]
+    public function itStampsOutboxMessageWithMessageNameStamp(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random());
 
@@ -48,7 +50,8 @@ final class MessageNameStampMiddlewareTest extends TestCase
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
     }
 
-    public function testNonOutboxMessagePassesThroughWithoutStamp(): void
+    #[Test]
+    public function itPassesThroughNonOutboxMessageWithoutStamp(): void
     {
         $envelope = new Envelope(new \stdClass());
 
@@ -62,7 +65,8 @@ final class MessageNameStampMiddlewareTest extends TestCase
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
     }
 
-    public function testOutboxMessageWithExistingStampIsNotReStamped(): void
+    #[Test]
+    public function itDoesNotReStampOutboxMessageWithExistingStamp(): void
     {
         $existingStamp = new MessageNameStamp('custom.name.override');
         $envelope = new Envelope(TestOutboxEvent::random(), [$existingStamp]);
@@ -80,7 +84,8 @@ final class MessageNameStampMiddlewareTest extends TestCase
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
     }
 
-    public function testOutboxMessageWithReceivedStampIsNotStamped(): void
+    #[Test]
+    public function itDoesNotStampOutboxMessageWithReceivedStamp(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random(), [new ReceivedStamp('outbox')]);
 
@@ -92,7 +97,8 @@ final class MessageNameStampMiddlewareTest extends TestCase
         $this->assertTrue($nextCalled, 'Middleware must always call next in the stack');
     }
 
-    public function testThrowsWhenMessageNameAttributeMissing(): void
+    #[Test]
+    public function itThrowsWhenMessageNameAttributeMissing(): void
     {
         $message = new class implements OutboxMessage {};
         $envelope = new Envelope($message);

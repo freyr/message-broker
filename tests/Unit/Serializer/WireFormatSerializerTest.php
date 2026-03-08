@@ -13,6 +13,7 @@ use Freyr\MessageBroker\Serializer\Normalizer\IdNormalizer;
 use Freyr\MessageBroker\Serializer\WireFormatSerializer;
 use Freyr\MessageBroker\Tests\Fixtures\TestOutboxEvent;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Symfony\Component\Messenger\Envelope;
@@ -66,7 +67,8 @@ final class WireFormatSerializerTest extends TestCase
         $this->serializer = new WireFormatSerializer($symfonySerializer);
     }
 
-    public function testEncodeProducesSemanticTypeHeader(): void
+    #[Test]
+    public function itProducesSemanticTypeHeaderOnEncode(): void
     {
         $encoded = $this->serializer->encode($this->createStampedEnvelope());
 
@@ -75,7 +77,8 @@ final class WireFormatSerializerTest extends TestCase
         $this->assertSame('test.event.sent', $headers['type']);
     }
 
-    public function testEncodeAddsMessageClassHeader(): void
+    #[Test]
+    public function itAddsMessageClassHeaderOnEncode(): void
     {
         $encoded = $this->serializer->encode($this->createStampedEnvelope());
 
@@ -85,7 +88,8 @@ final class WireFormatSerializerTest extends TestCase
         $this->assertSame(TestOutboxEvent::class, $headers['X-Message-Class']);
     }
 
-    public function testEncodeThrowsWhenMessageNameStampMissing(): void
+    #[Test]
+    public function itThrowsWhenMessageNameStampMissingOnEncode(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random(), [
             new MessageIdStamp(Id::fromString(self::TEST_MESSAGE_ID)),
@@ -97,7 +101,8 @@ final class WireFormatSerializerTest extends TestCase
         $this->serializer->encode($envelope);
     }
 
-    public function testEncodeBodyContainsOnlyBusinessData(): void
+    #[Test]
+    public function itContainsOnlyBusinessDataInBodyOnEncode(): void
     {
         $encoded = $this->serializer->encode($this->createStampedEnvelope());
 
@@ -108,7 +113,8 @@ final class WireFormatSerializerTest extends TestCase
         $this->assertArrayNotHasKey('messageId', $body, 'Body should not contain messageId');
     }
 
-    public function testDecodeRestoresFqnFromMessageClassHeader(): void
+    #[Test]
+    public function itRestoresFqnFromMessageClassHeaderOnDecode(): void
     {
         $encoded = $this->serializer->encode($this->createStampedEnvelope());
 
@@ -117,7 +123,8 @@ final class WireFormatSerializerTest extends TestCase
         $this->assertInstanceOf(TestOutboxEvent::class, $decoded->getMessage());
     }
 
-    public function testDecodeSkipsReplacementWhenTypeContainsBackslash(): void
+    #[Test]
+    public function itSkipsReplacementWhenTypeContainsBackslashOnDecode(): void
     {
         $encoded = $this->serializer->encode($this->createStampedEnvelope());
 
@@ -131,7 +138,8 @@ final class WireFormatSerializerTest extends TestCase
         $this->assertInstanceOf(TestOutboxEvent::class, $decoded->getMessage());
     }
 
-    public function testRoundTripPreservesMessageData(): void
+    #[Test]
+    public function itPreservesMessageDataOnRoundTrip(): void
     {
         $id = Id::new();
         $timestamp = CarbonImmutable::now();

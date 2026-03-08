@@ -11,6 +11,7 @@ use Doctrine\DBAL\Types\Types;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Doctrine\Type\IdType;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 
 /**
  * Functional test for IdType binary ULID storage and retrieval against a real database (MySQL or PostgreSQL).
@@ -59,7 +60,8 @@ final class IdTypeRoundTripTest extends FunctionalDatabaseTestCase
         self::$connection->executeStatement(sprintf('TRUNCATE TABLE %s', self::TABLE));
     }
 
-    public function testBinaryStorageAndRetrieval(): void
+    #[Test]
+    public function itRoundTripsBinaryStorageCorrectly(): void
     {
         $original = Id::new();
 
@@ -80,7 +82,8 @@ final class IdTypeRoundTripTest extends FunctionalDatabaseTestCase
         $this->assertTrue($original->sameAs($restored), 'Binary ULID should round-trip correctly');
     }
 
-    public function testMultipleIdsRoundTrip(): void
+    #[Test]
+    public function itRoundTripsMultipleIds(): void
     {
         $ids = [];
 
