@@ -15,7 +15,10 @@ final class IdType extends Type
 
     public function getSQLDeclaration(array $column, AbstractPlatform $platform): string
     {
-        return 'BINARY(16)';
+        return $platform->getBinaryTypeDeclarationSQL([
+            'length' => 16,
+            'fixed' => true,
+        ]);
     }
 
     public function convertToPHPValue(mixed $value, AbstractPlatform $platform): ?Id

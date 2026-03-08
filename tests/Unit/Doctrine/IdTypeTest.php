@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Unit\Doctrine;
 
 use Doctrine\DBAL\Platforms\AbstractPlatform;
+use Doctrine\DBAL\Platforms\MySQLPlatform;
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Doctrine\Type\IdType;
 use InvalidArgumentException;
@@ -31,7 +33,7 @@ final class IdTypeTest extends TestCase
     protected function setUp(): void
     {
         $this->type = new IdType();
-        $this->platform = $this->createStub(AbstractPlatform::class);
+        $this->platform = new MySQLPlatform();
     }
 
     public function testConvertToPHPValueReturnIdForBinaryString(): void
@@ -91,9 +93,14 @@ final class IdTypeTest extends TestCase
         $this->type->convertToDatabaseValue('not-an-id', $this->platform);
     }
 
-    public function testGetSQLDeclarationReturnsBinary16(): void
+    public function testGetSQLDeclarationReturnsBinary16ForMySQL(): void
     {
-        $this->assertSame('BINARY(16)', $this->type->getSQLDeclaration([], $this->platform));
+        $this->assertSame('BINARY(16)', $this->type->getSQLDeclaration([], new MySQLPlatform()));
+    }
+
+    public function testGetSQLDeclarationReturnsByteaForPostgreSQL(): void
+    {
+        $this->assertSame('BYTEA', $this->type->getSQLDeclaration([], new PostgreSQLPlatform()));
     }
 
     public function testGetNameReturnsIdBinary(): void

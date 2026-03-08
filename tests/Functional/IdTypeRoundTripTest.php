@@ -13,9 +13,9 @@ use Freyr\MessageBroker\Doctrine\Type\IdType;
 use PHPUnit\Framework\Attributes\CoversClass;
 
 /**
- * Functional test for IdType binary ULID storage and retrieval against real MySQL.
+ * Functional test for IdType binary ULID storage and retrieval against a real database (MySQL or PostgreSQL).
  *
- * Uses a dedicated test table to verify that BINARY(16) storage
+ * Uses a dedicated test table to verify that binary storage (BINARY(16) / BYTEA)
  * correctly round-trips ULID values without corruption.
  */
 #[CoversClass(IdType::class)]
