@@ -135,4 +135,4 @@ This gives you the best of both worlds: strict per-aggregate ordering where need
 
 - **No delayed outbox messages**: Messages with `available_at` in the future do not block subsequent messages in the same partition
 - **Single worker per partition**: By design, only one worker processes a partition's head message
-- **MySQL 8.0+ or PostgreSQL 9.5+**: The transport uses `FOR UPDATE SKIP LOCKED` syntax supported by both engines
+- **MySQL 8.0+ or PostgreSQL 13+**: The transport uses `FOR UPDATE SKIP LOCKED` syntax (MySQL 8.0+, PostgreSQL 9.5+) and PostgreSQL-specific `xid8` transaction filtering (PostgreSQL 13+)
