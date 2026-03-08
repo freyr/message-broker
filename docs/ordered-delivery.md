@@ -87,7 +87,7 @@ With `auto_setup: true`, the transport creates the table automatically on first 
 
 | Scenario | Behaviour |
 |---|---|
-| No `PartitionKeyStamp` | `partition_key = ''` — no ordering constraint |
+| No `PartitionKeyStamp` | `partition_key = ''` — all such messages grouped into one partition (serialized one-at-a-time) |
 | Worker crash | Message redelivered after `redeliver_timeout` without stalling the partition |
 | Hot partition | Bottlenecked to one worker at a time — by design |
 | Empty outbox | `get()` returns empty; workers sleep via Symfony's backoff |
@@ -104,6 +104,32 @@ With `auto_setup: true`, the transport creates the table automatically on first 
 3. Wait for the outbox to drain (or accept a temporary bottleneck — legacy rows with `partition_key = ''` are serialised one-at-a-time)
 4. Change the DSN from `doctrine://` to `ordered-doctrine://`
 5. Restart workers
+
+## PartitionKeyStampMiddleware (Optional)
+
+The `PartitionKeyStampMiddleware` is a **safety net**, not a requirement. It throws a `LogicException` if an `OutboxMessage` is dispatched without a `PartitionKeyStamp`. Adding it to your middleware chain is recommended but optional.
+
+If you omit the middleware, messages dispatched without a `PartitionKeyStamp` will be stored with `partition_key = ''` and serialized one-at-a-time (grouped into a single partition).
+
+## Events That Don't Need Ordering
+
+If some of your events are high-throughput and order-insensitive, route them to the standard `doctrine://` transport instead. Both transports can share the same physical table using different `queue_name` values:
+
+```yaml
+# config/packages/messenger.yaml
+framework:
+    messenger:
+        transports:
+            outbox:
+                dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
+            ordered_outbox:
+                dsn: 'ordered-doctrine://default?table_name=messenger_outbox&queue_name=ordered_outbox'
+        routing:
+            App\Event\OrderPlaced: ordered_outbox    # needs per-aggregate ordering
+            App\Event\UserLoggedIn: outbox            # no ordering needed
+```
+
+This gives you the best of both worlds: strict per-aggregate ordering where needed, and full parallelism for everything else.
 
 ## Limitations
 
