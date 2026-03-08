@@ -1,6 +1,6 @@
 # Ordered Outbox Delivery
 
-Per-aggregate causal ordering for outbox events. Events sharing a partition key are delivered to AMQP in insertion order, whilst events with different partition keys are processed in parallel across workers.
+Per-aggregate causal ordering for outbox events. Events sharing a partition key are delivered to AMQP in insertion order, while events with different partition keys are processed in parallel across workers.
 
 ## Quick Start
 
@@ -58,7 +58,7 @@ WHERE m.id IN (
 LIMIT 1 FOR UPDATE SKIP LOCKED
 ```
 
-This ensures only the oldest message per partition can be claimed by a worker. Workers parallelise across partitions but process each partition strictly in insertion order (by auto-increment `id`).
+This ensures only the oldest message per partition can be claimed by a worker. Workers parallelize across partitions but process each partition strictly in insertion order (by auto-increment `id`).
 
 ### Schema
 
@@ -85,9 +85,9 @@ With `auto_setup: true`, the transport creates the table automatically on first 
 
 ## Edge Cases
 
-| Scenario | Behaviour |
+| Scenario | Behavior |
 |---|---|
-| No `PartitionKeyStamp` | `partition_key = ''` — no ordering constraint |
+| No `PartitionKeyStamp` | `partition_key = ''` — all such messages grouped into one partition (serialized one-at-a-time) |
 | Worker crash | Message redelivered after `redeliver_timeout` without stalling the partition |
 | Hot partition | Bottlenecked to one worker at a time — by design |
 | Empty outbox | `get()` returns empty; workers sleep via Symfony's backoff |
@@ -101,9 +101,35 @@ With `auto_setup: true`, the transport creates the table automatically on first 
      ALGORITHM=INPLACE, LOCK=NONE;
    ```
 2. Add the covering index
-3. Wait for the outbox to drain (or accept a temporary bottleneck — legacy rows with `partition_key = ''` are serialised one-at-a-time)
+3. Wait for the outbox to drain (or accept a temporary bottleneck — legacy rows with `partition_key = ''` are serialized one-at-a-time)
 4. Change the DSN from `doctrine://` to `ordered-doctrine://`
 5. Restart workers
+
+## PartitionKeyStampMiddleware (Optional)
+
+The `PartitionKeyStampMiddleware` is a **safety net**, not a requirement. It throws a `LogicException` if an `OutboxMessage` is dispatched without a `PartitionKeyStamp`. Adding it to your middleware chain is recommended but optional.
+
+If you omit the middleware, messages dispatched without a `PartitionKeyStamp` will be stored with `partition_key = ''` and serialized one-at-a-time (grouped into a single partition).
+
+## Events That Don't Need Ordering
+
+If some of your events are high-throughput and order-insensitive, route them to the standard `doctrine://` transport instead. Both transports can share the same physical table using different `queue_name` values:
+
+```yaml
+# config/packages/messenger.yaml
+framework:
+    messenger:
+        transports:
+            outbox:
+                dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
+            ordered_outbox:
+                dsn: 'ordered-doctrine://default?table_name=messenger_outbox&queue_name=ordered_outbox'
+        routing:
+            App\Event\OrderPlaced: ordered_outbox    # needs per-aggregate ordering
+            App\Event\UserLoggedIn: outbox            # no ordering needed
+```
+
+This gives you the best of both worlds: strict per-aggregate ordering where needed, and full parallelism for everything else.
 
 ## Limitations
 

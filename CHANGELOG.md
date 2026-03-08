@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Performance benchmark for ordered outbox query — all scenarios pass `< 50ms` target (see `docs/benchmark-ordered-outbox.md`)
+- Documentation for order opt-out pattern (route unordered events to standard `doctrine://` transport)
+- Documentation clarifying `PartitionKeyStampMiddleware` is optional
+
+### Fixed
+
+- Corrected edge cases table: empty partition key groups messages into one partition (serialized), not "no ordering constraint"
+- Renamed misleading test `testEmptyPartitionKeyTreatedAsIndependent` to `testEmptyPartitionKeyGroupsMessagesIntoSinglePartition`
+
 ## [0.4.0] - 2026-03-07
 
 ### Added

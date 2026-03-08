@@ -170,14 +170,14 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $this->assertSame(0, (int) $count);
     }
 
-    public function testEmptyPartitionKeyTreatedAsIndependent(): void
+    public function testEmptyPartitionKeyGroupsMessagesIntoSinglePartition(): void
     {
         // Messages without PartitionKeyStamp get partition_key = ''
         $this->sendEvent('', 'msg-a');
         $this->sendEvent('', 'msg-b');
 
         // Both have partition_key = '' — they are in the same partition,
-        // so only the oldest is returned
+        // so only the oldest is returned (serialized, not independent)
         $fetched = iterator_to_array($this->transport->get());
         $this->assertCount(1, $fetched);
     }
