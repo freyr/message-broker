@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Inbox;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use Doctrine\DBAL\ParameterType;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Contracts\DeduplicationStore;
 use Psr\Log\LoggerInterface;
@@ -31,6 +32,8 @@ final readonly class DeduplicationDbalStore implements DeduplicationStore
                 'message_id' => $messageId->toBinary(),
                 'message_name' => $messageName,
                 'processed_at' => date('Y-m-d H:i:s'),
+            ], [
+                'message_id' => ParameterType::BINARY,
             ]);
 
             // Insert succeeded - message is new (not a duplicate)

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Outbox\Transport;
 
 use Doctrine\DBAL\Connection;
-use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Types;
 use Freyr\MessageBroker\Contracts\PartitionKeyStamp;
@@ -34,11 +33,10 @@ if (interface_exists(\Symfony\Component\Messenger\Transport\Receiver\KeepaliveRe
  */
 final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCompat
 {
-    private readonly bool $isPostgreSql;
-
     public function __construct(
         private readonly Connection $connection,
         private readonly SerializerInterface $serializer,
+        private readonly OutboxPlatformStrategy $platformStrategy,
         private readonly string $tableName,
         private readonly string $queueName,
         private readonly int $redeliverTimeout = 3600,
@@ -50,8 +48,6 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
                 $tableName,
             ));
         }
-
-        $this->isPostgreSql = $connection->getDatabasePlatform() instanceof PostgreSQLPlatform;
     }
 
     public function send(Envelope $envelope): Envelope
@@ -66,46 +62,22 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
         $encoded = $this->serializer->encode($envelope);
         $now = new \DateTimeImmutable();
 
-        $data = [
-            'body' => $encoded['body'],
-            'headers' => json_encode($encoded['headers'] ?? [], JSON_THROW_ON_ERROR),
-            'queue_name' => $this->queueName,
-            'created_at' => $now,
-            'available_at' => $now,
-            'partition_key' => $partitionKey,
-        ];
-
-        if ($this->isPostgreSql) {
-            // PostgreSQL: INSERT ... RETURNING id in a single roundtrip.
-            // Uses executeQuery() because RETURNING produces a result set.
-            $sql = sprintf(
-                'INSERT INTO %s (body, headers, queue_name, created_at, available_at, partition_key) '
-                .'VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
-                $this->tableName,
-            );
-
-            /** @var int|string|false $id */
-            $id = $this->connection->executeQuery($sql, array_values($data), [
-                Types::TEXT,
-                Types::TEXT,
-                Types::STRING,
-                Types::DATETIME_IMMUTABLE,
-                Types::DATETIME_IMMUTABLE,
-                Types::STRING,
-            ])
-                ->fetchOne();
-        } else {
-            $this->connection->insert($this->tableName, $data, [
+        $id = $this->platformStrategy->insertAndReturnId(
+            $this->connection,
+            $this->tableName,
+            [
+                'body' => $encoded['body'],
+                'headers' => json_encode($encoded['headers'] ?? [], JSON_THROW_ON_ERROR),
+                'queue_name' => $this->queueName,
+                'created_at' => $now,
+                'available_at' => $now,
+                'partition_key' => $partitionKey,
+            ],
+            [
                 'created_at' => Types::DATETIME_IMMUTABLE,
                 'available_at' => Types::DATETIME_IMMUTABLE,
-            ]);
-
-            $id = $this->connection->lastInsertId();
-        }
-
-        if ($id === false || $id === '' || $id === 0) {
-            throw new \RuntimeException('Failed to retrieve auto-generated ID after INSERT.');
-        }
+            ],
+        );
 
         return $envelope->with(new TransportMessageIdStamp((string) $id));
     }
@@ -123,6 +95,8 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
             $now = new \DateTimeImmutable();
             $redeliverLimit = $now->modify(sprintf('-%d seconds', $this->redeliverTimeout));
 
+            $platformFilter = $this->platformStrategy->buildHeadOfLineFilter();
+
             $sql = sprintf(
                 'SELECT m.* FROM %s m '
                 .'WHERE m.id IN ('
@@ -130,10 +104,12 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
                 .'  WHERE sub.queue_name = ?'
                 .'    AND (sub.delivered_at IS NULL OR sub.delivered_at < ?)'
                 .'    AND sub.available_at <= ?'
+                .'%s'
                 .'  GROUP BY sub.partition_key'
                 .') LIMIT 1 FOR UPDATE SKIP LOCKED',
                 $this->tableName,
                 $this->tableName,
+                $platformFilter,
             );
 
             $result = $this->connection->executeQuery($sql, [
@@ -233,20 +209,16 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
 
         if ($schemaManager->tablesExist([$this->tableName])) {
             $this->addPartitionKeyColumnIfMissing($schemaManager);
+            $this->platformStrategy->afterTableCreated($this->connection, $this->tableName);
 
             return;
         }
 
         $table = new Table($this->tableName);
 
-        $idOptions = [
+        $table->addColumn('id', Types::BIGINT, [
             'autoincrement' => true,
-        ];
-        if (!$this->isPostgreSql) {
-            // MySQL supports unsigned BIGINT; PostgreSQL does not.
-            $idOptions['unsigned'] = true;
-        }
-        $table->addColumn('id', Types::BIGINT, $idOptions);
+        ]);
         $table->addColumn('body', Types::TEXT);
         $table->addColumn('headers', Types::TEXT);
         $table->addColumn('queue_name', Types::STRING, [
@@ -270,6 +242,7 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
         );
 
         $schemaManager->createTable($table);
+        $this->platformStrategy->afterTableCreated($this->connection, $this->tableName);
     }
 
     /**

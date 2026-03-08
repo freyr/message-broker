@@ -8,6 +8,7 @@ services:
       - ${COMPOSER_HOME}:/.composer:consistent
     environment:
       DATABASE_URL: mysql://messenger:messenger@mysql:3306/messenger_test
+      POSTGRES_DATABASE_URL: postgresql://messenger:messenger@postgres:5432/messenger_test
       MESSENGER_AMQP_DSN: amqp://guest:guest@rabbitmq:5672/%2f
     depends_on:
       mysql:

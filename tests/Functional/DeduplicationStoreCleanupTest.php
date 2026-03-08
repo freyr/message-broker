@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional;
 
+use Doctrine\DBAL\ParameterType;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Command\DeduplicationStoreCleanup;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -24,12 +25,16 @@ final class DeduplicationStoreCleanupTest extends FunctionalDatabaseTestCase
             'message_id' => Id::new()->toBinary(),
             'message_name' => 'old.event',
             'processed_at' => '2000-01-01 00:00:00',
+        ], [
+            'message_id' => ParameterType::BINARY,
         ]);
 
         self::$connection->insert('message_broker_deduplication', [
             'message_id' => Id::new()->toBinary(),
             'message_name' => 'recent.event',
             'processed_at' => date('Y-m-d H:i:s'),
+        ], [
+            'message_id' => ParameterType::BINARY,
         ]);
 
         $command = new DeduplicationStoreCleanup(self::$connection);
@@ -55,6 +60,8 @@ final class DeduplicationStoreCleanupTest extends FunctionalDatabaseTestCase
                 'message_id' => Id::new()->toBinary(),
                 'message_name' => 'old.event.'.$i,
                 'processed_at' => '2000-01-01 00:00:00',
+            ], [
+                'message_id' => ParameterType::BINARY,
             ]);
         }
 

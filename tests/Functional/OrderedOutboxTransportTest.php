@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional;
 
+use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Types;
 use Freyr\MessageBroker\Contracts\PartitionKeyStamp;
+use Freyr\MessageBroker\Outbox\Transport\MySqlOutboxPlatformStrategy;
 use Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransport;
+use Freyr\MessageBroker\Outbox\Transport\OutboxPlatformStrategy;
+use Freyr\MessageBroker\Outbox\Transport\PostgreSqlOutboxPlatformStrategy;
 use Freyr\MessageBroker\Tests\Fixtures\TestOutboxEvent;
 use PHPUnit\Framework\Attributes\CoversClass;
 use Symfony\Component\Messenger\Envelope;
@@ -48,6 +53,7 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $this->transport = new OrderedOutboxTransport(
             connection: self::$connection,
             serializer: new PhpSerializer(),
+            platformStrategy: self::detectPlatformStrategy(),
             tableName: self::TABLE,
             queueName: 'outbox',
         );
@@ -225,6 +231,7 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $shortTimeoutTransport = new OrderedOutboxTransport(
             connection: self::$connection,
             serializer: new PhpSerializer(),
+            platformStrategy: self::detectPlatformStrategy(),
             tableName: self::TABLE,
             queueName: 'outbox',
             redeliverTimeout: 1,
@@ -247,7 +254,7 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
 
     public function testSetupMigratesExistingTableWithoutPartitionKey(): void
     {
-        // Create a table WITHOUT partition_key (simulating pre-migration state)
+        // Create a table WITHOUT partition_key (simulating pre-migration state) using DBAL Schema API
         self::$connection->executeStatement(sprintf('DROP TABLE IF EXISTS %s', self::TABLE));
 
         $table = new Table(self::TABLE);
@@ -296,6 +303,7 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $autoSetupTransport = new OrderedOutboxTransport(
             connection: self::$connection,
             serializer: new PhpSerializer(),
+            platformStrategy: self::detectPlatformStrategy(),
             tableName: self::TABLE,
             queueName: 'outbox',
             autoSetup: true,
@@ -319,6 +327,7 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $shortTimeoutTransport = new OrderedOutboxTransport(
             connection: self::$connection,
             serializer: new PhpSerializer(),
+            platformStrategy: self::detectPlatformStrategy(),
             tableName: self::TABLE,
             queueName: 'outbox',
             redeliverTimeout: 1,
@@ -343,6 +352,17 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         $count = self::$connection->fetchOne(sprintf('SELECT COUNT(*) FROM %s', self::TABLE));
         $this->assertIsNumeric($count);
         $this->assertSame(0, (int) $count);
+    }
+
+    private static function detectPlatformStrategy(): OutboxPlatformStrategy
+    {
+        $platform = self::$connection->getDatabasePlatform();
+
+        return match (true) {
+            $platform instanceof PostgreSQLPlatform => new PostgreSqlOutboxPlatformStrategy(),
+            $platform instanceof AbstractMySQLPlatform => new MySqlOutboxPlatformStrategy(),
+            default => new MySqlOutboxPlatformStrategy(),
+        };
     }
 
     /**

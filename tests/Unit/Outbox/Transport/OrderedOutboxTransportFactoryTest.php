@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Unit\Outbox\Transport;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Platforms\AbstractPlatform;
+use Doctrine\DBAL\Platforms\MariaDBPlatform;
+use Doctrine\DBAL\Platforms\MySQLPlatform;
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\Persistence\ConnectionRegistry;
 use Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransport;
 use Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransportFactory;
@@ -39,18 +43,12 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
 
     public function testCreateTransportReturnsOrderedOutboxTransport(): void
     {
-        $registry = $this->createStub(ConnectionRegistry::class);
-        $registry->method('getConnection')
-            ->with('default')
-            ->willReturn($this->createStub(Connection::class));
-
-        $factory = new OrderedOutboxTransportFactory($registry);
-        $serializer = $this->createStub(SerializerInterface::class);
+        $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $this->mysqlConnection()));
 
         $transport = $factory->createTransport(
             'ordered-doctrine://default?table_name=messenger_outbox&queue_name=outbox',
             [],
-            $serializer,
+            $this->createStub(SerializerInterface::class),
         );
 
         $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
@@ -58,18 +56,12 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
 
     public function testCreateTransportWithCustomOptions(): void
     {
-        $registry = $this->createStub(ConnectionRegistry::class);
-        $registry->method('getConnection')
-            ->with('events')
-            ->willReturn($this->createStub(Connection::class));
-
-        $factory = new OrderedOutboxTransportFactory($registry);
-        $serializer = $this->createStub(SerializerInterface::class);
+        $factory = new OrderedOutboxTransportFactory($this->registryWith('events', $this->mysqlConnection()));
 
         $transport = $factory->createTransport(
             'ordered-doctrine://events?table_name=my_outbox&queue_name=my_queue&redeliver_timeout=7200',
             [],
-            $serializer,
+            $this->createStub(SerializerInterface::class),
         );
 
         $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
@@ -77,14 +69,13 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
 
     public function testCreateTransportWithAutoSetup(): void
     {
-        $registry = $this->createStub(ConnectionRegistry::class);
-        $registry->method('getConnection')
-            ->willReturn($this->createStub(Connection::class));
+        $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $this->mysqlConnection()));
 
-        $factory = new OrderedOutboxTransportFactory($registry);
-        $serializer = $this->createStub(SerializerInterface::class);
-
-        $transport = $factory->createTransport('ordered-doctrine://default?auto_setup=true', [], $serializer);
+        $transport = $factory->createTransport(
+            'ordered-doctrine://default?auto_setup=true',
+            [],
+            $this->createStub(SerializerInterface::class)
+        );
 
         $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
     }
@@ -100,11 +91,7 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
 
     public function testCreateTransportRejectsInvalidTableName(): void
     {
-        $registry = $this->createStub(ConnectionRegistry::class);
-        $registry->method('getConnection')
-            ->willReturn($this->createStub(Connection::class));
-
-        $factory = new OrderedOutboxTransportFactory($registry);
+        $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $this->mysqlConnection()));
 
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('Table name must contain only alphanumeric characters');
@@ -118,11 +105,7 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
 
     public function testCreateTransportRejectsTableNameStartingWithDigit(): void
     {
-        $registry = $this->createStub(ConnectionRegistry::class);
-        $registry->method('getConnection')
-            ->willReturn($this->createStub(Connection::class));
-
-        $factory = new OrderedOutboxTransportFactory($registry);
+        $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $this->mysqlConnection()));
 
         $this->expectException(\InvalidArgumentException::class);
 
@@ -153,14 +136,8 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
 
     public function testDsnQueryOverridesOptionsWhichOverrideDefaults(): void
     {
-        $registry = $this->createStub(ConnectionRegistry::class);
-        $registry->method('getConnection')
-            ->willReturn($this->createStub(Connection::class));
+        $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $this->mysqlConnection()));
 
-        $factory = new OrderedOutboxTransportFactory($registry);
-
-        // DSN has table_name=from_dsn, options have table_name=from_options
-        // DSN should win
         $transport = $factory->createTransport(
             'ordered-doctrine://default?table_name=from_dsn',
             [
@@ -174,11 +151,7 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
 
     public function testCreateTransportWithNoQueryStringUsesDefaults(): void
     {
-        $registry = $this->createStub(ConnectionRegistry::class);
-        $registry->method('getConnection')
-            ->willReturn($this->createStub(Connection::class));
-
-        $factory = new OrderedOutboxTransportFactory($registry);
+        $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $this->mysqlConnection()));
 
         $transport = $factory->createTransport(
             'ordered-doctrine://default',
@@ -187,5 +160,89 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         );
 
         $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
+    }
+
+    public function testItInjectsMySqlStrategyForMySqlPlatform(): void
+    {
+        $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $this->mysqlConnection()));
+
+        $transport = $factory->createTransport(
+            'ordered-doctrine://default',
+            [],
+            $this->createStub(SerializerInterface::class),
+        );
+
+        $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
+    }
+
+    public function testItInjectsMySqlStrategyForMariaDbPlatform(): void
+    {
+        $connection = $this->createStub(Connection::class);
+        $connection->method('getDatabasePlatform')
+            ->willReturn(new MariaDBPlatform());
+
+        $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $connection));
+
+        $transport = $factory->createTransport(
+            'ordered-doctrine://default',
+            [],
+            $this->createStub(SerializerInterface::class),
+        );
+
+        $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
+    }
+
+    public function testItInjectsPostgreSqlStrategyForPostgreSqlPlatform(): void
+    {
+        $connection = $this->createStub(Connection::class);
+        $connection->method('getDatabasePlatform')
+            ->willReturn(new PostgreSQLPlatform());
+
+        $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $connection));
+
+        $transport = $factory->createTransport(
+            'ordered-doctrine://default',
+            [],
+            $this->createStub(SerializerInterface::class),
+        );
+
+        $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
+    }
+
+    public function testItThrowsForUnsupportedPlatform(): void
+    {
+        $connection = $this->createStub(Connection::class);
+        $connection->method('getDatabasePlatform')
+            ->willReturn($this->createStub(AbstractPlatform::class));
+
+        $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $connection));
+
+        $this->expectException(TransportException::class);
+        $this->expectExceptionMessage('Unsupported database platform');
+
+        $factory->createTransport(
+            'ordered-doctrine://default',
+            [],
+            $this->createStub(SerializerInterface::class),
+        );
+    }
+
+    private function mysqlConnection(): Connection
+    {
+        $connection = $this->createStub(Connection::class);
+        $connection->method('getDatabasePlatform')
+            ->willReturn(new MySQLPlatform());
+
+        return $connection;
+    }
+
+    private function registryWith(string $name, Connection $connection): ConnectionRegistry
+    {
+        $registry = $this->createStub(ConnectionRegistry::class);
+        $registry->method('getConnection')
+            ->with($name)
+            ->willReturn($connection);
+
+        return $registry;
     }
 }

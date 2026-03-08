@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional;
 
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Freyr\MessageBroker\Command\SetupDeduplicationCommand;
 use PHPUnit\Framework\Attributes\CoversClass;
 use Symfony\Component\Console\Command\Command;
@@ -46,13 +47,17 @@ final class SetupDeduplicationCommandTest extends FunctionalDatabaseTestCase
 
         $columns = $schemaManager->listTableColumns(self::TABLE);
         $this->assertArrayHasKey('message_id', $columns);
-        $this->assertSame(16, $columns['message_id']->getLength());
+
+        // PostgreSQL maps BINARY(16) to bytea which does not preserve length metadata
+        if (!self::$connection->getDatabasePlatform() instanceof PostgreSQLPlatform) {
+            $this->assertSame(16, $columns['message_id']->getLength());
+        }
         $this->assertArrayHasKey('message_name', $columns);
         $this->assertArrayHasKey('processed_at', $columns);
 
         $indexes = $schemaManager->listTableIndexes(self::TABLE);
         $this->assertArrayHasKey('primary', $indexes);
-        $this->assertArrayHasKey('idx_dedup_processed_at', $indexes);
+        $this->assertArrayHasKey(sprintf('idx_%s_processed_at', self::TABLE), $indexes);
     }
 
     public function testForceIsIdempotent(): void

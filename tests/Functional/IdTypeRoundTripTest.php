@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional;
 
+use Doctrine\DBAL\ParameterType;
+use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Type;
+use Doctrine\DBAL\Types\Types;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Doctrine\Type\IdType;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -24,14 +27,25 @@ final class IdTypeRoundTripTest extends FunctionalDatabaseTestCase
     {
         parent::setUpBeforeClass();
 
-        self::$connection->executeStatement(sprintf('DROP TABLE IF EXISTS %s', self::TABLE));
-        self::$connection->executeStatement(sprintf(
-            'CREATE TABLE %s (
-                id BINARY(16) NOT NULL PRIMARY KEY,
-                label VARCHAR(50) NULL
-            ) ENGINE=InnoDB',
-            self::TABLE
-        ));
+        $schemaManager = self::$connection->createSchemaManager();
+
+        if ($schemaManager->tablesExist([self::TABLE])) {
+            $schemaManager->dropTable(self::TABLE);
+        }
+
+        $table = new Table(self::TABLE);
+        $table->addColumn('id', Types::BINARY, [
+            'length' => 16,
+            'fixed' => true,
+            'notnull' => true,
+        ]);
+        $table->addColumn('label', Types::STRING, [
+            'length' => 50,
+            'notnull' => false,
+        ]);
+        $table->setPrimaryKey(['id']);
+
+        $schemaManager->createTable($table);
     }
 
     public static function tearDownAfterClass(): void
@@ -48,14 +62,16 @@ final class IdTypeRoundTripTest extends FunctionalDatabaseTestCase
     public function testBinaryStorageAndRetrieval(): void
     {
         $original = Id::new();
-        $type = Type::getType(IdType::NAME);
-        $platform = self::$connection->getDatabasePlatform();
 
         self::$connection->insert(self::TABLE, [
-            'id' => $type->convertToDatabaseValue($original, $platform),
+            'id' => $original->toBinary(),
             'label' => 'test',
+        ], [
+            'id' => ParameterType::BINARY,
         ]);
 
+        $type = Type::getType(IdType::NAME);
+        $platform = self::$connection->getDatabasePlatform();
         $raw = self::$connection->fetchOne(sprintf('SELECT id FROM %s WHERE label = ?', self::TABLE), ['test']);
 
         $restored = $type->convertToPHPValue($raw, $platform);
@@ -66,8 +82,6 @@ final class IdTypeRoundTripTest extends FunctionalDatabaseTestCase
 
     public function testMultipleIdsRoundTrip(): void
     {
-        $type = Type::getType(IdType::NAME);
-        $platform = self::$connection->getDatabasePlatform();
         $ids = [];
 
         for ($i = 0; $i < 5; ++$i) {
@@ -75,11 +89,15 @@ final class IdTypeRoundTripTest extends FunctionalDatabaseTestCase
             $ids[$i] = $id;
 
             self::$connection->insert(self::TABLE, [
-                'id' => $type->convertToDatabaseValue($id, $platform),
+                'id' => $id->toBinary(),
                 'label' => 'item-'.$i,
+            ], [
+                'id' => ParameterType::BINARY,
             ]);
         }
 
+        $type = Type::getType(IdType::NAME);
+        $platform = self::$connection->getDatabasePlatform();
         $rows = self::$connection->fetchAllAssociative(
             sprintf('SELECT id, label FROM %s ORDER BY label', self::TABLE)
         );

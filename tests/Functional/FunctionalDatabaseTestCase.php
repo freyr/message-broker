@@ -6,7 +6,6 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
-use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Tools\DsnParser;
 use Doctrine\DBAL\Types\Type;
@@ -16,7 +15,9 @@ use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
 /**
- * Base class for functional tests requiring a real database connection (MySQL or PostgreSQL).
+ * Base class for functional tests requiring a real database connection.
+ *
+ * Supports both MySQL and PostgreSQL via DATABASE_URL env var.
  *
  * Provides:
  * - DBAL connection from DATABASE_URL env var
@@ -92,29 +93,27 @@ abstract class FunctionalDatabaseTestCase extends TestCase
 
         $schemaManager = self::$connection->createSchemaManager();
 
+        // Drop and recreate deduplication table using DBAL Schema API (platform-agnostic)
         if ($schemaManager->tablesExist(['message_broker_deduplication'])) {
-            self::$connection->executeStatement('TRUNCATE TABLE message_broker_deduplication');
-
-            return;
-        }
-
-        if (self::$connection->getDatabasePlatform() instanceof PostgreSQLPlatform) {
-            // IdType uses BINARY(16) which PostgreSQL does not support (no BINARY type).
-            // Deduplication table creation is skipped on PostgreSQL.
-            // Tests requiring it will fail explicitly; tests that don't need it proceed.
-            return;
+            $schemaManager->dropTable('message_broker_deduplication');
         }
 
         $table = new Table('message_broker_deduplication');
-        $table->addColumn('message_id', IdType::NAME, [
+        $table->addColumn('message_id', Types::BINARY, [
             'length' => 16,
+            'fixed' => true,
+            'notnull' => true,
+            'comment' => '(DC2Type:id_binary)',
         ]);
         $table->addColumn('message_name', Types::STRING, [
             'length' => 255,
+            'notnull' => true,
         ]);
-        $table->addColumn('processed_at', Types::DATETIME_IMMUTABLE);
+        $table->addColumn('processed_at', Types::DATETIME_MUTABLE, [
+            'notnull' => true,
+        ]);
         $table->setPrimaryKey(['message_id']);
-        $table->addIndex(['processed_at'], 'idx_dedup_processed_at');
+        $table->addIndex(['processed_at'], 'idx_message_broker_deduplication_processed_at');
 
         $schemaManager->createTable($table);
 

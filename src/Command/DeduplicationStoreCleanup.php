@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Command;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Types\Types;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -31,9 +32,12 @@ final class DeduplicationStoreCleanup extends Command
         $daysOption = $input->getOption('days');
         $days = is_numeric($daysOption) ? (int) $daysOption : 30;
 
+        $cutoff = new \DateTimeImmutable(sprintf('-%d days', $days));
+
         $deleted = $this->connection->executeStatement(
-            sprintf('DELETE FROM %s WHERE processed_at < DATE_SUB(NOW(), INTERVAL ? DAY)', $this->tableName),
-            [$days]
+            sprintf('DELETE FROM %s WHERE processed_at < ?', $this->tableName),
+            [$cutoff],
+            [Types::DATETIME_IMMUTABLE],
         );
 
         $output->writeln("Removed {$deleted} old idempotency records");
