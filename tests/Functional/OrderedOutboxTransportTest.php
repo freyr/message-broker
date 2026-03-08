@@ -15,7 +15,7 @@ use Symfony\Component\Messenger\Stamp\TransportMessageIdStamp;
 use Symfony\Component\Messenger\Transport\Serialization\PhpSerializer;
 
 /**
- * Functional test for OrderedOutboxTransport against real MySQL.
+ * Functional test for OrderedOutboxTransport against a real database (MySQL or PostgreSQL).
  *
  * Verifies partition-aware head-of-line query, partition key storage,
  * ack/reject, keepalive, and auto-setup against a live database.

@@ -55,27 +55,18 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
         $encoded = $this->serializer->encode($envelope);
         $now = new \DateTimeImmutable();
 
-        $values = [
-            $encoded['body'],
-            json_encode($encoded['headers'] ?? [], JSON_THROW_ON_ERROR),
-            $this->queueName,
-            $now,
-            $now,
-            $partitionKey,
-        ];
-        $types = [
-            Types::TEXT,
-            Types::TEXT,
-            Types::STRING,
-            Types::DATETIME_IMMUTABLE,
-            Types::DATETIME_IMMUTABLE,
-            Types::STRING,
+        $data = [
+            'body' => $encoded['body'],
+            'headers' => json_encode($encoded['headers'] ?? [], JSON_THROW_ON_ERROR),
+            'queue_name' => $this->queueName,
+            'created_at' => $now,
+            'available_at' => $now,
+            'partition_key' => $partitionKey,
         ];
 
         if ($this->connection->getDatabasePlatform() instanceof PostgreSQLPlatform) {
-            // PostgreSQL: use INSERT ... RETURNING id to retrieve the generated ID
-            // in a single roundtrip. Uses executeQuery() because RETURNING produces
-            // a result set. This matches Symfony's DoctrineTransport\Connection pattern.
+            // PostgreSQL: INSERT ... RETURNING id in a single roundtrip.
+            // Uses executeQuery() because RETURNING produces a result set.
             $sql = sprintf(
                 'INSERT INTO %s (body, headers, queue_name, created_at, available_at, partition_key) '
                 .'VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
@@ -83,22 +74,26 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
             );
 
             /** @var int|string|false $id */
-            $id = $this->connection->executeQuery($sql, $values, $types)
+            $id = $this->connection->executeQuery($sql, array_values($data), [
+                Types::TEXT,
+                Types::TEXT,
+                Types::STRING,
+                Types::DATETIME_IMMUTABLE,
+                Types::DATETIME_IMMUTABLE,
+                Types::STRING,
+            ])
                 ->fetchOne();
         } else {
-            $this->connection->insert($this->tableName, [
-                'body' => $encoded['body'],
-                'headers' => json_encode($encoded['headers'] ?? [], JSON_THROW_ON_ERROR),
-                'queue_name' => $this->queueName,
-                'created_at' => $now,
-                'available_at' => $now,
-                'partition_key' => $partitionKey,
-            ], [
+            $this->connection->insert($this->tableName, $data, [
                 'created_at' => Types::DATETIME_IMMUTABLE,
                 'available_at' => Types::DATETIME_IMMUTABLE,
             ]);
 
             $id = $this->connection->lastInsertId();
+        }
+
+        if ($id === false || $id === '' || $id === 0) {
+            throw new \RuntimeException('Failed to retrieve auto-generated ID after INSERT.');
         }
 
         return $envelope->with(new TransportMessageIdStamp((string) $id));
