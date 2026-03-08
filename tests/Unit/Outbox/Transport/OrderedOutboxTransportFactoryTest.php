@@ -257,7 +257,6 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
     {
         $registry = $this->createStub(ConnectionRegistry::class);
         $registry->method('getConnection')
-            ->with($name)
             ->willReturn($connection);
 
         return $registry;
