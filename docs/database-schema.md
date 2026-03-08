@@ -77,8 +77,8 @@ CREATE TABLE messenger_outbox (
 - Standard Symfony Messenger Doctrine transport structure
 - Created automatically on first `messenger:consume outbox` command
 - Used exclusively for outbox pattern
-- Consumed by `OutboxToAmqpBridge`
-- Published events use `OutboxSerializer`
+- Consumed by `OutboxPublishingMiddleware`
+- Published events use `WireFormatSerializer`
 
 **Cleanup:**
 ```bash
@@ -244,14 +244,13 @@ framework:
       # Outbox transport - AUTO-MANAGED (auto_setup: true)
       outbox:
         dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox'
-        serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
         options:
           auto_setup: true  # Symfony creates table automatically
 
       # AMQP publish transport - MANUAL MANAGEMENT (auto_setup: false)
       amqp:
         dsn: '%env(MESSENGER_AMQP_DSN)%'
-        serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
+        serializer: 'Freyr\MessageBroker\Serializer\WireFormatSerializer'
         options:
           auto_setup: false  # Infrastructure managed by ops
 
@@ -279,7 +278,7 @@ Domain Event → messenger.bus.default
   ↓ (routing: outbox)
 messenger_outbox table (INSERT within transaction)
   ↓ (messenger:consume outbox)
-OutboxToAmqpBridge → AMQP
+OutboxPublishingMiddleware → OutboxPublisher → AMQP
 ```
 
 ### Consuming (Inbox Pattern)

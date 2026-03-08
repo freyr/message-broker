@@ -2,7 +2,7 @@
 #
 # Transports:
 #   outbox          — Stores domain events in DB (Doctrine, auto-managed)
-#   amqp            — Publishes outbox events to RabbitMQ (OutboxSerializer)
+#   amqp            — Publishes outbox events to RabbitMQ (WireFormatSerializer)
 #   amqp_your_inbox — Consumes from a RabbitMQ queue (InboxSerializer)
 #   failed          — Stores failed messages for retry/inspection (Doctrine, auto-managed)
 #
@@ -51,11 +51,11 @@ framework:
             #         auto_setup: true
 
             # AMQP publish: AmqpOutboxPublisher publishes events here.
-            # Uses OutboxSerializer to translate PHP class names to semantic message names.
+            # Uses WireFormatSerializer to translate PHP class names to semantic message names.
             # TODO: Configure the exchange to match your RabbitMQ setup
             amqp:
                 dsn: '%env(MESSENGER_AMQP_DSN)%'
-                serializer: 'Freyr\MessageBroker\Serializer\OutboxSerializer'
+                serializer: 'Freyr\MessageBroker\Serializer\WireFormatSerializer'
                 options:
                     auto_setup: false
                     # exchange:
