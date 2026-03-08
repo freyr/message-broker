@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Outbox\Transport;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Types;
 use Freyr\MessageBroker\Contracts\PartitionKeyStamp;
@@ -54,19 +55,51 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
         $encoded = $this->serializer->encode($envelope);
         $now = new \DateTimeImmutable();
 
-        $this->connection->insert($this->tableName, [
-            'body' => $encoded['body'],
-            'headers' => json_encode($encoded['headers'] ?? [], JSON_THROW_ON_ERROR),
-            'queue_name' => $this->queueName,
-            'created_at' => $now,
-            'available_at' => $now,
-            'partition_key' => $partitionKey,
-        ], [
-            'created_at' => Types::DATETIME_IMMUTABLE,
-            'available_at' => Types::DATETIME_IMMUTABLE,
-        ]);
+        $values = [
+            $encoded['body'],
+            json_encode($encoded['headers'] ?? [], JSON_THROW_ON_ERROR),
+            $this->queueName,
+            $now,
+            $now,
+            $partitionKey,
+        ];
+        $types = [
+            Types::TEXT,
+            Types::TEXT,
+            Types::STRING,
+            Types::DATETIME_IMMUTABLE,
+            Types::DATETIME_IMMUTABLE,
+            Types::STRING,
+        ];
 
-        $id = $this->connection->lastInsertId();
+        if ($this->connection->getDatabasePlatform() instanceof PostgreSQLPlatform) {
+            // PostgreSQL: use INSERT ... RETURNING id to retrieve the generated ID
+            // in a single roundtrip. Uses executeQuery() because RETURNING produces
+            // a result set. This matches Symfony's DoctrineTransport\Connection pattern.
+            $sql = sprintf(
+                'INSERT INTO %s (body, headers, queue_name, created_at, available_at, partition_key) '
+                .'VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
+                $this->tableName,
+            );
+
+            /** @var int|string|false $id */
+            $id = $this->connection->executeQuery($sql, $values, $types)
+                ->fetchOne();
+        } else {
+            $this->connection->insert($this->tableName, [
+                'body' => $encoded['body'],
+                'headers' => json_encode($encoded['headers'] ?? [], JSON_THROW_ON_ERROR),
+                'queue_name' => $this->queueName,
+                'created_at' => $now,
+                'available_at' => $now,
+                'partition_key' => $partitionKey,
+            ], [
+                'created_at' => Types::DATETIME_IMMUTABLE,
+                'available_at' => Types::DATETIME_IMMUTABLE,
+            ]);
+
+            $id = $this->connection->lastInsertId();
+        }
 
         return $envelope->with(new TransportMessageIdStamp((string) $id));
     }
@@ -202,7 +235,6 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
 
         $table->addColumn('id', Types::BIGINT, [
             'autoincrement' => true,
-            'unsigned' => true,
         ]);
         $table->addColumn('body', Types::TEXT);
         $table->addColumn('headers', Types::TEXT);
