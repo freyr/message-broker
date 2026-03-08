@@ -5,13 +5,11 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Unit\Outbox\Transport;
 
 use Doctrine\DBAL\Connection;
-use Doctrine\DBAL\Platforms\AbstractPlatform;
-use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Result;
 use Freyr\MessageBroker\Contracts\PartitionKeyStamp;
 use Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransport;
+use Freyr\MessageBroker\Outbox\Transport\OutboxPlatformStrategy;
 use Freyr\MessageBroker\Tests\Fixtures\TestOutboxEvent;
-use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\MockObject\Stub;
@@ -25,16 +23,16 @@ final class OrderedOutboxTransportTest extends TestCase
 {
     private Connection&MockObject $connection;
     private SerializerInterface&Stub $serializer;
+    private OutboxPlatformStrategy&MockObject $platformStrategy;
 
     protected function setUp(): void
     {
         $this->connection = $this->createMock(Connection::class);
-        $this->connection->method('getDatabasePlatform')
-            ->willReturn($this->createStub(AbstractPlatform::class));
         $this->serializer = $this->createStub(SerializerInterface::class);
+        $this->platformStrategy = $this->createMock(OutboxPlatformStrategy::class);
     }
 
-    public function testSendExtractsPartitionKeyAndInsertsRow(): void
+    public function testSendDelegatesToStrategyAndReturnsId(): void
     {
         $event = TestOutboxEvent::random();
         $envelope = new Envelope($event, [new PartitionKeyStamp('order-abc')]);
@@ -47,9 +45,10 @@ final class OrderedOutboxTransportTest extends TestCase
                 ],
             ]);
 
-        $this->connection->expects($this->once())
-            ->method('insert')
+        $this->platformStrategy->expects($this->once())
+            ->method('insertAndReturnId')
             ->with(
+                $this->connection,
                 'messenger_outbox',
                 $this->callback(function (array $data): bool {
                     $this->assertSame('order-abc', $data['partition_key']);
@@ -61,9 +60,7 @@ final class OrderedOutboxTransportTest extends TestCase
                     return true;
                 }),
                 $this->anything(),
-            );
-
-        $this->connection->method('lastInsertId')
+            )
             ->willReturn('42');
 
         $transport = $this->createTransport();
@@ -84,15 +81,14 @@ final class OrderedOutboxTransportTest extends TestCase
                 'headers' => [],
             ]);
 
-        $this->connection->expects($this->once())
-            ->method('insert')
+        $this->platformStrategy->expects($this->once())
+            ->method('insertAndReturnId')
             ->with(
+                $this->connection,
                 'messenger_outbox',
                 $this->callback(fn (array $data): bool => $data['partition_key'] === ''),
                 $this->anything(),
-            );
-
-        $this->connection->method('lastInsertId')
+            )
             ->willReturn('1');
 
         $transport = $this->createTransport();
@@ -235,7 +231,6 @@ final class OrderedOutboxTransportTest extends TestCase
         iterator_to_array($transport->get());
     }
 
-    #[AllowMockObjectsWithoutExpectations]
     public function testSendPreservesExistingStamps(): void
     {
         $partitionStamp = new PartitionKeyStamp('order-99');
@@ -248,15 +243,14 @@ final class OrderedOutboxTransportTest extends TestCase
                 'headers' => [],
             ]);
 
-        $connection = $this->createStub(Connection::class);
-        $connection->method('getDatabasePlatform')
-            ->willReturn($this->createStub(AbstractPlatform::class));
-        $connection->method('lastInsertId')
+        $strategy = $this->createStub(OutboxPlatformStrategy::class);
+        $strategy->method('insertAndReturnId')
             ->willReturn('10');
 
         $transport = new OrderedOutboxTransport(
-            connection: $connection,
+            connection: $this->createStub(Connection::class),
             serializer: $this->serializer,
+            platformStrategy: $strategy,
             tableName: 'messenger_outbox',
             queueName: 'outbox',
         );
@@ -276,43 +270,29 @@ final class OrderedOutboxTransportTest extends TestCase
         new OrderedOutboxTransport(
             connection: $this->connection,
             serializer: $this->serializer,
+            platformStrategy: $this->platformStrategy,
             tableName: 'DROP TABLE users; --',
             queueName: 'outbox',
         );
     }
 
-    public function testSendUsesReturningIdOnPostgresql(): void
+    public function testGetIncludesPlatformFilterInQuery(): void
     {
-        $event = TestOutboxEvent::random();
-        $envelope = new Envelope($event, [new PartitionKeyStamp('order-pg')]);
+        $this->platformStrategy->method('buildHeadOfLineFilter')
+            ->willReturn(' AND sub.custom_filter = true');
 
-        $this->serializer->method('encode')
-            ->willReturn([
-                'body' => '{"payload":"PG"}',
-                'headers' => [
-                    'type' => 'test.event.sent',
-                ],
-            ]);
-
-        $pgConnection = $this->createMock(Connection::class);
-        $pgConnection->method('getDatabasePlatform')
-            ->willReturn(new PostgreSQLPlatform());
-
-        $pgConnection->expects($this->never())
-            ->method('insert');
-        $pgConnection->expects($this->never())
-            ->method('lastInsertId');
+        $this->connection->expects($this->once())
+            ->method('beginTransaction');
 
         $result = $this->createStub(Result::class);
-        $result->method('fetchOne')
-            ->willReturn(77);
+        $result->method('fetchAssociative')
+            ->willReturn(false);
 
-        $pgConnection->expects($this->once())
+        $this->connection->expects($this->once())
             ->method('executeQuery')
             ->with(
                 $this->callback(function (string $sql): bool {
-                    $this->assertStringContainsString('INSERT INTO', $sql);
-                    $this->assertStringContainsString('RETURNING id', $sql);
+                    $this->assertStringContainsString('AND sub.custom_filter = true', $sql);
 
                     return true;
                 }),
@@ -321,17 +301,8 @@ final class OrderedOutboxTransportTest extends TestCase
             )
             ->willReturn($result);
 
-        $transport = new OrderedOutboxTransport(
-            connection: $pgConnection,
-            serializer: $this->serializer,
-            tableName: 'messenger_outbox',
-            queueName: 'outbox',
-        );
-        $sent = $transport->send($envelope);
-
-        $stamp = $sent->last(TransportMessageIdStamp::class);
-        $this->assertNotNull($stamp);
-        $this->assertSame('77', $stamp->getId());
+        $transport = $this->createTransport();
+        iterator_to_array($transport->get());
     }
 
     private function createTransport(): OrderedOutboxTransport
@@ -339,6 +310,7 @@ final class OrderedOutboxTransportTest extends TestCase
         return new OrderedOutboxTransport(
             connection: $this->connection,
             serializer: $this->serializer,
+            platformStrategy: $this->platformStrategy,
             tableName: 'messenger_outbox',
             queueName: 'outbox',
         );

@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional;
 
+use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Type;
+use Doctrine\DBAL\Types\Types;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Doctrine\Type\IdType;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -24,14 +26,25 @@ final class IdTypeRoundTripTest extends FunctionalDatabaseTestCase
     {
         parent::setUpBeforeClass();
 
-        self::$connection->executeStatement(sprintf('DROP TABLE IF EXISTS %s', self::TABLE));
-        self::$connection->executeStatement(sprintf(
-            'CREATE TABLE %s (
-                id BINARY(16) NOT NULL PRIMARY KEY,
-                label VARCHAR(50) NULL
-            ) ENGINE=InnoDB',
-            self::TABLE
-        ));
+        $schemaManager = self::$connection->createSchemaManager();
+
+        if ($schemaManager->tablesExist([self::TABLE])) {
+            $schemaManager->dropTable(self::TABLE);
+        }
+
+        $table = new Table(self::TABLE);
+        $table->addColumn('id', Types::BINARY, [
+            'length' => 16,
+            'fixed' => true,
+            'notnull' => true,
+        ]);
+        $table->addColumn('label', Types::STRING, [
+            'length' => 50,
+            'notnull' => false,
+        ]);
+        $table->setPrimaryKey(['id']);
+
+        $schemaManager->createTable($table);
     }
 
     public static function tearDownAfterClass(): void

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Outbox\Transport;
 
+use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\Persistence\ConnectionRegistry;
 use Symfony\Component\Messenger\Exception\TransportException;
 use Symfony\Component\Messenger\Transport\Serialization\SerializerInterface;
@@ -76,9 +78,21 @@ final readonly class OrderedOutboxTransportFactory implements TransportFactoryIn
         $redeliverTimeout = \is_int($rawTimeout) ? $rawTimeout : (\is_numeric($rawTimeout) ? (int) $rawTimeout : 3600);
 
         /** @var \Doctrine\DBAL\Connection $driverConnection */
+        $platform = $driverConnection->getDatabasePlatform();
+
+        $platformStrategy = match (true) {
+            $platform instanceof AbstractMySQLPlatform => new MySqlOutboxPlatformStrategy(),
+            $platform instanceof PostgreSQLPlatform => new PostgreSqlOutboxPlatformStrategy(),
+            default => throw new TransportException(sprintf(
+                'Unsupported database platform "%s" for ordered-doctrine:// transport. Supported: MySQL, MariaDB, PostgreSQL.',
+                $platform::class,
+            )),
+        };
+
         return new OrderedOutboxTransport(
             connection: $driverConnection,
             serializer: $serializer,
+            platformStrategy: $platformStrategy,
             tableName: $tableName,
             queueName: $queueName,
             redeliverTimeout: $redeliverTimeout,
