@@ -9,10 +9,10 @@ use Freyr\MessageBroker\Inbox\DeduplicationDbalStore;
 use PHPUnit\Framework\Attributes\CoversClass;
 
 /**
- * Functional test for DeduplicationDbalStore against real MySQL.
+ * Functional test for DeduplicationDbalStore against a real database (MySQL or PostgreSQL).
  *
  * Verifies that binary ULID INSERT and unique constraint
- * duplicate detection work correctly with a real database.
+ * duplicate detection work correctly.
  */
 #[CoversClass(DeduplicationDbalStore::class)]
 final class DeduplicationDbalStoreTest extends FunctionalDatabaseTestCase

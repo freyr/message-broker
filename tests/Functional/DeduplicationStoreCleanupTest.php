@@ -11,9 +11,9 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use Symfony\Component\Console\Tester\CommandTester;
 
 /**
- * Functional test for DeduplicationStoreCleanup command against real MySQL.
+ * Functional test for DeduplicationStoreCleanup command against a real database (MySQL or PostgreSQL).
  *
- * Verifies that the DATE_SUB SQL works correctly with binary ULID schema,
+ * Verifies that platform-portable date arithmetic works correctly with binary ULID schema,
  * deleting old rows and keeping recent ones.
  */
 #[CoversClass(DeduplicationStoreCleanup::class)]

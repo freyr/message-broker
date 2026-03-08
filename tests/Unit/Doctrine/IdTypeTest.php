@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Unit\Doctrine;
 
+use Doctrine\DBAL\ParameterType;
 use Doctrine\DBAL\Platforms\AbstractPlatform;
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Doctrine\Type\IdType;
 use InvalidArgumentException;
@@ -91,9 +93,21 @@ final class IdTypeTest extends TestCase
         $this->type->convertToDatabaseValue('not-an-id', $this->platform);
     }
 
-    public function testGetSQLDeclarationReturnsBinary16(): void
+    public function testGetSQLDeclarationReturnsBinary16ForMySQL(): void
     {
         $this->assertSame('BINARY(16)', $this->type->getSQLDeclaration([], $this->platform));
+    }
+
+    public function testGetSQLDeclarationReturnsByteaForPostgreSQL(): void
+    {
+        $platform = $this->createStub(PostgreSQLPlatform::class);
+
+        $this->assertSame('BYTEA', $this->type->getSQLDeclaration([], $platform));
+    }
+
+    public function testBindingTypeIsBinary(): void
+    {
+        $this->assertSame(ParameterType::BINARY, $this->type->getBindingType());
     }
 
     public function testGetNameReturnsIdBinary(): void

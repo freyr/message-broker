@@ -11,7 +11,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
 /**
- * Functional test for SetupDeduplicationCommand --force against real MySQL.
+ * Functional test for SetupDeduplicationCommand --force against a real database (MySQL or PostgreSQL).
  *
  * Uses a unique table name to avoid colliding with the shared deduplication schema.
  * Verifies that the generated DDL creates a valid table with the correct structure.
