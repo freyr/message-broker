@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional;
 
+use Doctrine\DBAL\Schema\Table;
+use Doctrine\DBAL\Types\Types;
 use Freyr\MessageBroker\Contracts\PartitionKeyStamp;
 use Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransport;
 use Freyr\MessageBroker\Tests\Fixtures\TestOutboxEvent;
@@ -13,7 +15,7 @@ use Symfony\Component\Messenger\Stamp\TransportMessageIdStamp;
 use Symfony\Component\Messenger\Transport\Serialization\PhpSerializer;
 
 /**
- * Functional test for OrderedOutboxTransport against real MySQL.
+ * Functional test for OrderedOutboxTransport against a real database (MySQL or PostgreSQL).
  *
  * Verifies partition-aware head-of-line query, partition key storage,
  * ack/reject, keepalive, and auto-setup against a live database.
@@ -247,18 +249,24 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
     {
         // Create a table WITHOUT partition_key (simulating pre-migration state)
         self::$connection->executeStatement(sprintf('DROP TABLE IF EXISTS %s', self::TABLE));
-        self::$connection->executeStatement(sprintf(
-            'CREATE TABLE %s ('
-            .'  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,'
-            .'  body LONGTEXT NOT NULL,'
-            .'  headers LONGTEXT NOT NULL,'
-            .'  queue_name VARCHAR(190) NOT NULL,'
-            .'  created_at DATETIME NOT NULL,'
-            .'  available_at DATETIME NOT NULL,'
-            .'  delivered_at DATETIME DEFAULT NULL'
-            .') ENGINE=InnoDB',
-            self::TABLE,
-        ));
+
+        $table = new Table(self::TABLE);
+        $table->addColumn('id', Types::BIGINT, [
+            'autoincrement' => true,
+        ]);
+        $table->addColumn('body', Types::TEXT);
+        $table->addColumn('headers', Types::TEXT);
+        $table->addColumn('queue_name', Types::STRING, [
+            'length' => 190,
+        ]);
+        $table->addColumn('created_at', Types::DATETIME_IMMUTABLE);
+        $table->addColumn('available_at', Types::DATETIME_IMMUTABLE);
+        $table->addColumn('delivered_at', Types::DATETIME_IMMUTABLE, [
+            'notnull' => false,
+        ]);
+        $table->setPrimaryKey(['id']);
+
+        self::$connection->createSchemaManager()->createTable($table);
 
         $columns = self::$connection->createSchemaManager()->listTableColumns(self::TABLE);
         $this->assertArrayNotHasKey('partition_key', $columns, 'Pre-condition: no partition_key column');

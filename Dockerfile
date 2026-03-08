@@ -16,6 +16,7 @@ RUN apk add --no-cache \
         opcache \
         pcntl \
         pdo_mysql \
+        pdo_pgsql \
         zip
 
 # Install Composer

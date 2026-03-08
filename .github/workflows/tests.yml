@@ -148,3 +148,54 @@ jobs:
           APP_ENV: test
           DATABASE_URL: mysql://messenger:messenger@127.0.0.1:3306/messenger_test
         run: vendor/bin/phpunit --testsuite Functional --testdox
+
+  functional-tests-postgres:
+    name: Functional Tests (PostgreSQL)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: messenger_test
+          POSTGRES_USER: messenger
+          POSTGRES_PASSWORD: messenger
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U messenger -d messenger_test"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, bcmath, intl, pdo_pgsql
+          coverage: none
+          tools: composer:v2
+
+      - name: Get composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-php-8.4-functional-pg-composer-${{ hashFiles('**/composer.json') }}
+          restore-keys: ${{ runner.os }}-php-8.4-composer-
+
+      - name: Install dependencies
+        run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
+
+      - name: Run OrderedOutboxTransport functional tests
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql://messenger:messenger@127.0.0.1:5432/messenger_test
+        run: vendor/bin/phpunit --testsuite Functional --filter OrderedOutboxTransportTest --testdox

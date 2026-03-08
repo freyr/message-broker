@@ -6,25 +6,28 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
+use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Tools\DsnParser;
 use Doctrine\DBAL\Types\Type;
+use Doctrine\DBAL\Types\Types;
 use Freyr\MessageBroker\Doctrine\Type\IdType;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
 /**
- * Base class for functional tests requiring a real MySQL connection.
+ * Base class for functional tests requiring a real database connection (MySQL or PostgreSQL).
  *
  * Provides:
  * - DBAL connection from DATABASE_URL env var
  * - Safety check: database name must contain '_test'
- * - Schema setup via schema.sql in setUpBeforeClass (once per suite)
+ * - Schema setup via DBAL Schema API in setUpBeforeClass (once per suite)
  * - TRUNCATE deduplication table in setUp (each test method)
  * - IdType registration (global singleton, guarded)
  */
 abstract class FunctionalDatabaseTestCase extends TestCase
 {
-    private static bool $schemaInitialised = false;
+    private static bool $schemaInitialized = false;
 
     protected static Connection $connection;
 
@@ -41,6 +44,7 @@ abstract class FunctionalDatabaseTestCase extends TestCase
 
         $dsnParser = new DsnParser([
             'mysql' => 'pdo_mysql',
+            'postgresql' => 'pdo_pgsql',
         ]);
         $params = $dsnParser->parse($databaseUrl);
 
@@ -54,9 +58,9 @@ abstract class FunctionalDatabaseTestCase extends TestCase
             ));
         }
 
-        if (!self::$schemaInitialised) {
+        if (!self::$schemaInitialized) {
             self::setupSchema();
-            self::$schemaInitialised = true;
+            self::$schemaInitialized = true;
         }
     }
 
@@ -86,21 +90,35 @@ abstract class FunctionalDatabaseTestCase extends TestCase
             }
         }
 
-        $schemaFile = __DIR__.'/schema.sql';
-        $schema = file_get_contents($schemaFile);
+        $schemaManager = self::$connection->createSchemaManager();
 
-        if ($schema === false) {
-            throw new RuntimeException(sprintf('Failed to read schema file: %s', $schemaFile));
+        if ($schemaManager->tablesExist(['message_broker_deduplication'])) {
+            self::$connection->executeStatement('TRUNCATE TABLE message_broker_deduplication');
+
+            return;
         }
 
-        self::$connection->executeStatement($schema);
+        if (self::$connection->getDatabasePlatform() instanceof PostgreSQLPlatform) {
+            // IdType uses BINARY(16) which PostgreSQL does not support (no BINARY type).
+            // Deduplication table creation is skipped on PostgreSQL.
+            // Tests requiring it will fail explicitly; tests that don't need it proceed.
+            return;
+        }
 
-        // Verify critical table exists
-        $result = self::$connection->fetchOne(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'message_broker_deduplication'"
-        );
+        $table = new Table('message_broker_deduplication');
+        $table->addColumn('message_id', IdType::NAME, [
+            'length' => 16,
+        ]);
+        $table->addColumn('message_name', Types::STRING, [
+            'length' => 255,
+        ]);
+        $table->addColumn('processed_at', Types::DATETIME_IMMUTABLE);
+        $table->setPrimaryKey(['message_id']);
+        $table->addIndex(['processed_at'], 'idx_dedup_processed_at');
 
-        if (!is_numeric($result) || (int) $result !== 1) {
+        $schemaManager->createTable($table);
+
+        if (!$schemaManager->tablesExist(['message_broker_deduplication'])) {
             throw new RuntimeException('Schema applied but message_broker_deduplication table not found');
         }
     }

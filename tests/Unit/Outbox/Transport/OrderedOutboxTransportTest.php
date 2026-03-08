@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Unit\Outbox\Transport;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Platforms\AbstractPlatform;
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Result;
 use Freyr\MessageBroker\Contracts\PartitionKeyStamp;
 use Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransport;
@@ -27,6 +29,8 @@ final class OrderedOutboxTransportTest extends TestCase
     protected function setUp(): void
     {
         $this->connection = $this->createMock(Connection::class);
+        $this->connection->method('getDatabasePlatform')
+            ->willReturn($this->createStub(AbstractPlatform::class));
         $this->serializer = $this->createStub(SerializerInterface::class);
     }
 
@@ -245,6 +249,8 @@ final class OrderedOutboxTransportTest extends TestCase
             ]);
 
         $connection = $this->createStub(Connection::class);
+        $connection->method('getDatabasePlatform')
+            ->willReturn($this->createStub(AbstractPlatform::class));
         $connection->method('lastInsertId')
             ->willReturn('10');
 
@@ -260,6 +266,72 @@ final class OrderedOutboxTransportTest extends TestCase
 
         $transportStamps = $result->all(TransportMessageIdStamp::class);
         $this->assertCount(2, $transportStamps, 'Both old and new TransportMessageIdStamp must be present');
+    }
+
+    public function testConstructorRejectsInvalidTableName(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Table name must contain only alphanumeric characters and underscores');
+
+        new OrderedOutboxTransport(
+            connection: $this->connection,
+            serializer: $this->serializer,
+            tableName: 'DROP TABLE users; --',
+            queueName: 'outbox',
+        );
+    }
+
+    public function testSendUsesReturningIdOnPostgresql(): void
+    {
+        $event = TestOutboxEvent::random();
+        $envelope = new Envelope($event, [new PartitionKeyStamp('order-pg')]);
+
+        $this->serializer->method('encode')
+            ->willReturn([
+                'body' => '{"payload":"PG"}',
+                'headers' => [
+                    'type' => 'test.event.sent',
+                ],
+            ]);
+
+        $pgConnection = $this->createMock(Connection::class);
+        $pgConnection->method('getDatabasePlatform')
+            ->willReturn(new PostgreSQLPlatform());
+
+        $pgConnection->expects($this->never())
+            ->method('insert');
+        $pgConnection->expects($this->never())
+            ->method('lastInsertId');
+
+        $result = $this->createStub(Result::class);
+        $result->method('fetchOne')
+            ->willReturn(77);
+
+        $pgConnection->expects($this->once())
+            ->method('executeQuery')
+            ->with(
+                $this->callback(function (string $sql): bool {
+                    $this->assertStringContainsString('INSERT INTO', $sql);
+                    $this->assertStringContainsString('RETURNING id', $sql);
+
+                    return true;
+                }),
+                $this->anything(),
+                $this->anything(),
+            )
+            ->willReturn($result);
+
+        $transport = new OrderedOutboxTransport(
+            connection: $pgConnection,
+            serializer: $this->serializer,
+            tableName: 'messenger_outbox',
+            queueName: 'outbox',
+        );
+        $sent = $transport->send($envelope);
+
+        $stamp = $sent->last(TransportMessageIdStamp::class);
+        $this->assertNotNull($stamp);
+        $this->assertSame('77', $stamp->getId());
     }
 
     private function createTransport(): OrderedOutboxTransport

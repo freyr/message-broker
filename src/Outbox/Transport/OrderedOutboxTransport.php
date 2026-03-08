@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Outbox\Transport;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Types;
 use Freyr\MessageBroker\Contracts\PartitionKeyStamp;
@@ -33,6 +34,8 @@ if (interface_exists(\Symfony\Component\Messenger\Transport\Receiver\KeepaliveRe
  */
 final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCompat
 {
+    private readonly bool $isPostgreSql;
+
     public function __construct(
         private readonly Connection $connection,
         private readonly SerializerInterface $serializer,
@@ -40,7 +43,16 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
         private readonly string $queueName,
         private readonly int $redeliverTimeout = 3600,
         private bool $autoSetup = false,
-    ) {}
+    ) {
+        if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $tableName) !== 1) {
+            throw new \InvalidArgumentException(sprintf(
+                'Table name must contain only alphanumeric characters and underscores. Got: %s',
+                $tableName,
+            ));
+        }
+
+        $this->isPostgreSql = $connection->getDatabasePlatform() instanceof PostgreSQLPlatform;
+    }
 
     public function send(Envelope $envelope): Envelope
     {
@@ -54,19 +66,46 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
         $encoded = $this->serializer->encode($envelope);
         $now = new \DateTimeImmutable();
 
-        $this->connection->insert($this->tableName, [
+        $data = [
             'body' => $encoded['body'],
             'headers' => json_encode($encoded['headers'] ?? [], JSON_THROW_ON_ERROR),
             'queue_name' => $this->queueName,
             'created_at' => $now,
             'available_at' => $now,
             'partition_key' => $partitionKey,
-        ], [
-            'created_at' => Types::DATETIME_IMMUTABLE,
-            'available_at' => Types::DATETIME_IMMUTABLE,
-        ]);
+        ];
 
-        $id = $this->connection->lastInsertId();
+        if ($this->isPostgreSql) {
+            // PostgreSQL: INSERT ... RETURNING id in a single roundtrip.
+            // Uses executeQuery() because RETURNING produces a result set.
+            $sql = sprintf(
+                'INSERT INTO %s (body, headers, queue_name, created_at, available_at, partition_key) '
+                .'VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
+                $this->tableName,
+            );
+
+            /** @var int|string|false $id */
+            $id = $this->connection->executeQuery($sql, array_values($data), [
+                Types::TEXT,
+                Types::TEXT,
+                Types::STRING,
+                Types::DATETIME_IMMUTABLE,
+                Types::DATETIME_IMMUTABLE,
+                Types::STRING,
+            ])
+                ->fetchOne();
+        } else {
+            $this->connection->insert($this->tableName, $data, [
+                'created_at' => Types::DATETIME_IMMUTABLE,
+                'available_at' => Types::DATETIME_IMMUTABLE,
+            ]);
+
+            $id = $this->connection->lastInsertId();
+        }
+
+        if ($id === false || $id === '' || $id === 0) {
+            throw new \RuntimeException('Failed to retrieve auto-generated ID after INSERT.');
+        }
 
         return $envelope->with(new TransportMessageIdStamp((string) $id));
     }
@@ -200,10 +239,14 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
 
         $table = new Table($this->tableName);
 
-        $table->addColumn('id', Types::BIGINT, [
+        $idOptions = [
             'autoincrement' => true,
-            'unsigned' => true,
-        ]);
+        ];
+        if (!$this->isPostgreSql) {
+            // MySQL supports unsigned BIGINT; PostgreSQL does not.
+            $idOptions['unsigned'] = true;
+        }
+        $table->addColumn('id', Types::BIGINT, $idOptions);
         $table->addColumn('body', Types::TEXT);
         $table->addColumn('headers', Types::TEXT);
         $table->addColumn('queue_name', Types::STRING, [
