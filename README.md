@@ -17,7 +17,7 @@ Inbox and Outbox patterns for Symfony Messenger with transactional guarantees an
 - PHP 8.2+
 - Symfony 6.4+ or 7.0+
 - Doctrine DBAL 3.0+ / ORM 3.0+
-- MySQL or MariaDB
+- MySQL, MariaDB, or PostgreSQL 13+
 
 ## Installation
 
