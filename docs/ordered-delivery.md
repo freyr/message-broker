@@ -1,6 +1,6 @@
 # Ordered Outbox Delivery
 
-Per-aggregate causal ordering for outbox events. Events sharing a partition key are delivered to AMQP in insertion order, whilst events with different partition keys are processed in parallel across workers.
+Per-aggregate causal ordering for outbox events. Events sharing a partition key are delivered to AMQP in insertion order, while events with different partition keys are processed in parallel across workers.
 
 ## Quick Start
 
@@ -101,7 +101,7 @@ With `auto_setup: true`, the transport creates the table automatically on first 
      ALGORITHM=INPLACE, LOCK=NONE;
    ```
 2. Add the covering index
-3. Wait for the outbox to drain (or accept a temporary bottleneck — legacy rows with `partition_key = ''` are serialised one-at-a-time)
+3. Wait for the outbox to drain (or accept a temporary bottleneck — legacy rows with `partition_key = ''` are serialized one-at-a-time)
 4. Change the DSN from `doctrine://` to `ordered-doctrine://`
 5. Restart workers
 
