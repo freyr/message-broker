@@ -35,16 +35,6 @@ Namespace: `Freyr\MessageBroker\*`
 | Message serialization | [docs/message-serialization.md](docs/message-serialization.md) |
 | Outbox pattern | [docs/outbox-pattern.md](docs/outbox-pattern.md) |
 | Ordered delivery | [docs/ordered-delivery.md](docs/ordered-delivery.md) |
-| Critical patterns | See `docs/solutions/patterns/` in workspace root |
-
-## Git Conventions
-
-See [docs/git-conventions.md](docs/git-conventions.md) for full guide.
-
-- **Branches:** `<issue-number>-description` (e.g., `10-add-retry-mechanism`)
-- **Commits:** Conventional Commits with issue refs
-- **PRs:** Use `Fixes #N` / `Closes #N` in body
-- **Identity:** Before `gh` commands, run `gh auth switch --user freyr`
 
 ## Boundaries
 
