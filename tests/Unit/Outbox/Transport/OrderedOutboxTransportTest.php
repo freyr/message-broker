@@ -249,6 +249,8 @@ final class OrderedOutboxTransportTest extends TestCase
             ]);
 
         $connection = $this->createStub(Connection::class);
+        $connection->method('getDatabasePlatform')
+            ->willReturn($this->createStub(AbstractPlatform::class));
         $connection->method('lastInsertId')
             ->willReturn('10');
 
@@ -264,6 +266,19 @@ final class OrderedOutboxTransportTest extends TestCase
 
         $transportStamps = $result->all(TransportMessageIdStamp::class);
         $this->assertCount(2, $transportStamps, 'Both old and new TransportMessageIdStamp must be present');
+    }
+
+    public function testConstructorRejectsInvalidTableName(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Table name must contain only alphanumeric characters and underscores');
+
+        new OrderedOutboxTransport(
+            connection: $this->connection,
+            serializer: $this->serializer,
+            tableName: 'DROP TABLE users; --',
+            queueName: 'outbox',
+        );
     }
 
     public function testSendUsesReturningIdOnPostgresql(): void

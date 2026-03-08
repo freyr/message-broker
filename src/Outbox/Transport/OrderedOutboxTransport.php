@@ -34,6 +34,8 @@ if (interface_exists(\Symfony\Component\Messenger\Transport\Receiver\KeepaliveRe
  */
 final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCompat
 {
+    private readonly bool $isPostgreSql;
+
     public function __construct(
         private readonly Connection $connection,
         private readonly SerializerInterface $serializer,
@@ -41,7 +43,16 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
         private readonly string $queueName,
         private readonly int $redeliverTimeout = 3600,
         private bool $autoSetup = false,
-    ) {}
+    ) {
+        if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $tableName) !== 1) {
+            throw new \InvalidArgumentException(sprintf(
+                'Table name must contain only alphanumeric characters and underscores. Got: %s',
+                $tableName,
+            ));
+        }
+
+        $this->isPostgreSql = $connection->getDatabasePlatform() instanceof PostgreSQLPlatform;
+    }
 
     public function send(Envelope $envelope): Envelope
     {
@@ -64,7 +75,7 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
             'partition_key' => $partitionKey,
         ];
 
-        if ($this->connection->getDatabasePlatform() instanceof PostgreSQLPlatform) {
+        if ($this->isPostgreSql) {
             // PostgreSQL: INSERT ... RETURNING id in a single roundtrip.
             // Uses executeQuery() because RETURNING produces a result set.
             $sql = sprintf(
@@ -228,9 +239,14 @@ final class OrderedOutboxTransport implements OrderedOutboxTransportKeepaliveCom
 
         $table = new Table($this->tableName);
 
-        $table->addColumn('id', Types::BIGINT, [
+        $idOptions = [
             'autoincrement' => true,
-        ]);
+        ];
+        if (!$this->isPostgreSql) {
+            // MySQL supports unsigned BIGINT; PostgreSQL does not.
+            $idOptions['unsigned'] = true;
+        }
+        $table->addColumn('id', Types::BIGINT, $idOptions);
         $table->addColumn('body', Types::TEXT);
         $table->addColumn('headers', Types::TEXT);
         $table->addColumn('queue_name', Types::STRING, [
