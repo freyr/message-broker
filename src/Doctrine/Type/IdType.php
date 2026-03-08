@@ -24,6 +24,11 @@ final class IdType extends Type
             return $value;
         }
 
+        // PostgreSQL bytea columns return PHP resource streams
+        if (\is_resource($value)) {
+            $value = stream_get_contents($value);
+        }
+
         if (!is_string($value)) {
             throw new InvalidArgumentException('Expected string value from database');
         }

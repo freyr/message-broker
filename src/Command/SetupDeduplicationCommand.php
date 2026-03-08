@@ -170,7 +170,7 @@ final class SetupDeduplicationCommand extends Command
             'notnull' => true,
         ]);
         $table->setPrimaryKey(['message_id']);
-        $table->addIndex(['processed_at'], 'idx_dedup_processed_at');
+        $table->addIndex(['processed_at'], sprintf('idx_%s_processed_at', $this->tableName));
 
         return $table;
     }
@@ -212,7 +212,7 @@ final class SetupDeduplicationCommand extends Command
                         'notnull' => true,
                     ]);
                     \$table->setPrimaryKey(['message_id']);
-                    \$table->addIndex(['processed_at'], 'idx_dedup_processed_at');
+                    \$table->addIndex(['processed_at'], 'idx_{$tableName}_processed_at');
                 }
 
                 public function down(Schema \$schema): void

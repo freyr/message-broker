@@ -65,8 +65,9 @@ final class DeduplicationDbalStoreTest extends FunctionalDatabaseTestCase
         $this->assertSame($messageName, $row['message_name']);
         $this->assertNotEmpty($row['processed_at']);
 
-        $this->assertIsString($row['message_id']);
-        $restored = Id::fromBinary($row['message_id']);
+        $rawId = \is_resource($row['message_id']) ? stream_get_contents($row['message_id']) : $row['message_id'];
+        $this->assertIsString($rawId);
+        $restored = Id::fromBinary($rawId);
         $this->assertTrue($id->sameAs($restored), 'Binary ULID should round-trip correctly');
     }
 }

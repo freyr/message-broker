@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Unit\Outbox\Transport;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Platforms\MariaDBPlatform;
 use Doctrine\DBAL\Platforms\MySQLPlatform;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
-use Doctrine\DBAL\Platforms\SQLitePlatform;
 use Doctrine\Persistence\ConnectionRegistry;
 use Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransport;
 use Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransportFactory;
@@ -213,7 +213,7 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
     {
         $connection = $this->createStub(Connection::class);
         $connection->method('getDatabasePlatform')
-            ->willReturn(new SQLitePlatform());
+            ->willReturn($this->createStub(AbstractPlatform::class));
 
         $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $connection));
 

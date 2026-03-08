@@ -46,7 +46,7 @@ final class SetupDeduplicationCommandTest extends TestCase
                 $this->assertTrue($table->hasColumn('message_name'));
                 $this->assertTrue($table->hasColumn('processed_at'));
                 $this->assertSame(['message_id'], $table->getPrimaryKey()?->getColumns());
-                $this->assertTrue($table->hasIndex('idx_dedup_processed_at'));
+                $this->assertTrue($table->hasIndex('idx_message_broker_deduplication_processed_at'));
 
                 return ['CREATE TABLE message_broker_deduplication (...)'];
             });

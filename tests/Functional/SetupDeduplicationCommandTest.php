@@ -57,7 +57,7 @@ final class SetupDeduplicationCommandTest extends FunctionalDatabaseTestCase
 
         $indexes = $schemaManager->listTableIndexes(self::TABLE);
         $this->assertArrayHasKey('primary', $indexes);
-        $this->assertArrayHasKey('idx_dedup_processed_at', $indexes);
+        $this->assertArrayHasKey(sprintf('idx_%s_processed_at', self::TABLE), $indexes);
     }
 
     public function testForceIsIdempotent(): void

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional;
 
+use Doctrine\DBAL\ParameterType;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Type;
 use Doctrine\DBAL\Types\Types;
@@ -61,14 +62,16 @@ final class IdTypeRoundTripTest extends FunctionalDatabaseTestCase
     public function testBinaryStorageAndRetrieval(): void
     {
         $original = Id::new();
-        $type = Type::getType(IdType::NAME);
-        $platform = self::$connection->getDatabasePlatform();
 
         self::$connection->insert(self::TABLE, [
-            'id' => $type->convertToDatabaseValue($original, $platform),
+            'id' => $original->toBinary(),
             'label' => 'test',
+        ], [
+            'id' => ParameterType::BINARY,
         ]);
 
+        $type = Type::getType(IdType::NAME);
+        $platform = self::$connection->getDatabasePlatform();
         $raw = self::$connection->fetchOne(sprintf('SELECT id FROM %s WHERE label = ?', self::TABLE), ['test']);
 
         $restored = $type->convertToPHPValue($raw, $platform);
@@ -79,8 +82,6 @@ final class IdTypeRoundTripTest extends FunctionalDatabaseTestCase
 
     public function testMultipleIdsRoundTrip(): void
     {
-        $type = Type::getType(IdType::NAME);
-        $platform = self::$connection->getDatabasePlatform();
         $ids = [];
 
         for ($i = 0; $i < 5; ++$i) {
@@ -88,11 +89,15 @@ final class IdTypeRoundTripTest extends FunctionalDatabaseTestCase
             $ids[$i] = $id;
 
             self::$connection->insert(self::TABLE, [
-                'id' => $type->convertToDatabaseValue($id, $platform),
+                'id' => $id->toBinary(),
                 'label' => 'item-'.$i,
+            ], [
+                'id' => ParameterType::BINARY,
             ]);
         }
 
+        $type = Type::getType(IdType::NAME);
+        $platform = self::$connection->getDatabasePlatform();
         $rows = self::$connection->fetchAllAssociative(
             sprintf('SELECT id, label FROM %s ORDER BY label', self::TABLE)
         );

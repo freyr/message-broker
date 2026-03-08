@@ -105,4 +105,21 @@ final class IdTypeTest extends TestCase
     {
         $this->assertTrue($this->type->requiresSQLCommentHint($this->platform));
     }
+
+    public function testConvertToPHPValueHandlesResourceStream(): void
+    {
+        $id = Id::new();
+        $binary = $id->toBinary();
+
+        // PostgreSQL bytea columns return PHP resource streams
+        $stream = fopen('php://memory', 'r+');
+        $this->assertIsResource($stream);
+        fwrite($stream, $binary);
+        rewind($stream);
+
+        $result = $this->type->convertToPHPValue($stream, $this->platform);
+
+        $this->assertInstanceOf(Id::class, $result);
+        $this->assertSame((string) $id, (string) $result);
+    }
 }

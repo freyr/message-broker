@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Tests\Unit\Inbox;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use Doctrine\DBAL\ParameterType;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Inbox\DeduplicationDbalStore;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -89,9 +90,30 @@ final class DeduplicationDbalStoreTest extends TestCase
         $connection = $this->createMock(Connection::class);
         $connection->expects($this->once())
             ->method('insert')
-            ->with('custom_dedup_table', $this->anything());
+            ->with('custom_dedup_table', $this->anything(), $this->anything());
 
         $store = new DeduplicationDbalStore($connection, 'custom_dedup_table');
+
+        $store->isDuplicate(Id::new(), 'App\\Message\\OrderPlaced');
+    }
+
+    public function testInsertSpecifiesIdTypeForMessageId(): void
+    {
+        $connection = $this->createMock(Connection::class);
+        $connection->expects($this->once())
+            ->method('insert')
+            ->with(
+                $this->anything(),
+                $this->anything(),
+                $this->callback(function (array $types): bool {
+                    $this->assertArrayHasKey('message_id', $types);
+                    $this->assertSame(ParameterType::BINARY, $types['message_id']);
+
+                    return true;
+                }),
+            );
+
+        $store = new DeduplicationDbalStore($connection);
 
         $store->isDuplicate(Id::new(), 'App\\Message\\OrderPlaced');
     }

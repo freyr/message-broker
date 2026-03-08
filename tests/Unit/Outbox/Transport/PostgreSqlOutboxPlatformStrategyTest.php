@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Unit\Outbox\Transport;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Result;
 use Doctrine\DBAL\Schema\AbstractSchemaManager;
 use Doctrine\DBAL\Schema\Column;
@@ -86,6 +87,9 @@ final class PostgreSqlOutboxPlatformStrategyTest extends TestCase
     public function testItAddsTransactionIdColumnWhenMissing(): void
     {
         $connection = $this->createMock(Connection::class);
+        $platform = $this->createStub(PostgreSQLPlatform::class);
+        $connection->method('getDatabasePlatform')
+            ->willReturn($platform);
 
         /** @var AbstractSchemaManager<\Doctrine\DBAL\Platforms\AbstractPlatform>&\PHPUnit\Framework\MockObject\MockObject $schemaManager */
         $schemaManager = $this->createMock(AbstractSchemaManager::class);
@@ -116,6 +120,9 @@ final class PostgreSqlOutboxPlatformStrategyTest extends TestCase
     public function testItSkipsTransactionIdColumnWhenAlreadyExists(): void
     {
         $connection = $this->createMock(Connection::class);
+        $platform = $this->createStub(PostgreSQLPlatform::class);
+        $connection->method('getDatabasePlatform')
+            ->willReturn($platform);
 
         /** @var AbstractSchemaManager<\Doctrine\DBAL\Platforms\AbstractPlatform>&\PHPUnit\Framework\MockObject\MockObject $schemaManager */
         $schemaManager = $this->createMock(AbstractSchemaManager::class);

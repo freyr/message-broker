@@ -113,7 +113,7 @@ abstract class FunctionalDatabaseTestCase extends TestCase
             'notnull' => true,
         ]);
         $table->setPrimaryKey(['message_id']);
-        $table->addIndex(['processed_at'], 'idx_dedup_processed_at');
+        $table->addIndex(['processed_at'], 'idx_message_broker_deduplication_processed_at');
 
         $schemaManager->createTable($table);
 
