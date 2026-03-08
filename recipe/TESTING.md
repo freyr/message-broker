@@ -239,7 +239,7 @@ After installation, verify:
 ### Services
 
 - [ ] Bundle registered in `config/bundles.php`
-- [ ] Serialisers registered: `php bin/console debug:container | grep Serializer`
+- [ ] Serializers registered: `php bin/console debug:container | grep Serializer`
 
 ### Messenger
 

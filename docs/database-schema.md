@@ -17,7 +17,7 @@ These tables are created and managed automatically by Symfony Messenger when `au
    - Standard Symfony Messenger Doctrine transport schema
    - Uses default table name
 
-**First-Run Behaviour:**
+**First-Run Behavior:**
 - Symfony uses `CREATE TABLE IF NOT EXISTS` (idempotent)
 - Tables are created when the worker first polls the transport
 - No manual migration or schema.sql setup required
@@ -43,7 +43,7 @@ The Freyr Message Broker uses a **3-table architecture** for optimal performance
 - ✅ Native AMQP transport consumption (no custom commands)
 - ✅ Middleware-based deduplication (more native to Symfony Messenger)
 - ✅ Transactional guarantees (deduplication + handler in same transaction)
-- ✅ Optimised indexes per use case
+- ✅ Optimized indexes per use case
 - ✅ Independent cleanup policies
 - ✅ Unified failed message monitoring
 - ✅ Flexible: Direct AMQP→Handler or AMQP→Inbox→Handler
@@ -319,7 +319,7 @@ services:
       - { name: 'doctrine.dbal.types', type: 'id_binary' }
 ```
 
-## Index Optimisation
+## Index Optimization
 
 **messenger_outbox (standard):**
 - `idx_queue_name` - Fast filtering by queue
@@ -359,7 +359,7 @@ services:
 ## Performance Considerations
 
 - **Binary ULID:** Chronologically sortable, better index performance than UUID v4
-- **Separate tables:** Independent cleanup, optimised indexes per use case
+- **Separate tables:** Independent cleanup, optimized indexes per use case
 - **SKIP LOCKED:** Native support for horizontal scaling
 - **Transactional deduplication:** Atomic guarantees without distributed locks
 

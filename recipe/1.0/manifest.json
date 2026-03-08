@@ -22,7 +22,7 @@
         "",
         "  2. Replace <info>your_</> placeholders in <info>config/packages/messenger.yaml</>",
         "",
-        "  3. (Optional) Customise the deduplication table name in <info>config/packages/message_broker.yaml</>:",
+        "  3. (Optional) Customize the deduplication table name in <info>config/packages/message_broker.yaml</>:",
         "     The default is <info>message_broker_deduplication</>.",
         "",
         "  4. Create the deduplication table:",

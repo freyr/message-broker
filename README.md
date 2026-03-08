@@ -8,7 +8,7 @@ Inbox and Outbox patterns for Symfony Messenger with transactional guarantees an
 
 | Package | Description |
 |---|---|
-| [freyr/message-broker](https://github.com/freyr/message-broker) | Core bundle — outbox publishing, inbox deduplication, serialisers |
+| [freyr/message-broker](https://github.com/freyr/message-broker) | Core bundle — outbox publishing, inbox deduplication, serializers |
 | [freyr/message-broker-contracts](https://github.com/freyr/message-broker-contracts) | Shared interfaces, stamps, and attributes |
 | [freyr/message-broker-amqp](https://github.com/freyr/message-broker-amqp) | AMQP transport plugin — RabbitMQ publishing, routing, topology management |
 
@@ -203,8 +203,8 @@ See [Ordered Delivery](docs/ordered-delivery.md) for the full guide.
 - [Outbox Pattern](docs/outbox-pattern.md) — transactional event publishing
 - [Ordered Delivery](docs/ordered-delivery.md) — per-aggregate causal ordering with partition keys
 - [Inbox Deduplication](docs/inbox-deduplication.md) — preventing duplicate message processing
-- [Message Serialisation](docs/message-serialization.md) — semantic naming and cross-language compatibility
+- [Message Serialization](docs/message-serialization.md) — semantic naming and cross-language compatibility
 
-## Licence
+## License
 
 MIT
