@@ -7,11 +7,13 @@ Messages are serialized using semantic, language-agnostic names (`order.placed`)
 ## How It Works
 
 **Publishing (Outbox → AMQP):**
-1. Event has `#[MessageName('order.placed')]` attribute
-2. `OutboxSerializer` extracts semantic name and sets `type` header to `order.placed`
-3. `OutboxToAmqpBridge` generates messageId (ULID) and adds MessageIdStamp
-4. Body contains JSON-serialised event payload (only business data)
-5. MessageId transported via MessageIdStamp in `X-Message-Stamp-*` header
+1. Event has `#[MessageName('order.placed')]` attribute and implements `OutboxMessage`
+2. `MessageIdStampMiddleware` generates ULID and attaches `MessageIdStamp` at dispatch time
+3. `MessageNameStampMiddleware` extracts semantic name into `MessageNameStamp` at dispatch time
+4. Event stored in `messenger_outbox` within `doctrine_transaction`
+5. `OutboxPublishingMiddleware` delegates to transport-specific `OutboxPublisherInterface`
+6. `WireFormatSerializer` reads `MessageNameStamp` and sets `type` header to `order.placed`
+7. MessageId transported via `MessageIdStamp` in `X-Message-Stamp-*` header
 
 **Consuming (AMQP → Inbox):**
 1. Message arrives with `type: order.placed` header
@@ -35,7 +37,7 @@ Messages are serialized using semantic, language-agnostic names (`order.placed`)
 ```
 [Publisher Event] → #[MessageName('order.placed')]
          ↓
-[OutboxSerializer::encode()]
+[WireFormatSerializer::encode()]
          ↓
 AMQP: { type: "order.placed", body: {...}, stamps: X-Message-Stamp-* }
          ↓
@@ -52,7 +54,7 @@ message_types['order.placed'] → App\Message\OrderPlaced
 
 - **MessageName attribute** - Declares semantic name on event classes
 - **InboxSerializer** - Consumes from AMQP (semantic name → FQN)
-- **OutboxSerializer** - Publishes to AMQP (FQN → semantic name)
+- **WireFormatSerializer** - Publishes to AMQP (FQN → semantic name)
 - **message_types configuration** - Maps semantic names to PHP classes
 - **Symfony Serialiser** - Native JSON serialisation with normalizers
 - **Stamp headers** - X-Message-Stamp-* for metadata transport

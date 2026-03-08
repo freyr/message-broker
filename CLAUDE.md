@@ -56,4 +56,3 @@ See [docs/git-conventions.md](docs/git-conventions.md) for full guide.
 ## References
 
 - [docs/](docs/) — Detailed architecture and pattern documentation
-- [AMQP extraction learnings](docs/AMQP_EXTRACTION_LEARNINGS.md)

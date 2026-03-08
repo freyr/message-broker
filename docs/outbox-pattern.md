@@ -41,7 +41,7 @@ The Outbox pattern ensures that domain events are published reliably alongside b
 ## Key Components
 
 - **OutboxMessage** - Marker interface all outbox events must implement
-- **OutboxToAmqpBridge** - Worker handler that publishes events to AMQP
+- **OutboxPublishingMiddleware** - Middleware that delegates publishing to transport-specific OutboxPublisherInterface implementations
 - **messenger_outbox table** - Stores events until successfully published
 
 ## Delivery Guarantees

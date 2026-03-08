@@ -204,7 +204,6 @@ See [Ordered Delivery](docs/ordered-delivery.md) for the full guide.
 - [Ordered Delivery](docs/ordered-delivery.md) — per-aggregate causal ordering with partition keys
 - [Inbox Deduplication](docs/inbox-deduplication.md) — preventing duplicate message processing
 - [Message Serialisation](docs/message-serialization.md) — semantic naming and cross-language compatibility
-- [AMQP Routing](docs/amqp-routing.md) — convention-based routing with attribute overrides
 
 ## Licence
 
