@@ -251,13 +251,19 @@ final class OrderedOutboxTransportTest extends FunctionalDatabaseTestCase
         self::$connection->executeStatement(sprintf('DROP TABLE IF EXISTS %s', self::TABLE));
 
         $table = new Table(self::TABLE);
-        $table->addColumn('id', Types::BIGINT, ['autoincrement' => true]);
+        $table->addColumn('id', Types::BIGINT, [
+            'autoincrement' => true,
+        ]);
         $table->addColumn('body', Types::TEXT);
         $table->addColumn('headers', Types::TEXT);
-        $table->addColumn('queue_name', Types::STRING, ['length' => 190]);
+        $table->addColumn('queue_name', Types::STRING, [
+            'length' => 190,
+        ]);
         $table->addColumn('created_at', Types::DATETIME_IMMUTABLE);
         $table->addColumn('available_at', Types::DATETIME_IMMUTABLE);
-        $table->addColumn('delivered_at', Types::DATETIME_IMMUTABLE, ['notnull' => false]);
+        $table->addColumn('delivered_at', Types::DATETIME_IMMUTABLE, [
+            'notnull' => false,
+        ]);
         $table->setPrimaryKey(['id']);
 
         self::$connection->createSchemaManager()->createTable($table);

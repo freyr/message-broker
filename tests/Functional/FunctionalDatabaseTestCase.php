@@ -98,8 +98,12 @@ abstract class FunctionalDatabaseTestCase extends TestCase
         }
 
         $table = new Table('message_broker_deduplication');
-        $table->addColumn('message_id', IdType::NAME, ['length' => 16]);
-        $table->addColumn('message_name', Types::STRING, ['length' => 255]);
+        $table->addColumn('message_id', IdType::NAME, [
+            'length' => 16,
+        ]);
+        $table->addColumn('message_name', Types::STRING, [
+            'length' => 255,
+        ]);
         $table->addColumn('processed_at', Types::DATETIME_IMMUTABLE);
         $table->setPrimaryKey(['message_id']);
         $table->addIndex(['processed_at'], 'idx_dedup_processed_at');

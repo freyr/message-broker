@@ -109,4 +109,4 @@ With `auto_setup: true`, the transport creates the table automatically on first 
 
 - **No delayed outbox messages**: Messages with `available_at` in the future do not block subsequent messages in the same partition
 - **Single worker per partition**: By design, only one worker processes a partition's head message
-- **MySQL only**: The transport uses MySQL-specific `SKIP LOCKED` syntax
+- **MySQL 8.0+ or PostgreSQL 9.5+**: The transport uses `FOR UPDATE SKIP LOCKED` syntax supported by both engines
