@@ -9,6 +9,7 @@ use Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware;
 use Freyr\MessageBroker\Tests\Fixtures\TestPublisher;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
@@ -28,7 +29,8 @@ use Symfony\Component\DependencyInjection\Reference;
 #[CoversClass(OutboxPublisherPass::class)]
 final class OutboxPublisherPassTest extends TestCase
 {
-    public function testHandlesNoPublishersGracefully(): void
+    #[Test]
+    public function itHandlesNoPublishersGracefully(): void
     {
         $container = $this->createContainerWithMiddleware();
 
@@ -40,7 +42,8 @@ final class OutboxPublisherPassTest extends TestCase
         $this->assertInstanceOf(Reference::class, $locatorArg);
     }
 
-    public function testEarlyReturnWhenMiddlewareNotDefined(): void
+    #[Test]
+    public function itReturnsEarlyWhenMiddlewareNotDefined(): void
     {
         $container = new ContainerBuilder();
 
@@ -50,7 +53,8 @@ final class OutboxPublisherPassTest extends TestCase
         $this->assertFalse($container->hasDefinition(OutboxPublishingMiddleware::class));
     }
 
-    public function testCollectsTaggedPublishersIntoServiceLocator(): void
+    #[Test]
+    public function itCollectsTaggedPublishersIntoServiceLocator(): void
     {
         $container = $this->createContainerWithMiddleware();
 
@@ -68,7 +72,8 @@ final class OutboxPublisherPassTest extends TestCase
         $this->assertInstanceOf(Reference::class, $locatorArg);
     }
 
-    public function testThrowsOnMissingTransportAttribute(): void
+    #[Test]
+    public function itThrowsOnMissingTransportAttribute(): void
     {
         $container = $this->createContainerWithMiddleware();
 
@@ -83,7 +88,8 @@ final class OutboxPublisherPassTest extends TestCase
         $pass->process($container);
     }
 
-    public function testThrowsOnDuplicateTransportName(): void
+    #[Test]
+    public function itThrowsOnDuplicateTransportName(): void
     {
         $container = $this->createContainerWithMiddleware();
 
@@ -106,7 +112,8 @@ final class OutboxPublisherPassTest extends TestCase
         $pass->process($container);
     }
 
-    public function testThrowsWhenServiceDoesNotImplementInterface(): void
+    #[Test]
+    public function itThrowsWhenServiceDoesNotImplementInterface(): void
     {
         $container = $this->createContainerWithMiddleware();
 

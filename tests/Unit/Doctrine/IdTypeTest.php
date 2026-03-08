@@ -11,6 +11,7 @@ use Freyr\Identity\Id;
 use Freyr\MessageBroker\Doctrine\Type\IdType;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -36,7 +37,8 @@ final class IdTypeTest extends TestCase
         $this->platform = new MySQLPlatform();
     }
 
-    public function testConvertToPHPValueReturnIdForBinaryString(): void
+    #[Test]
+    public function itConvertsPhpValueFromBinaryString(): void
     {
         $id = Id::new();
         $binary = $id->toBinary();
@@ -47,12 +49,14 @@ final class IdTypeTest extends TestCase
         $this->assertSame((string) $id, (string) $result);
     }
 
-    public function testConvertToPHPValueReturnsNullForNull(): void
+    #[Test]
+    public function itReturnsNullPhpValueForNull(): void
     {
         $this->assertNull($this->type->convertToPHPValue(null, $this->platform));
     }
 
-    public function testConvertToPHPValuePassesThroughIdInstance(): void
+    #[Test]
+    public function itPassesThroughIdInstanceForPhpValue(): void
     {
         $id = Id::new();
 
@@ -61,7 +65,8 @@ final class IdTypeTest extends TestCase
         $this->assertSame($id, $result);
     }
 
-    public function testConvertToPHPValueThrowsForNonStringNonNull(): void
+    #[Test]
+    public function itThrowsForNonStringNonNullPhpValue(): void
     {
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage('Expected string value from database');
@@ -69,7 +74,8 @@ final class IdTypeTest extends TestCase
         $this->type->convertToPHPValue(12345, $this->platform);
     }
 
-    public function testConvertToDatabaseValueReturnsBinaryForId(): void
+    #[Test]
+    public function itConvertsToDatabaseBinaryForId(): void
     {
         $id = Id::new();
 
@@ -80,12 +86,14 @@ final class IdTypeTest extends TestCase
         $this->assertSame($id->toBinary(), $result);
     }
 
-    public function testConvertToDatabaseValueReturnsNullForNull(): void
+    #[Test]
+    public function itReturnsNullDatabaseValueForNull(): void
     {
         $this->assertNull($this->type->convertToDatabaseValue(null, $this->platform));
     }
 
-    public function testConvertToDatabaseValueThrowsForNonId(): void
+    #[Test]
+    public function itThrowsForNonIdDatabaseValue(): void
     {
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage('Expected Id instance');
@@ -93,27 +101,32 @@ final class IdTypeTest extends TestCase
         $this->type->convertToDatabaseValue('not-an-id', $this->platform);
     }
 
-    public function testGetSQLDeclarationReturnsBinary16ForMySQL(): void
+    #[Test]
+    public function itReturnsBinary16SqlDeclarationForMySql(): void
     {
         $this->assertSame('BINARY(16)', $this->type->getSQLDeclaration([], new MySQLPlatform()));
     }
 
-    public function testGetSQLDeclarationReturnsByteaForPostgreSQL(): void
+    #[Test]
+    public function itReturnsByteaSqlDeclarationForPostgreSql(): void
     {
         $this->assertSame('BYTEA', $this->type->getSQLDeclaration([], new PostgreSQLPlatform()));
     }
 
-    public function testGetNameReturnsIdBinary(): void
+    #[Test]
+    public function itReturnsIdBinaryAsName(): void
     {
         $this->assertSame('id_binary', $this->type->getName());
     }
 
-    public function testRequiresSQLCommentHint(): void
+    #[Test]
+    public function itRequiresSqlCommentHint(): void
     {
         $this->assertTrue($this->type->requiresSQLCommentHint($this->platform));
     }
 
-    public function testConvertToPHPValueHandlesResourceStream(): void
+    #[Test]
+    public function itHandlesResourceStreamForPhpValue(): void
     {
         $id = Id::new();
         $binary = $id->toBinary();

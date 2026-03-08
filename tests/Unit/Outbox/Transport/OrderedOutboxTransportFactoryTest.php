@@ -13,6 +13,7 @@ use Doctrine\Persistence\ConnectionRegistry;
 use Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransport;
 use Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransportFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Messenger\Exception\TransportException;
 use Symfony\Component\Messenger\Transport\Serialization\SerializerInterface;
@@ -20,28 +21,32 @@ use Symfony\Component\Messenger\Transport\Serialization\SerializerInterface;
 #[CoversClass(OrderedOutboxTransportFactory::class)]
 final class OrderedOutboxTransportFactoryTest extends TestCase
 {
-    public function testSupportsOrderedDoctrineDsn(): void
+    #[Test]
+    public function itSupportsOrderedDoctrineDsn(): void
     {
         $factory = new OrderedOutboxTransportFactory($this->createStub(ConnectionRegistry::class));
 
         $this->assertTrue($factory->supports('ordered-doctrine://default', []));
     }
 
-    public function testDoesNotSupportStandardDoctrineDsn(): void
+    #[Test]
+    public function itDoesNotSupportStandardDoctrineDsn(): void
     {
         $factory = new OrderedOutboxTransportFactory($this->createStub(ConnectionRegistry::class));
 
         $this->assertFalse($factory->supports('doctrine://default', []));
     }
 
-    public function testDoesNotSupportAmqpDsn(): void
+    #[Test]
+    public function itDoesNotSupportAmqpDsn(): void
     {
         $factory = new OrderedOutboxTransportFactory($this->createStub(ConnectionRegistry::class));
 
         $this->assertFalse($factory->supports('amqp://guest:guest@localhost', []));
     }
 
-    public function testCreateTransportReturnsOrderedOutboxTransport(): void
+    #[Test]
+    public function itCreatesTransportAsOrderedOutboxTransport(): void
     {
         $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $this->mysqlConnection()));
 
@@ -54,7 +59,8 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
     }
 
-    public function testCreateTransportWithCustomOptions(): void
+    #[Test]
+    public function itCreatesTransportWithCustomOptions(): void
     {
         $factory = new OrderedOutboxTransportFactory($this->registryWith('events', $this->mysqlConnection()));
 
@@ -67,7 +73,8 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
     }
 
-    public function testCreateTransportWithAutoSetup(): void
+    #[Test]
+    public function itCreatesTransportWithAutoSetup(): void
     {
         $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $this->mysqlConnection()));
 
@@ -80,7 +87,8 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
     }
 
-    public function testCreateTransportThrowsOnInvalidDsn(): void
+    #[Test]
+    public function itThrowsOnInvalidDsnWhenCreatingTransport(): void
     {
         $factory = new OrderedOutboxTransportFactory($this->createStub(ConnectionRegistry::class));
 
@@ -89,7 +97,8 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         $factory->createTransport('://invalid', [], $this->createStub(SerializerInterface::class));
     }
 
-    public function testCreateTransportRejectsInvalidTableName(): void
+    #[Test]
+    public function itRejectsInvalidTableNameWhenCreatingTransport(): void
     {
         $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $this->mysqlConnection()));
 
@@ -103,7 +112,8 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         );
     }
 
-    public function testCreateTransportRejectsTableNameStartingWithDigit(): void
+    #[Test]
+    public function itRejectsTableNameStartingWithDigitWhenCreatingTransport(): void
     {
         $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $this->mysqlConnection()));
 
@@ -116,7 +126,8 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         );
     }
 
-    public function testCreateTransportWrapsConnectionNotFoundInTransportException(): void
+    #[Test]
+    public function itWrapsConnectionNotFoundInTransportException(): void
     {
         $registry = $this->createStub(ConnectionRegistry::class);
         $registry->method('getConnection')
@@ -134,7 +145,8 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         );
     }
 
-    public function testDsnQueryOverridesOptionsWhichOverrideDefaults(): void
+    #[Test]
+    public function itOverridesDefaultsWithDsnQuery(): void
     {
         $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $this->mysqlConnection()));
 
@@ -149,7 +161,8 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
     }
 
-    public function testCreateTransportWithNoQueryStringUsesDefaults(): void
+    #[Test]
+    public function itUsesDefaultsWhenNoQueryString(): void
     {
         $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $this->mysqlConnection()));
 
@@ -162,7 +175,8 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
     }
 
-    public function testItInjectsMySqlStrategyForMySqlPlatform(): void
+    #[Test]
+    public function itInjectsMySqlStrategyForMySqlPlatform(): void
     {
         $factory = new OrderedOutboxTransportFactory($this->registryWith('default', $this->mysqlConnection()));
 
@@ -175,7 +189,8 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
     }
 
-    public function testItInjectsMySqlStrategyForMariaDbPlatform(): void
+    #[Test]
+    public function itInjectsMySqlStrategyForMariaDbPlatform(): void
     {
         $connection = $this->createStub(Connection::class);
         $connection->method('getDatabasePlatform')
@@ -192,7 +207,8 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
     }
 
-    public function testItInjectsPostgreSqlStrategyForPostgreSqlPlatform(): void
+    #[Test]
+    public function itInjectsPostgreSqlStrategyForPostgreSqlPlatform(): void
     {
         $connection = $this->createStub(Connection::class);
         $connection->method('getDatabasePlatform')
@@ -209,7 +225,8 @@ final class OrderedOutboxTransportFactoryTest extends TestCase
         $this->assertInstanceOf(OrderedOutboxTransport::class, $transport);
     }
 
-    public function testItThrowsForUnsupportedPlatform(): void
+    #[Test]
+    public function itThrowsForUnsupportedPlatform(): void
     {
         $connection = $this->createStub(Connection::class);
         $connection->method('getDatabasePlatform')

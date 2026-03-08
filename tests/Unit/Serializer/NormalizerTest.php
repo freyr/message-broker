@@ -9,6 +9,7 @@ use Freyr\Identity\Id;
 use Freyr\MessageBroker\Serializer\Normalizer\CarbonImmutableNormalizer;
 use Freyr\MessageBroker\Serializer\Normalizer\IdNormalizer;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -21,7 +22,8 @@ use PHPUnit\Framework\TestCase;
 #[CoversClass(CarbonImmutableNormalizer::class)]
 final class NormalizerTest extends TestCase
 {
-    public function testIdNormalizerRoundTripPreservesValue(): void
+    #[Test]
+    public function itPreservesValueOnIdNormalizerRoundTrip(): void
     {
         $normalizer = new IdNormalizer();
         $id = Id::new();
@@ -33,7 +35,8 @@ final class NormalizerTest extends TestCase
         $this->assertSame((string) $id, (string) $denormalized);
     }
 
-    public function testCarbonImmutableNormalizerRoundTripPreservesTimestamp(): void
+    #[Test]
+    public function itPreservesTimestampOnCarbonImmutableNormalizerRoundTrip(): void
     {
         $normalizer = new CarbonImmutableNormalizer();
         $timestamp = CarbonImmutable::parse('2026-02-20T10:30:00+00:00');

@@ -12,6 +12,7 @@ use Freyr\MessageBroker\Outbox\OutboxPublishingMiddleware;
 use Freyr\MessageBroker\Tests\Fixtures\TestOutboxEvent;
 use Freyr\MessageBroker\Tests\Unit\MiddlewareStackFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 use RuntimeException;
@@ -40,7 +41,8 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         return Id::fromString('01ARYZ6S41TSV4RRFFQ69G5FAV');
     }
 
-    public function testNonOutboxMessagePassesThrough(): void
+    #[Test]
+    public function itPassesThroughNonOutboxMessage(): void
     {
         $middleware = $this->createMiddleware([]);
         $envelope = new Envelope(new \stdClass(), [new ReceivedStamp('outbox')]);
@@ -51,7 +53,8 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         $this->assertTrue($nextCalled, 'Non-OutboxMessage should pass through to next middleware');
     }
 
-    public function testOutboxMessageWithoutReceivedStampPassesThrough(): void
+    #[Test]
+    public function itPassesThroughOutboxMessageWithoutReceivedStamp(): void
     {
         $middleware = $this->createMiddleware([
             'outbox' => $this->createFakePublisher(),
@@ -64,7 +67,8 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         $this->assertTrue($nextCalled, 'Dispatch-phase envelope should pass through');
     }
 
-    public function testPassesThroughWhenPublisherNotRegisteredForTransport(): void
+    #[Test]
+    public function itPassesThroughWhenPublisherNotRegisteredForTransport(): void
     {
         $middleware = $this->createMiddleware([]);
         $envelope = new Envelope(TestOutboxEvent::random(), [new ReceivedStamp('outbox')]);
@@ -75,7 +79,8 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         $this->assertTrue($nextCalled, 'Should pass through when no publisher registered');
     }
 
-    public function testThrowsWhenMessageNameStampMissing(): void
+    #[Test]
+    public function itThrowsWhenMessageNameStampMissing(): void
     {
         $middleware = $this->createMiddleware([
             'outbox' => $this->createFakePublisher(),
@@ -91,7 +96,8 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         $middleware->handle($envelope, MiddlewareStackFactory::createPassThrough());
     }
 
-    public function testThrowsWhenMessageIdStampMissing(): void
+    #[Test]
+    public function itThrowsWhenMessageIdStampMissing(): void
     {
         $middleware = $this->createMiddleware([
             'outbox' => $this->createFakePublisher(),
@@ -107,7 +113,8 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         $middleware->handle($envelope, MiddlewareStackFactory::createPassThrough());
     }
 
-    public function testDelegatesToPublisherWithCleanEnvelope(): void
+    #[Test]
+    public function itDelegatesToPublisherWithCleanEnvelope(): void
     {
         $publishedEnvelope = null;
         $publisher = $this->createFakePublisher(function (Envelope $envelope) use (&$publishedEnvelope): void {
@@ -142,7 +149,8 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         $this->assertSame('test.event.sent', $nameStamp->messageName);
     }
 
-    public function testShortCircuitsAfterPublishing(): void
+    #[Test]
+    public function itShortCircuitsAfterPublishing(): void
     {
         $middleware = $this->createMiddleware([
             'outbox' => $this->createFakePublisher(),
@@ -159,7 +167,8 @@ final class OutboxPublishingMiddlewareTest extends TestCase
         $this->assertFalse($nextCalled, 'Middleware should short-circuit after publishing');
     }
 
-    public function testReturnsOriginalEnvelopeAfterPublishing(): void
+    #[Test]
+    public function itReturnsOriginalEnvelopeAfterPublishing(): void
     {
         $middleware = $this->createMiddleware([
             'outbox' => $this->createFakePublisher(),

@@ -13,6 +13,7 @@ use Doctrine\DBAL\Types\StringType;
 use Freyr\MessageBroker\Outbox\Transport\OutboxPlatformStrategy;
 use Freyr\MessageBroker\Outbox\Transport\PostgreSqlOutboxPlatformStrategy;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 #[CoversClass(PostgreSqlOutboxPlatformStrategy::class)]
@@ -25,12 +26,14 @@ final class PostgreSqlOutboxPlatformStrategyTest extends TestCase
         $this->strategy = new PostgreSqlOutboxPlatformStrategy();
     }
 
-    public function testItImplementsOutboxPlatformStrategy(): void
+    #[Test]
+    public function itImplementsOutboxPlatformStrategy(): void
     {
         $this->assertInstanceOf(OutboxPlatformStrategy::class, $this->strategy);
     }
 
-    public function testItBuildsInsertReturningQuery(): void
+    #[Test]
+    public function itBuildsInsertReturningQuery(): void
     {
         $connection = $this->createMock(Connection::class);
 
@@ -74,7 +77,8 @@ final class PostgreSqlOutboxPlatformStrategyTest extends TestCase
         $this->assertSame('99', $id);
     }
 
-    public function testItReturnsXid8HeadOfLineFilter(): void
+    #[Test]
+    public function itReturnsXid8HeadOfLineFilter(): void
     {
         $filter = $this->strategy->buildHeadOfLineFilter();
 
@@ -84,7 +88,8 @@ final class PostgreSqlOutboxPlatformStrategyTest extends TestCase
         $this->assertStringStartsWith(' AND ', $filter);
     }
 
-    public function testItAddsTransactionIdColumnWhenMissing(): void
+    #[Test]
+    public function itAddsTransactionIdColumnWhenMissing(): void
     {
         $connection = $this->createMock(Connection::class);
         $platform = $this->createStub(PostgreSQLPlatform::class);
@@ -117,7 +122,8 @@ final class PostgreSqlOutboxPlatformStrategyTest extends TestCase
         $this->strategy->afterTableCreated($connection, 'messenger_outbox');
     }
 
-    public function testItSkipsTransactionIdColumnWhenAlreadyExists(): void
+    #[Test]
+    public function itSkipsTransactionIdColumnWhenAlreadyExists(): void
     {
         $connection = $this->createMock(Connection::class);
         $platform = $this->createStub(PostgreSQLPlatform::class);

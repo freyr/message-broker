@@ -9,6 +9,7 @@ use Doctrine\DBAL\Types\Types;
 use Freyr\MessageBroker\Outbox\Transport\MySqlOutboxPlatformStrategy;
 use Freyr\MessageBroker\Outbox\Transport\OutboxPlatformStrategy;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 #[CoversClass(MySqlOutboxPlatformStrategy::class)]
@@ -21,12 +22,14 @@ final class MySqlOutboxPlatformStrategyTest extends TestCase
         $this->strategy = new MySqlOutboxPlatformStrategy();
     }
 
-    public function testItImplementsOutboxPlatformStrategy(): void
+    #[Test]
+    public function itImplementsOutboxPlatformStrategy(): void
     {
         $this->assertInstanceOf(OutboxPlatformStrategy::class, $this->strategy);
     }
 
-    public function testItDelegatesInsertToConnectionAndReturnsLastInsertId(): void
+    #[Test]
+    public function itDelegatesInsertToConnectionAndReturnsLastInsertId(): void
     {
         $connection = $this->createMock(Connection::class);
 
@@ -51,12 +54,14 @@ final class MySqlOutboxPlatformStrategyTest extends TestCase
         $this->assertSame('42', $id);
     }
 
-    public function testItReturnsEmptyHeadOfLineFilter(): void
+    #[Test]
+    public function itReturnsEmptyHeadOfLineFilter(): void
     {
         $this->assertSame('', $this->strategy->buildHeadOfLineFilter());
     }
 
-    public function testItIsNoOpAfterTableCreated(): void
+    #[Test]
+    public function itIsNoOpAfterTableCreated(): void
     {
         $connection = $this->createMock(Connection::class);
 

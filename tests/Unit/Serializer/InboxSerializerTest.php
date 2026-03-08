@@ -12,6 +12,7 @@ use Freyr\MessageBroker\Serializer\Normalizer\CarbonImmutableNormalizer;
 use Freyr\MessageBroker\Serializer\Normalizer\IdNormalizer;
 use Freyr\MessageBroker\Tests\Fixtures\TestInboxEvent;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\MessageDecodingFailedException;
@@ -65,7 +66,8 @@ final class InboxSerializerTest extends TestCase
         ]);
     }
 
-    public function testDecodeTranslatesSemanticNameToFqn(): void
+    #[Test]
+    public function itTranslatesSemanticNameToFqnOnDecode(): void
     {
         $encoded = $this->createEncodedMessage('test.inbox.received');
 
@@ -74,7 +76,8 @@ final class InboxSerializerTest extends TestCase
         $this->assertInstanceOf(TestInboxEvent::class, $decoded->getMessage());
     }
 
-    public function testDecodeThrowsOnMissingTypeHeader(): void
+    #[Test]
+    public function itThrowsOnMissingTypeHeaderOnDecode(): void
     {
         $this->expectException(MessageDecodingFailedException::class);
         $this->expectExceptionMessageMatches('/type/');
@@ -85,7 +88,8 @@ final class InboxSerializerTest extends TestCase
         ]);
     }
 
-    public function testDecodeThrowsOnNonArrayHeaders(): void
+    #[Test]
+    public function itThrowsOnNonArrayHeadersOnDecode(): void
     {
         $this->expectException(MessageDecodingFailedException::class);
 
@@ -95,7 +99,8 @@ final class InboxSerializerTest extends TestCase
         ]);
     }
 
-    public function testDecodeThrowsOnUnknownMessageType(): void
+    #[Test]
+    public function itThrowsOnUnknownMessageTypeOnDecode(): void
     {
         $this->expectException(MessageDecodingFailedException::class);
         $this->expectExceptionMessageMatches('/Unknown message type.*unknown\.event/');
@@ -108,7 +113,8 @@ final class InboxSerializerTest extends TestCase
         ]);
     }
 
-    public function testDecodeThrowsWhenFqnInTypeHeader(): void
+    #[Test]
+    public function itThrowsWhenFqnInTypeHeaderOnDecode(): void
     {
         $this->expectException(MessageDecodingFailedException::class);
         $this->expectExceptionMessageMatches('/Unknown message type/');
@@ -121,7 +127,8 @@ final class InboxSerializerTest extends TestCase
         ]);
     }
 
-    public function testDecodeAddsMessageNameStamp(): void
+    #[Test]
+    public function itAddsMessageNameStampOnDecode(): void
     {
         $encoded = $this->createEncodedMessage('test.inbox.received');
 
@@ -132,7 +139,8 @@ final class InboxSerializerTest extends TestCase
         $this->assertSame('test.inbox.received', $stamp->messageName);
     }
 
-    public function testDecodePreservesExistingMessageNameStamp(): void
+    #[Test]
+    public function itPreservesExistingMessageNameStampOnDecode(): void
     {
         $encoded = $this->createEncodedMessage('test.inbox.received');
 
@@ -149,7 +157,8 @@ final class InboxSerializerTest extends TestCase
         $this->assertCount(1, $stamps, 'Should not add duplicate MessageNameStamp');
     }
 
-    public function testEncodeUsesMessageNameStampForSemanticType(): void
+    #[Test]
+    public function itUsesMessageNameStampForSemanticTypeOnEncode(): void
     {
         $message = TestInboxEvent::random();
         $envelope = new Envelope($message, [new MessageNameStamp('test.inbox.received')]);
@@ -161,7 +170,8 @@ final class InboxSerializerTest extends TestCase
         $this->assertSame('test.inbox.received', $headers['type']);
     }
 
-    public function testEncodePreservesFqnWithoutMessageNameStamp(): void
+    #[Test]
+    public function itPreservesFqnWithoutMessageNameStampOnEncode(): void
     {
         $message = TestInboxEvent::random();
         $envelope = new Envelope($message);
@@ -173,7 +183,8 @@ final class InboxSerializerTest extends TestCase
         $this->assertSame(TestInboxEvent::class, $headers['type']);
     }
 
-    public function testRoundTripDecodeEncodePreservesSemanticName(): void
+    #[Test]
+    public function itPreservesSemanticNameOnRoundTrip(): void
     {
         $id = Id::new();
         $timestamp = CarbonImmutable::now();

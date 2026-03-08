@@ -8,6 +8,7 @@ use Doctrine\DBAL\ParameterType;
 use Freyr\Identity\Id;
 use Freyr\MessageBroker\Command\DeduplicationStoreCleanup;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use Symfony\Component\Console\Tester\CommandTester;
 
 /**
@@ -19,7 +20,8 @@ use Symfony\Component\Console\Tester\CommandTester;
 #[CoversClass(DeduplicationStoreCleanup::class)]
 final class DeduplicationStoreCleanupTest extends FunctionalDatabaseTestCase
 {
-    public function testOldRecordsAreDeletedAndRecentKept(): void
+    #[Test]
+    public function itDeletesOldRecordsAndKeepsRecent(): void
     {
         self::$connection->insert('message_broker_deduplication', [
             'message_id' => Id::new()->toBinary(),
@@ -53,7 +55,8 @@ final class DeduplicationStoreCleanupTest extends FunctionalDatabaseTestCase
         $this->assertSame('recent.event', $remaining);
     }
 
-    public function testOutputReportsDeletedCount(): void
+    #[Test]
+    public function itReportsDeletedCountInOutput(): void
     {
         for ($i = 0; $i < 3; ++$i) {
             self::$connection->insert('message_broker_deduplication', [

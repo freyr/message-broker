@@ -7,6 +7,7 @@ namespace Freyr\MessageBroker\Tests\Functional;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Freyr\MessageBroker\Command\SetupDeduplicationCommand;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
@@ -32,7 +33,8 @@ final class SetupDeduplicationCommandTest extends FunctionalDatabaseTestCase
         parent::tearDownAfterClass();
     }
 
-    public function testForceCreatesTableWithCorrectSchema(): void
+    #[Test]
+    public function itCreatesTableWithCorrectSchemaInForceMode(): void
     {
         $command = new SetupDeduplicationCommand(self::$connection, self::TABLE);
         $tester = new CommandTester($command);
@@ -60,7 +62,8 @@ final class SetupDeduplicationCommandTest extends FunctionalDatabaseTestCase
         $this->assertArrayHasKey(sprintf('idx_%s_processed_at', self::TABLE), $indexes);
     }
 
-    public function testForceIsIdempotent(): void
+    #[Test]
+    public function itIsIdempotentInForceMode(): void
     {
         $command = new SetupDeduplicationCommand(self::$connection, self::TABLE);
         $tester = new CommandTester($command);
@@ -78,7 +81,8 @@ final class SetupDeduplicationCommandTest extends FunctionalDatabaseTestCase
         $this->assertStringContainsString('already exists', $tester->getDisplay());
     }
 
-    public function testDryRunShowsSqlWithoutExecuting(): void
+    #[Test]
+    public function itShowsSqlWithoutExecutingInDryRun(): void
     {
         $command = new SetupDeduplicationCommand(self::$connection, self::TABLE);
         $tester = new CommandTester($command);

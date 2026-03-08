@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Tests\Unit\DependencyInjection;
 
 use Freyr\MessageBroker\DependencyInjection\Configuration;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\Config\Definition\Processor;
@@ -26,7 +27,8 @@ use Symfony\Component\Config\Definition\Processor;
 #[CoversClass(Configuration::class)]
 final class ConfigurationTest extends TestCase
 {
-    public function testEmptyConfigIsValid(): void
+    #[Test]
+    public function itAcceptsEmptyConfigWithDefaults(): void
     {
         $config = $this->processConfig([]);
 
@@ -34,7 +36,8 @@ final class ConfigurationTest extends TestCase
         $this->assertSame('message_broker_deduplication', $config['inbox']['deduplication']['table_name']);
     }
 
-    public function testInboxMessageTypes(): void
+    #[Test]
+    public function itAcceptsInboxMessageTypes(): void
     {
         $config = $this->processConfig([
             'inbox' => [
@@ -51,7 +54,8 @@ final class ConfigurationTest extends TestCase
         ], $config['inbox']['message_types']);
     }
 
-    public function testCustomDeduplicationTableName(): void
+    #[Test]
+    public function itAcceptsCustomDeduplicationTableName(): void
     {
         $config = $this->processConfig([
             'inbox' => [
@@ -64,7 +68,8 @@ final class ConfigurationTest extends TestCase
         $this->assertSame('custom_dedup_table', $config['inbox']['deduplication']['table_name']);
     }
 
-    public function testDeduplicationTableNameCannotBeEmpty(): void
+    #[Test]
+    public function itRejectsEmptyDeduplicationTableName(): void
     {
         $this->expectException(InvalidConfigurationException::class);
 
@@ -77,7 +82,8 @@ final class ConfigurationTest extends TestCase
         ]);
     }
 
-    public function testDeduplicationTableNameRejectsSpecialCharacters(): void
+    #[Test]
+    public function itRejectsSpecialCharactersInDeduplicationTableName(): void
     {
         $this->expectException(InvalidConfigurationException::class);
         $this->expectExceptionMessage('Table name must contain only alphanumeric characters and underscores');
@@ -91,7 +97,8 @@ final class ConfigurationTest extends TestCase
         ]);
     }
 
-    public function testDeduplicationTableNameRejectsStartingWithNumber(): void
+    #[Test]
+    public function itRejectsDeduplicationTableNameStartingWithNumber(): void
     {
         $this->expectException(InvalidConfigurationException::class);
 

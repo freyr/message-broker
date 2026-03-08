@@ -11,6 +11,7 @@ use Freyr\MessageBroker\Outbox\Transport\OrderedOutboxTransport;
 use Freyr\MessageBroker\Outbox\Transport\OutboxPlatformStrategy;
 use Freyr\MessageBroker\Tests\Fixtures\TestOutboxEvent;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\MockObject\Stub;
 use PHPUnit\Framework\TestCase;
@@ -32,7 +33,8 @@ final class OrderedOutboxTransportTest extends TestCase
         $this->platformStrategy = $this->createMock(OutboxPlatformStrategy::class);
     }
 
-    public function testSendDelegatesToStrategyAndReturnsId(): void
+    #[Test]
+    public function itDelegatesToStrategyAndReturnsIdOnSend(): void
     {
         $event = TestOutboxEvent::random();
         $envelope = new Envelope($event, [new PartitionKeyStamp('order-abc')]);
@@ -71,7 +73,8 @@ final class OrderedOutboxTransportTest extends TestCase
         $this->assertSame('42', $stamp->getId());
     }
 
-    public function testSendDefaultsToEmptyPartitionKeyWhenStampMissing(): void
+    #[Test]
+    public function itDefaultsToEmptyPartitionKeyWhenStampMissingOnSend(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random());
 
@@ -95,7 +98,8 @@ final class OrderedOutboxTransportTest extends TestCase
         $transport->send($envelope);
     }
 
-    public function testGetReturnsEnvelopeWhenMessageAvailable(): void
+    #[Test]
+    public function itReturnsEnvelopeWhenMessageAvailableOnGet(): void
     {
         $event = TestOutboxEvent::random();
         $envelope = new Envelope($event);
@@ -133,7 +137,8 @@ final class OrderedOutboxTransportTest extends TestCase
         $this->assertSame('7', $stamp->getId());
     }
 
-    public function testGetReturnsEmptyWhenNoMessagesAvailable(): void
+    #[Test]
+    public function itReturnsEmptyWhenNoMessagesAvailableOnGet(): void
     {
         $this->connection->expects($this->once())
             ->method('beginTransaction');
@@ -153,7 +158,8 @@ final class OrderedOutboxTransportTest extends TestCase
         $this->assertCount(0, $envelopes);
     }
 
-    public function testAckDeletesRowById(): void
+    #[Test]
+    public function itDeletesRowByIdOnAck(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random(), [new TransportMessageIdStamp('99')]);
 
@@ -167,7 +173,8 @@ final class OrderedOutboxTransportTest extends TestCase
         $transport->ack($envelope);
     }
 
-    public function testRejectDeletesRowById(): void
+    #[Test]
+    public function itDeletesRowByIdOnReject(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random(), [new TransportMessageIdStamp('55')]);
 
@@ -181,7 +188,8 @@ final class OrderedOutboxTransportTest extends TestCase
         $transport->reject($envelope);
     }
 
-    public function testKeepaliveUpdatesDeliveredAt(): void
+    #[Test]
+    public function itUpdatesDeliveredAtOnKeepalive(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random(), [new TransportMessageIdStamp('33')]);
 
@@ -200,7 +208,8 @@ final class OrderedOutboxTransportTest extends TestCase
         $transport->keepalive($envelope);
     }
 
-    public function testKeepaliveDoesNothingWithoutStamp(): void
+    #[Test]
+    public function itDoesNothingOnKeepaliveWithoutStamp(): void
     {
         $envelope = new Envelope(TestOutboxEvent::random());
 
@@ -211,7 +220,8 @@ final class OrderedOutboxTransportTest extends TestCase
         $transport->keepalive($envelope);
     }
 
-    public function testGetRollsBackTransactionOnException(): void
+    #[Test]
+    public function itRollsBackTransactionOnExceptionDuringGet(): void
     {
         $this->connection->expects($this->once())
             ->method('beginTransaction');
@@ -231,7 +241,8 @@ final class OrderedOutboxTransportTest extends TestCase
         iterator_to_array($transport->get());
     }
 
-    public function testSendPreservesExistingStamps(): void
+    #[Test]
+    public function itPreservesExistingStampsOnSend(): void
     {
         $partitionStamp = new PartitionKeyStamp('order-99');
         $existingStamp = new TransportMessageIdStamp('old-id');
@@ -262,7 +273,8 @@ final class OrderedOutboxTransportTest extends TestCase
         $this->assertCount(2, $transportStamps, 'Both old and new TransportMessageIdStamp must be present');
     }
 
-    public function testConstructorRejectsInvalidTableName(): void
+    #[Test]
+    public function itRejectsInvalidTableNameInConstructor(): void
     {
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('Table name must contain only alphanumeric characters and underscores');
@@ -276,7 +288,8 @@ final class OrderedOutboxTransportTest extends TestCase
         );
     }
 
-    public function testGetIncludesPlatformFilterInQuery(): void
+    #[Test]
+    public function itIncludesPlatformFilterInQueryOnGet(): void
     {
         $this->platformStrategy->method('buildHeadOfLineFilter')
             ->willReturn(' AND sub.custom_filter = true');
