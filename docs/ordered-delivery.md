@@ -58,7 +58,7 @@ WHERE m.id IN (
 LIMIT 1 FOR UPDATE SKIP LOCKED
 ```
 
-This ensures only the oldest message per partition can be claimed by a worker. Workers parallelise across partitions but process each partition strictly in insertion order (by auto-increment `id`).
+This ensures only the oldest message per partition can be claimed by a worker. Workers parallelize across partitions but process each partition strictly in insertion order (by auto-increment `id`).
 
 ### Schema
 
@@ -85,7 +85,7 @@ With `auto_setup: true`, the transport creates the table automatically on first 
 
 ## Edge Cases
 
-| Scenario | Behaviour |
+| Scenario | Behavior |
 |---|---|
 | No `PartitionKeyStamp` | `partition_key = ''` — all such messages grouped into one partition (serialized one-at-a-time) |
 | Worker crash | Message redelivered after `redeliver_timeout` without stalling the partition |
