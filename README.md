@@ -186,7 +186,7 @@ framework:
 Add `PartitionKeyStampMiddleware` to your bus middleware and dispatch with a partition key:
 
 ```php
-use Freyr\MessageBroker\Outbox\PartitionKeyStamp;
+use Freyr\MessageBroker\Contracts\PartitionKeyStamp;
 
 $this->bus->dispatch($orderPlaced, [
     new PartitionKeyStamp((string) $orderPlaced->orderId),
