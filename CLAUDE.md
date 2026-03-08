@@ -32,7 +32,7 @@ Namespace: `Freyr\MessageBroker\*`
 | Configuration & setup | [README.md](README.md) |
 | Database schema & migrations | [docs/database-schema.md](docs/database-schema.md) |
 | Inbox deduplication | [docs/inbox-deduplication.md](docs/inbox-deduplication.md) |
-| Message serialisation | [docs/message-serialization.md](docs/message-serialization.md) |
+| Message serialization | [docs/message-serialization.md](docs/message-serialization.md) |
 | Outbox pattern | [docs/outbox-pattern.md](docs/outbox-pattern.md) |
 | Ordered delivery | [docs/ordered-delivery.md](docs/ordered-delivery.md) |
 | Critical patterns | See `docs/solutions/patterns/` in workspace root |

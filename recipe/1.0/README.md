@@ -31,7 +31,7 @@ bundled console command to create it in the way that best suits your project:
 ### With doctrine/doctrine-migrations-bundle (recommended)
 
 ```bash
-# 1. (Optional) Customise table name in config/packages/message_broker.yaml
+# 1. (Optional) Customize table name in config/packages/message_broker.yaml
 # 2. Generate a migration file
 php bin/console message-broker:setup-deduplication --migration
 
@@ -138,7 +138,7 @@ or use a GitHub repository. See `recipe/TESTING.md` for full details.
 ### Configuration Files
 
 **config/packages/message_broker.yaml:**
-- Message type mappings for inbox (needs user customisation)
+- Message type mappings for inbox (needs user customization)
 - Deduplication table name (defaults to `message_broker_deduplication`)
 - Used by InboxSerializer to translate semantic names to PHP classes
 
@@ -184,10 +184,10 @@ After running `composer require freyr/message-broker`, users need to:
    - `php bin/console messenger:consume outbox -vv` (publish to AMQP)
    - `php bin/console messenger:consume amqp_your_inbox -vv` (consume from AMQP)
 
-## Customisation
+## Customization
 
-Users can customise:
-- Message type mappings in `message_broker.yaml` (inbox deserialisation)
+Users can customize:
+- Message type mappings in `message_broker.yaml` (inbox deserialization)
 - Deduplication table name in `message_broker.yaml`
 - Transport DSNs in `messenger.yaml` (including table names)
 - AMQP connection string in `.env`

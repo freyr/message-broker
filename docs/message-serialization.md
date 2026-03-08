@@ -18,7 +18,7 @@ Messages are serialized using semantic, language-agnostic names (`order.placed`)
 **Consuming (AMQP → Inbox):**
 1. Message arrives with `type: order.placed` header
 2. `InboxSerializer` looks up mapping: `order.placed` → `App\Message\OrderPlaced`
-3. Delegates to Symfony's native serialiser for deserialisation
+3. Delegates to Symfony's native serializer for deserialization
 4. Stamps restored from `X-Message-Stamp-*` headers
 5. Result: Typed PHP object for handler
 
@@ -30,7 +30,7 @@ Messages are serialized using semantic, language-agnostic names (`order.placed`)
 
 **Versioning:** Same semantic name can map to different classes per application
 
-**Type safety:** Native Symfony serialisation with full type support
+**Type safety:** Native Symfony serialization with full type support
 
 ## Architecture
 
@@ -45,7 +45,7 @@ AMQP: { type: "order.placed", body: {...}, stamps: X-Message-Stamp-* }
          ↓
 message_types['order.placed'] → App\Message\OrderPlaced
          ↓
-[Symfony Serialiser] → Typed PHP Object
+[Symfony Serializer] → Typed PHP Object
          ↓
 [Handler(OrderPlaced $message)]
 ```
@@ -56,7 +56,7 @@ message_types['order.placed'] → App\Message\OrderPlaced
 - **InboxSerializer** - Consumes from AMQP (semantic name → FQN)
 - **WireFormatSerializer** - Publishes to AMQP (FQN → semantic name)
 - **message_types configuration** - Maps semantic names to PHP classes
-- **Symfony Serialiser** - Native JSON serialisation with normalizers
+- **Symfony Serializer** - Native JSON serialization with normalizers
 - **Stamp headers** - X-Message-Stamp-* for metadata transport
 
 ## Message Format

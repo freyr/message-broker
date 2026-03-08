@@ -64,7 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING: Stamp-first middleware pattern**
   - `MessageIdStampMiddleware` generates `MessageIdStamp` at dispatch time (previously generated in bridge)
   - New `MessageNameStampMiddleware` extracts semantic name from `#[MessageName]` at dispatch time
-  - Stamps are now the single source of truth for message metadata — serialisers read stamps instead of reflecting on classes
+  - Stamps are now the single source of truth for message metadata — serializers read stamps instead of reflecting on classes
 
 - **BREAKING: Namespace changes** — the following classes moved to `freyr/message-broker-contracts`:
   - `Freyr\MessageBroker\Inbox\MessageIdStamp` → `Freyr\MessageBroker\Contracts\MessageIdStamp`
@@ -77,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING: `OutboxSerializer` replaced by `WireFormatSerializer`**
   - Reads semantic name from `MessageNameStamp` instead of reflecting on `#[MessageName]` attribute
-  - Cleaner separation: serialiser handles wire format only, metadata extraction is middleware's responsibility
+  - Cleaner separation: serializer handles wire format only, metadata extraction is middleware's responsibility
 
 - **BREAKING: Enabled `auto_setup: true` for Doctrine Messenger transports** (outbox, failed)
   - `messenger_outbox` and `messenger_messages` tables are now auto-created by Symfony Messenger
@@ -94,7 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `OutboxPublisherPass` compiler pass — collects services tagged with `message_broker.outbox_publisher` into the middleware's service locator
 - `MessageIdStampMiddleware` — stamps `OutboxMessage` envelopes with `MessageIdStamp` at dispatch time
 - `MessageNameStampMiddleware` — stamps `OutboxMessage` envelopes with `MessageNameStamp` at dispatch time
-- `WireFormatSerializer` — wire format serialiser for AMQP publishing (replaces `OutboxSerializer`)
+- `WireFormatSerializer` — wire format serializer for AMQP publishing (replaces `OutboxSerializer`)
 - Configurable deduplication table name (`deduplication_table_name` in bundle configuration)
 - Comprehensive functional test suite (Outbox flow, Inbox flow, deduplication edge cases, transaction rollback)
 - Phase 1 critical data integrity tests
@@ -107,7 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `DeduplicationMiddleware` now `final readonly` with proper logger injection
 - All PHPStan level max errors resolved (119 → 0)
 - ORM entity mapping moved to test directory (not shipped with package)
-- Recipe serialiser class references corrected
+- Recipe serializer class references corrected
 
 ### Removed
 
@@ -124,7 +124,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Critical: Wrong table name in cleanup command** - `DeduplicationStoreCleanup` command now uses correct table name `message_broker_deduplication` instead of non-existent `deduplication_store`
-- **MessageNameStamp duplication on retry** - Added existence checks before appending `MessageNameStamp` in both serialisers to prevent stamp accumulation during retry/failed scenarios
+- **MessageNameStamp duplication on retry** - Added existence checks before appending `MessageNameStamp` in both serializers to prevent stamp accumulation during retry/failed scenarios
 
 ### Documentation
 
@@ -135,7 +135,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed "Automatic DLQ Routing" feature claim (standard Symfony failed transport is used)
   - Removed `dlq_transport` configuration (never implemented)
 - **Fixed incorrect attribute names** - Changed `#[AmqpExchange]` to correct `#[MessengerTransport]` attribute throughout documentation
-- **Fixed serialiser terminology** - Corrected all references from non-existent `MessageNameSerializer` to actual classes:
+- **Fixed serializer terminology** - Corrected all references from non-existent `MessageNameSerializer` to actual classes:
   - Publishing: `OutboxSerializer`
   - Consuming: `InboxSerializer`
 - **Clarified deduplication mechanism** - Documented that deduplication uses `MessageIdStamp` + PHP class FQN (not `MessageNameStamp`)
@@ -149,7 +149,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Full SQL schemas for all tables
   - Migration examples
   - Cleanup strategies and commands
-  - Performance optimisation notes
+  - Performance optimization notes
   - Transport configuration examples
   - Message flow diagrams
 
@@ -158,7 +158,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Consolidated documentation** - Reduced duplication by creating single source of truth for 3-table architecture in `docs/database-schema.md`
 - **Improved README** - Updated documentation index with links to all architecture docs
 - **Code cleanup** - Applied coding standards and improved code consistency across codebase
-- **British English** - Standardised spelling throughout documentation (serialiser, optimised, customisation)
+- **British English** - Standardized spelling throughout documentation (serializer, optimized, customization)
 
 ### Development
 
