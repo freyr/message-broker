@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Doctrine\Type;
 
-use Doctrine\DBAL\ParameterType;
 use Doctrine\DBAL\Platforms\AbstractPlatform;
-use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Types\Type;
 use Freyr\Identity\Id;
 use InvalidArgumentException;
@@ -17,11 +15,10 @@ final class IdType extends Type
 
     public function getSQLDeclaration(array $column, AbstractPlatform $platform): string
     {
-        if ($platform instanceof PostgreSQLPlatform) {
-            return 'BYTEA';
-        }
-
-        return 'BINARY(16)';
+        return $platform->getBinaryTypeDeclarationSQL([
+            'length' => 16,
+            'fixed' => true,
+        ]);
     }
 
     public function convertToPHPValue(mixed $value, AbstractPlatform $platform): ?Id
@@ -53,11 +50,6 @@ final class IdType extends Type
         }
 
         return $value->toBinary();
-    }
-
-    public function getBindingType(): ParameterType
-    {
-        return ParameterType::BINARY;
     }
 
     public function getName(): string
