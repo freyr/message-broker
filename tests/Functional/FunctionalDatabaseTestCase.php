@@ -6,8 +6,10 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
+use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Tools\DsnParser;
 use Doctrine\DBAL\Types\Type;
+use Doctrine\DBAL\Types\Types;
 use Freyr\MessageBroker\Doctrine\Type\IdType;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -41,6 +43,7 @@ abstract class FunctionalDatabaseTestCase extends TestCase
 
         $dsnParser = new DsnParser([
             'mysql' => 'pdo_mysql',
+            'postgresql' => 'pdo_pgsql',
         ]);
         $params = $dsnParser->parse($databaseUrl);
 
@@ -86,21 +89,31 @@ abstract class FunctionalDatabaseTestCase extends TestCase
             }
         }
 
-        $schemaFile = __DIR__.'/schema.sql';
-        $schema = file_get_contents($schemaFile);
+        $schemaManager = self::$connection->createSchemaManager();
 
-        if ($schema === false) {
-            throw new RuntimeException(sprintf('Failed to read schema file: %s', $schemaFile));
+        if ($schemaManager->tablesExist(['message_broker_deduplication'])) {
+            self::$connection->executeStatement('TRUNCATE TABLE message_broker_deduplication');
+
+            return;
         }
 
-        self::$connection->executeStatement($schema);
+        $table = new Table('message_broker_deduplication');
+        $table->addColumn('message_id', IdType::NAME, ['length' => 16]);
+        $table->addColumn('message_name', Types::STRING, ['length' => 255]);
+        $table->addColumn('processed_at', Types::DATETIME_IMMUTABLE);
+        $table->setPrimaryKey(['message_id']);
+        $table->addIndex(['processed_at'], 'idx_dedup_processed_at');
 
-        // Verify critical table exists
-        $result = self::$connection->fetchOne(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'message_broker_deduplication'"
-        );
+        try {
+            $schemaManager->createTable($table);
+        } catch (\Doctrine\DBAL\Exception $e) {
+            // IdType uses BINARY(16) which is not supported on PostgreSQL.
+            // Tests requiring the deduplication table will fail explicitly;
+            // tests that don't need it (e.g. OrderedOutboxTransportTest) proceed.
+            return;
+        }
 
-        if (!is_numeric($result) || (int) $result !== 1) {
+        if (!$schemaManager->tablesExist(['message_broker_deduplication'])) {
             throw new RuntimeException('Schema applied but message_broker_deduplication table not found');
         }
     }
