@@ -19,8 +19,9 @@ use Freyr\MessageBroker\Serializer\WireMessage;
  * The schema comes from the committed local files; the registry is consulted
  * once per message_name (cached) for the frame's schema id. Registry failures
  * here are transient by definition — the relay backs off the lane head and
- * retries forever (D17); conformance failures cannot happen, they were
- * rejected at produce time by AvroWireValidator.
+ * retries forever (D17); conformance failures should have been rejected at
+ * produce time by AvroWireValidator — if it is not wired on the lane, a
+ * non-conforming row blocks the lane until manually removed.
  */
 final class AvroSerializer implements Serializer
 {

@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Tests\Unit\Serializer\Avro;
 
 use Apache\Avro\Datum\AvroIOBinaryDecoder;
 use Apache\Avro\Datum\AvroIODatumReader;
+use Apache\Avro\Datum\AvroIOTypeException;
 use Apache\Avro\IO\AvroStringIO;
 use Apache\Avro\Schema\AvroSchema;
 use Freyr\MessageBroker\Serializer\Avro\AvroSerializer;
@@ -87,5 +88,21 @@ final class AvroSerializerTest extends TestCase
             ->serialize([
                 'payload' => [],
             ]);
+    }
+
+    public function testNonConformingPayloadPropagatesAvroIoTypeException(): void
+    {
+        $document = $this->document();
+        $document['payload'] = [
+            'order_id' => 'o-1',
+            // total_cents missing — does not conform to the OrderPlaced schema.
+        ];
+
+        // Pinned deliberately: at the relay this exception blocks the lane
+        // head forever, so wrapping or changing it must be a conscious decision.
+        $this->expectException(AvroIOTypeException::class);
+
+        $this->serializer()
+            ->serialize($document);
     }
 }
