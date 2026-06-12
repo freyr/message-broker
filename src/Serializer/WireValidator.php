@@ -13,6 +13,9 @@ namespace Freyr\MessageBroker\Serializer;
  * Wired per OutboxProducer (= per lane); must match the lane's relay-side
  * Serializer — a userland configuration responsibility. Throws
  * InvalidArgumentException when the document cannot be published.
+ * Configuration faults (missing, unreadable, or invalid schema file) surface
+ * as RuntimeException instead — intentionally NOT InvalidArgumentException,
+ * because a broken deploy must not be handled like a bad message.
  */
 interface WireValidator
 {

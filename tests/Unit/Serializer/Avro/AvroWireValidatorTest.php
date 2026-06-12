@@ -23,6 +23,8 @@ final class AvroWireValidatorTest extends TestCase
             ->assertPublishable([
                 'metadata' => [
                     'message_name' => 'order.placed',
+                    'message_id' => '0197a3a4-7e3a-7e3a-8e3a-7e3a7e3a7e3a',
+                    'created_at' => 1718000000000,
                 ],
                 'payload' => [
                     'order_id' => 'o-1',
@@ -31,6 +33,39 @@ final class AvroWireValidatorTest extends TestCase
             ]);
 
         $this->expectNotToPerformAssertions();
+    }
+
+    public function testDocumentWithoutMetadataSectionIsRejected(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/metadata and payload/');
+
+        $this->validator()
+            ->assertPublishable([
+                'payload' => [
+                    'order_id' => 'o-1',
+                    'total_cents' => 100,
+                ],
+            ]);
+    }
+
+    public function testMetadataMissingIdOrCreatedAtIsRejected(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/message_id/');
+
+        $this->validator()
+            ->assertPublishable([
+                'metadata' => [
+                    'message_name' => 'order.placed',
+                    // message_id and created_at missing — the serializer
+                    // would reject this document at relay time.
+                ],
+                'payload' => [
+                    'order_id' => 'o-1',
+                    'total_cents' => 100,
+                ],
+            ]);
     }
 
     public function testNonConformingPayloadIsRejected(): void
@@ -42,6 +77,8 @@ final class AvroWireValidatorTest extends TestCase
             ->assertPublishable([
                 'metadata' => [
                     'message_name' => 'order.placed',
+                    'message_id' => '0197a3a4-7e3a-7e3a-8e3a-7e3a7e3a7e3a',
+                    'created_at' => 1718000000000,
                 ],
                 'payload' => [
                     'order_id' => 'o-1',
@@ -58,6 +95,8 @@ final class AvroWireValidatorTest extends TestCase
             ->assertPublishable([
                 'metadata' => [
                     'message_name' => 'order.unknown',
+                    'message_id' => '0197a3a4-7e3a-7e3a-8e3a-7e3a7e3a7e3a',
+                    'created_at' => 1718000000000,
                 ],
                 'payload' => [],
             ]);

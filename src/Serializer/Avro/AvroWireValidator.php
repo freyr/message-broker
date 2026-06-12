@@ -31,9 +31,15 @@ final class AvroWireValidator implements WireValidator
             throw new \InvalidArgumentException('Wire document must contain metadata and payload sections');
         }
 
+        // Mirror AvroSerializer's full metadata contract: if this validator
+        // passes, the lane's serializer must be able to encode the document.
         $messageName = $metadata['message_name'] ?? null;
-        if (!is_string($messageName)) {
-            throw new \InvalidArgumentException('Wire metadata must contain message_name');
+        $messageId = $metadata['message_id'] ?? null;
+        $createdAt = $metadata['created_at'] ?? null;
+        if (!is_string($messageName) || !is_string($messageId) || !is_int($createdAt)) {
+            throw new \InvalidArgumentException(
+                'Wire metadata must contain message_name (string), message_id (string) and created_at (epoch ms int)',
+            );
         }
 
         $writer = $this->writers[$messageName]
