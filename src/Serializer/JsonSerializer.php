@@ -6,13 +6,8 @@ namespace Freyr\MessageBroker\Serializer;
 
 final readonly class JsonSerializer implements Serializer
 {
-    public function serialize(array $wire): string
+    public function serialize(array $wire): WireMessage
     {
-        return json_encode($wire, JSON_THROW_ON_ERROR);
-    }
-
-    public function contentType(): string
-    {
-        return 'application/json';
+        return new WireMessage(bytes: json_encode($wire, JSON_THROW_ON_ERROR), contentType: 'application/json');
     }
 }

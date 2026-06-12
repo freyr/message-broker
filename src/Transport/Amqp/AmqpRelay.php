@@ -116,11 +116,12 @@ final class AmqpRelay
         }
 
         foreach ($batch as $record) {
-            $message = new AMQPMessage($this->serializer->serialize($record->body), [
-                'content_type' => $this->serializer->contentType(),
+            $wire = $this->serializer->serialize($record->body);
+            $message = new AMQPMessage($wire->bytes, [
+                'content_type' => $wire->contentType,
                 'message_id' => $record->id,
                 'delivery_mode' => AMQPMessage::DELIVERY_MODE_PERSISTENT,
-                'application_headers' => new AMQPTable($record->headers),
+                'application_headers' => new AMQPTable(array_merge($record->headers, $wire->headers)),
             ]);
             $routingKey = str_replace('{message_name}', $record->messageName, $this->publish->routingKeyTemplate);
             $this->amqp->basic_publish($message, $this->publish->exchange, $routingKey);
