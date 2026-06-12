@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\DeadLetter;
 
+use Freyr\MessageBroker\Time\EpochMillis;
+use Symfony\Component\Uid\Uuid;
 use Throwable;
 
 /**
@@ -41,7 +43,29 @@ final readonly class DeadLetter
         Throwable $error,
         int $attempts,
     ): self {
-        // TODO slice 1: id generation, Clock::now(), error chain flattening.
-        throw new \LogicException('skeleton');
+        return new self(
+            id: Uuid::v7()->toString(),
+            source: $source,
+            messageId: $messageId,
+            messageName: $messageName,
+            body: $body,
+            headers: $headers,
+            errorClass: $error::class,
+            errorMessage: self::flattenMessages($error),
+            errorTrace: $error->getTraceAsString(),
+            attempts: $attempts,
+            failedAt: EpochMillis::now(),
+        );
+    }
+
+    /** The full previous-exception chain, root cause last. */
+    private static function flattenMessages(Throwable $error): string
+    {
+        $messages = [];
+        for ($current = $error; $current !== null; $current = $current->getPrevious()) {
+            $messages[] = $current->getMessage();
+        }
+
+        return implode(' <- ', $messages);
     }
 }

@@ -34,9 +34,14 @@ final readonly class PdoDeduplicationStore
         return $statement->rowCount() === 1;
     }
 
-    public function cleanup(int $olderThanMs): int
+    /** Prune entries created before the given instant. @return int rows removed */
+    public function cleanup(int $beforeEpochMs): int
     {
-        // TODO slice 1: DELETE ... WHERE created_at < :threshold, return count.
-        return 0;
+        $statement = $this->pdo->prepare('DELETE FROM message_deduplication WHERE created_at < :threshold');
+        $statement->execute([
+            'threshold' => EpochMillis::toDateTime($beforeEpochMs)->format('Y-m-d H:i:s.v'),
+        ]);
+
+        return $statement->rowCount();
     }
 }

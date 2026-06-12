@@ -33,5 +33,15 @@ abstract class FunctionalTestCase extends TestCase
     protected function setUp(): void
     {
         self::$pdo->exec('DELETE FROM outbox_messages');
+        self::$pdo->exec('DELETE FROM message_deduplication');
+        self::$pdo->exec('DELETE FROM dead_letters');
+    }
+
+    protected static function fetchInt(string $sql): int
+    {
+        $statement = self::$pdo->query($sql);
+        self::assertNotFalse($statement);
+
+        return (int) $statement->fetchColumn();
     }
 }

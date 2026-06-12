@@ -82,6 +82,21 @@ final readonly class OutboxStore
     }
 
     /**
+     * Batched variant for the relay's batched drain.
+     *
+     * @param list<string> $ids
+     * @param positive-int $chunkSize
+     */
+    public function deleteBatch(array $ids, int $chunkSize = 500): void
+    {
+        foreach (array_chunk($ids, $chunkSize) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $statement = $this->pdo->prepare("DELETE FROM outbox_messages WHERE id IN ({$placeholders})");
+            $statement->execute($chunk);
+        }
+    }
+
+    /**
      * Transient publish failure: bump the head's available_at, increment
      * attempts. The lane waits out the backoff — there is no exhaustion,
      * no relay-side DLQ; a long-blocked lane is an operational alert.

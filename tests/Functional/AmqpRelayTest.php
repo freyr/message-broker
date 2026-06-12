@@ -6,9 +6,11 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\OutboxProducer;
+use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonSerializer;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
+use Freyr\MessageBroker\Tests\Fixtures\RecordingErrorHandler;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpRelay;
 use PhpAmqpLib\Channel\AMQPChannel;
@@ -129,6 +131,51 @@ final class AmqpRelayTest extends FunctionalTestCase
         self::assertSame(0, $published, 'nothing may overtake a backing-off head (D17)');
         self::assertSame(2, (int) self::$pdo->query('SELECT COUNT(*) FROM outbox_messages')->fetchColumn());
         self::assertNull($this->channel->basic_get(self::QUEUE, no_ack: true));
+    }
+
+    public function testPublishFailureBacksOffHeadInvokesErrorHandlerAndBlocksLane(): void
+    {
+        $head = OrderPlaced::create('o-1', 100);
+        $next = OrderPlaced::create('o-1', 200);
+        $this->producer->produce($head);
+        $this->producer->produce($next);
+
+        $errorHandler = new RecordingErrorHandler();
+        $badChannel = self::$amqp->channel();
+        $failing = new AmqpRelay(
+            outbox: $this->store,
+            amqp: $badChannel,
+            publish: new AmqpPublishConfig(exchange: 'missing_exchange_404'),
+            serializer: new JsonSerializer(),
+            lane: 'orders',
+            backoff: Backoff::exponential(initialDelayMs: 60_000, maxDelayMs: 600_000),
+            errorHandler: $errorHandler,
+        );
+
+        self::assertSame(0, $failing->drainOnce());
+
+        // Nothing left the outbox; only the head was backed off.
+        self::assertSame(2, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
+        self::assertSame(
+            1,
+            self::fetchInt(
+                "SELECT COUNT(*) FROM outbox_messages WHERE id = '{$head->id}'
+                 AND attempts = 1 AND available_at > NOW(3)",
+            ),
+            'head must be backed off into the future with attempts incremented',
+        );
+        self::assertSame(
+            1,
+            self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE id = '{$next->id}' AND attempts = 0"),
+            'rows behind the head stay untouched',
+        );
+
+        self::assertCount(1, $errorHandler->calls);
+        self::assertSame($head->id, $errorHandler->calls[0]['context']['message_id']);
+        self::assertSame(1, $errorHandler->calls[0]['context']['attempt']);
+
+        // A healthy relay still cannot overtake the backing-off head (D17).
+        self::assertSame(0, $this->relay()->drainOnce());
     }
 
     public function testDrainTouchesOnlyItsOwnLane(): void
