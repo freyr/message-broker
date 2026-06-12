@@ -12,7 +12,7 @@ namespace Freyr\MessageBroker\Serializer;
  */
 final readonly class WireMessage
 {
-    /** @param array<string, int|string> $headers */
+    /** @param array<string, int|string> $headers The narrow scalar type is intentional: transport headers are scalar values; do not widen to mixed. */
     public function __construct(
         public string $bytes,
         public string $contentType,
