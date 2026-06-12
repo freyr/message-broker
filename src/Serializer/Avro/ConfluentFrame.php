@@ -20,7 +20,11 @@ final readonly class ConfluentFrame
     public function __construct(
         public int $schemaId,
         public string $avroBytes,
-    ) {}
+    ) {
+        if ($schemaId < 0 || $schemaId > 0x7FFFFFFF) {
+            throw new \InvalidArgumentException(sprintf('Confluent schema id out of range: %d', $schemaId));
+        }
+    }
 
     public function bytes(): string
     {

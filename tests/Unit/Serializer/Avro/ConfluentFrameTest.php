@@ -47,4 +47,26 @@ final class ConfluentFrameTest extends TestCase
 
         ConfluentFrame::parse("\x01\x00\x00\x00\x2APAYLOAD");
     }
+
+    public function testRoundTripAtMaxValidSchemaId(): void
+    {
+        $frame = ConfluentFrame::parse(new ConfluentFrame(0x7FFFFFFF, 'P')->bytes());
+
+        self::assertSame(0x7FFFFFFF, $frame->schemaId);
+        self::assertSame('P', $frame->avroBytes);
+    }
+
+    public function testNegativeSchemaIdIsRejected(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new ConfluentFrame(-1, '');
+    }
+
+    public function testSchemaIdAboveSigned32BitRangeIsRejected(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new ConfluentFrame(0x80000000, '');
+    }
 }
