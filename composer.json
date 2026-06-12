@@ -1,0 +1,64 @@
+{
+    "name": "freyr/message-broker",
+    "description": "Standalone messaging library: transactional outbox, deduplication, per-transport producers and consumers (AMQP, Kafka, SQS) with retries, DLQ and replay",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "outbox-pattern",
+        "inbox-pattern",
+        "event-driven",
+        "deduplication",
+        "amqp",
+        "kafka",
+        "sqs",
+        "dlq"
+    ],
+    "authors": [
+        {
+            "name": "Freyr Development Team"
+        }
+    ],
+    "require": {
+        "php": ">=8.4",
+        "ext-pdo": "*",
+        "symfony/clock": "^8.1",
+        "symfony/console": "^7.0",
+        "symfony/property-access": "^7.0",
+        "symfony/serializer": "^7.0",
+        "symfony/uid": "^7.0"
+    },
+    "require-dev": {
+        "php-amqplib/php-amqplib": "^3.7",
+        "phpstan/phpstan": "^2.1",
+        "phpunit/phpunit": "^11.0|^12.0",
+        "symplify/easy-coding-standard": "^13.0"
+    },
+    "suggest": {
+        "php-amqplib/php-amqplib": "Required for the AMQP transport",
+        "ext-rdkafka": "Required for the Kafka transport (future slice)",
+        "aws/aws-sdk-php": "Required for the SQS transport (future slice)"
+    },
+    "autoload": {
+        "psr-4": {
+            "Freyr\\MessageBroker\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Freyr\\MessageBroker\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "preferred-install": "dist",
+        "optimize-autoloader": true
+    },
+    "scripts": {
+        "phpstan": "phpstan analyse --memory-limit=-1",
+        "ecs": "ecs check",
+        "ecs:fix": "ecs check --fix",
+        "test": "phpunit"
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
