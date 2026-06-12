@@ -90,6 +90,9 @@ final class AmqpConsumer
             }
         }
 
+        // Transient deserialize failures intentionally propagate past this
+        // cancel; the unacked delivery is requeued on connection close —
+        // do not "fix" with a finally.
         $this->channel->basic_cancel($consumerTag);
     }
 
@@ -118,6 +121,19 @@ final class AmqpConsumer
             $this->acknowledge($delivery);
 
             return;
+        } catch (Throwable $error) {
+            // Observe-then-rethrow: a transient dependency failure (e.g.
+            // schema registry down) must surface to operators before the
+            // process exits and the delivery requeues.
+            $messageId = $properties['message_id'] ?? null;
+            $this->errorHandler?->handle($error, [
+                'queue' => $this->queue->queue,
+                'stage' => 'deserialize',
+                'message_id' => is_string($messageId) ? $messageId : 'unknown',
+                'attempt' => $attempt,
+            ]);
+
+            throw $error;
         }
 
         $binding = $this->handlers->bindingFor($incoming->messageName);
@@ -247,6 +263,8 @@ final class AmqpConsumer
                 'created_at' => $incoming->createdAt,
             ],
             'payload' => $incoming->payload,
+            // INVALID_UTF8_SUBSTITUTE: substitution preferred over a failed
+            // dead-letter write.
         ], JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
 
         $this->storeDeadLetter(
