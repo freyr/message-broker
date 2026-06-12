@@ -281,21 +281,24 @@ final class AvroEndToEndTest extends FunctionalTestCase
         self::assertSame(1, $this->relay->drainOnce());
 
         // Consume with a broken registry URL — RegistryUnavailable must propagate.
-        $this->expectException(RegistryUnavailable::class);
-
-        $this->consumer(registryUrl: 'http://apicurio:9')
-            ->run(messageLimit: 1, idleTimeoutSec: 10);
-
-        // The assertions below are unreachable when the exception propagates,
-        // but the exception itself proves no dead-lettering happened.
         // tearDown closes the channel, requeuing the unacked delivery; setUp's
         // queue_purge cleans it for the next test.
+        try {
+            $this->consumer(registryUrl: 'http://apicurio:9')
+                ->run(messageLimit: 1, idleTimeoutSec: 10);
+            self::fail('RegistryUnavailable was expected to propagate out of run()');
+        } catch (RegistryUnavailable) {
+            // expected — delivery stays unacked and requeues on channel close
+        }
+
+        self::assertCount(0, $this->handled);
+        self::assertSame(
+            0,
+            self::fetchInt('SELECT COUNT(*) FROM dead_letters'),
+            'registry outage must never mass-DLQ valid messages (A10)',
+        );
     }
 
-    /**
-     * @doesNotPerformAssertions
-     * See inline assertSame calls — PHPUnit counts them.
-     */
     public function testUnregisteredSchemaBlocksLaneWithAlertNotLoss(): void
     {
         // Separate lane so the blocked head cannot interfere with the main lane.
