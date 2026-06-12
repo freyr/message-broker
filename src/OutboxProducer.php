@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker;
 
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Serializer\WireValidator;
 
 /**
  * Shared outbox producer — the single write-side entry point.
@@ -23,6 +24,7 @@ final readonly class OutboxProducer
     public function __construct(
         private OutboxStore $store,
         private string $lane = 'default',
+        private ?WireValidator $validator = null,
     ) {}
 
     /** @param array<string, mixed> $headers */
@@ -50,8 +52,13 @@ final readonly class OutboxProducer
             throw new \InvalidArgumentException('Message key and name must be non-empty');
         }
 
+        $wire = $message->wire();
+
         // Structural check: the wire document must serialize.
-        // TODO: per-lane serializer conformance (e.g. Avro schema) in slice 5.
-        json_encode($message->wire(), JSON_THROW_ON_ERROR);
+        json_encode($wire, JSON_THROW_ON_ERROR);
+
+        // Per-lane serializer conformance (D17 poison prevention, spec A3):
+        // e.g. AvroWireValidator on Avro lanes — local schema, no registry.
+        $this->validator?->assertPublishable($wire);
     }
 }
