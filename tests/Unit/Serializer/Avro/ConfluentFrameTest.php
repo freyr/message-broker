@@ -69,4 +69,15 @@ final class ConfluentFrameTest extends TestCase
 
         new ConfluentFrame(0x80000000, '');
     }
+
+    public function testOutOfRangeSchemaIdInReceivedFrameIsMalformedMessage(): void
+    {
+        // 0xFFFFFFFF = 4294967295, beyond 0x7FFFFFFF — wire corruption on the
+        // receive path must be MalformedMessage, not InvalidArgumentException,
+        // so the consumer dead-letters it instead of crashing into an infinite
+        // redeliver loop.
+        $this->expectException(MalformedMessage::class);
+
+        ConfluentFrame::parse("\x00\xFF\xFF\xFF\xFF".'PAYLOAD');
+    }
 }

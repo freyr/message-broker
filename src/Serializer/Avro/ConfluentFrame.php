@@ -46,6 +46,15 @@ final readonly class ConfluentFrame
             throw new MalformedMessage('Unreadable Confluent schema id');
         }
 
+        // unpack('N') is unsigned: values > 0x7FFFFFFF are wire-level corruption.
+        // Throw MalformedMessage here (not inside the constructor) so the
+        // consumer dead-letters rather than crashes into an infinite redeliver
+        // loop.  The constructor guard stays for the encode-side programmer-error
+        // path.
+        if ($unpacked[1] > 0x7FFFFFFF) {
+            throw new MalformedMessage(sprintf('Confluent schema id out of valid range: %d', $unpacked[1]));
+        }
+
         return new self($unpacked[1], substr($framed, self::HEADER_LENGTH));
     }
 }

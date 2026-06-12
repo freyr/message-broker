@@ -238,13 +238,21 @@ final class AmqpConsumer
         Throwable $error,
         int $attempt,
     ): void {
+        $appHeaders = $this->applicationHeaders($properties);
+
+        // Prefer x-message-id / x-message-name from application headers when
+        // present (set by the Avro relay): improves dlq:show triage for
+        // stage-1 failures where the frame was parsed but the schema id was
+        // rejected.  Fall back to the AMQP message_id property and 'unknown'.
+        $xMessageId = $appHeaders['x-message-id'] ?? null;
+        $xMessageName = $appHeaders['x-message-name'] ?? null;
         $messageId = $properties['message_id'] ?? null;
 
         $this->storeDeadLetter(
-            messageId: is_string($messageId) ? $messageId : 'unknown',
-            messageName: 'unknown',
+            messageId: is_string($xMessageId) ? $xMessageId : (is_string($messageId) ? $messageId : 'unknown'),
+            messageName: is_string($xMessageName) ? $xMessageName : 'unknown',
             body: $delivery->getBody(),
-            headers: $this->applicationHeaders($properties),
+            headers: $appHeaders,
             error: $error,
             attempt: $attempt,
         );

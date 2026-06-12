@@ -38,4 +38,22 @@ trait RegistersSchemas
             throw new RuntimeException("Cannot register schema for '{$subject}' at {$url}");
         }
     }
+
+    /**
+     * Deletes all versions of a subject from the registry (soft delete).
+     * Used in test teardown to keep the registry clean between runs.
+     */
+    private static function deleteSchema(string $subject): void
+    {
+        $url = self::registryUrl().'/subjects/'.rawurlencode($subject);
+        file_get_contents($url, false, stream_context_create([
+            'http' => [
+                'method' => 'DELETE',
+                'header' => 'Content-Type: application/vnd.schemaregistry.v1+json',
+                'ignore_errors' => true,
+                'timeout' => 5.0,
+            ],
+        ]));
+        // Ignore errors: if the subject does not exist the call is a no-op.
+    }
 }

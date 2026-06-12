@@ -99,6 +99,11 @@ final class AvroEndToEndTest extends FunctionalTestCase
         $channel->exchange_delete('mb_avro_unregistered');
         $channel->close();
         self::$amqp->close();
+
+        // The block-then-drain test registers 'order.never_registered' to prove
+        // the lane drains after CI registration.  Delete it here so other tests
+        // (HttpSchemaRegistryTest) can still assert that the subject is absent.
+        self::deleteSchema('order.never_registered');
     }
 
     protected function setUp(): void
@@ -299,7 +304,7 @@ final class AvroEndToEndTest extends FunctionalTestCase
         );
     }
 
-    public function testUnregisteredSchemaBlocksLaneWithAlertNotLoss(): void
+    public function testUnregisteredSchemaBlocksLaneThenDrainsAfterRegistration(): void
     {
         // Separate lane so the blocked head cannot interfere with the main lane.
         $unregisteredLane = 'avro_unregistered';
@@ -316,6 +321,9 @@ final class AvroEndToEndTest extends FunctionalTestCase
 
         $errorHandler = new RecordingErrorHandler();
 
+        // Tiny backoff so the backed-off head becomes available again almost
+        // immediately — this lets the second drainOnce() succeed without a
+        // long sleep.
         $unregisteredRelay = new AmqpRelay(
             outbox: $unregisteredOutbox,
             amqp: $unregisteredRelayChannel,
@@ -323,9 +331,13 @@ final class AvroEndToEndTest extends FunctionalTestCase
             serializer: new AvroSerializer(
                 $this->schemas,
                 // Fresh registry instance — no cache from the main tests.
+                // HttpSchemaRegistry only caches successes; a SchemaNotFound on
+                // the first drain leaves no cache entry, so the SAME instance
+                // retries the lookup after registration.
                 new HttpSchemaRegistry(self::registryUrl()),
             ),
             lane: $unregisteredLane,
+            backoff: Backoff::exponential(initialDelayMs: 1, maxDelayMs: 1),
             errorHandler: $errorHandler,
         );
 
@@ -356,6 +368,21 @@ final class AvroEndToEndTest extends FunctionalTestCase
             "SELECT attempts FROM outbox_messages WHERE lane = '{$unregisteredLane}' LIMIT 1",
         );
         self::assertSame(1, $attempts, 'head must be backed off with attempts = 1');
+
+        // --- Phase 2: register the schema and prove the lane drains ---
+
+        // Play the CI registration role for 'order.never_registered'.
+        $schemaJson = file_get_contents(self::SCHEMA_PATH);
+        self::assertNotFalse($schemaJson);
+        self::registerSchema('order.never_registered', $schemaJson);
+
+        // The backoff is 1 ms — the head is already available.  Reuse the
+        // SAME relay instance (proving failed lookups are not cached) and drain.
+        usleep(5_000); // 5 ms — well past the 1 ms backoff
+        self::assertSame(1, $unregisteredRelay->drainOnce(), 'lane must drain after schema is registered');
+
+        $laneCountAfter = self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE lane = '{$unregisteredLane}'");
+        self::assertSame(0, $laneCountAfter, 'outbox must be empty after the lane drains');
 
         $unregisteredRelayChannel->close();
     }
