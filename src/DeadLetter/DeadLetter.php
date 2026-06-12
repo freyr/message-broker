@@ -15,6 +15,7 @@ use Throwable;
  */
 final readonly class DeadLetter
 {
+    /** @param array<string, mixed> $headers */
     public function __construct(
         public string $id,
         public string $source,        // queue / topic / lane it failed on
@@ -30,6 +31,7 @@ final readonly class DeadLetter
         public ?int $replayedAt = null,
     ) {}
 
+    /** @param array<string, mixed> $headers */
     public static function fromFailure(
         string $source,
         string $messageId,

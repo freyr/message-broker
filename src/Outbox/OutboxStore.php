@@ -66,7 +66,10 @@ final readonly class OutboxStore
         $statement->bindValue('limit', $limit, PDO::PARAM_INT);
         $statement->execute();
 
-        return array_map(self::hydrate(...), $statement->fetchAll(PDO::FETCH_ASSOC));
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_map(self::hydrate(...), $rows);
     }
 
     /** Successful publish — the row's job is done. Rows leave ONLY this way. */
@@ -94,19 +97,58 @@ final readonly class OutboxStore
         ]);
     }
 
+    /** @param array<string, mixed> $row */
     private static function hydrate(array $row): OutboxRecord
     {
         return new OutboxRecord(
-            id: $row['id'],
-            lane: $row['lane'],
-            messageName: $row['message_name'],
-            key: $row['message_key'],
-            body: json_decode((string) $row['body'], true, 512, JSON_THROW_ON_ERROR),
-            headers: json_decode((string) $row['headers'], true, 512, JSON_THROW_ON_ERROR),
-            createdAt: self::epochMilliseconds($row['created_at']),
-            attempts: (int) $row['attempts'],
-            availableAt: self::epochMilliseconds($row['available_at']),
+            id: self::stringColumn($row, 'id'),
+            lane: self::stringColumn($row, 'lane'),
+            messageName: self::stringColumn($row, 'message_name'),
+            key: self::stringColumn($row, 'message_key'),
+            body: self::jsonColumn($row, 'body'),
+            headers: self::jsonColumn($row, 'headers'),
+            createdAt: self::epochMilliseconds(self::stringColumn($row, 'created_at')),
+            attempts: self::intColumn($row, 'attempts'),
+            availableAt: self::epochMilliseconds(self::stringColumn($row, 'available_at')),
         );
+    }
+
+    /** @param array<string, mixed> $row */
+    private static function stringColumn(array $row, string $column): string
+    {
+        $value = $row[$column] ?? null;
+        if (!is_string($value)) {
+            throw new \RuntimeException("Outbox column '{$column}' is not a string");
+        }
+
+        return $value;
+    }
+
+    /** @param array<string, mixed> $row */
+    private static function intColumn(array $row, string $column): int
+    {
+        $value = $row[$column] ?? null;
+        if (!is_int($value) && !(is_string($value) && is_numeric($value))) {
+            throw new \RuntimeException("Outbox column '{$column}' is not an integer");
+        }
+
+        return (int) $value;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     *
+     * @return array<string, mixed>
+     */
+    private static function jsonColumn(array $row, string $column): array
+    {
+        $decoded = json_decode(self::stringColumn($row, $column), true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($decoded)) {
+            throw new \RuntimeException("Outbox column '{$column}' does not hold a JSON object");
+        }
+
+        /** @var array<string, mixed> $decoded */
+        return $decoded;
     }
 
     private static function epochMilliseconds(string $storedDateTime): int

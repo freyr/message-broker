@@ -10,8 +10,8 @@ use PDO;
 final readonly class PdoDeadLetterStore
 {
     public function __construct(
-        private PDO $pdo,
-        private Platform $platform,
+        private PDO $pdo, // @phpstan-ignore property.onlyWritten (skeleton: read once slice 1 implements the methods)
+        private Platform $platform, // @phpstan-ignore property.onlyWritten (skeleton: read once slice 1 implements the methods)
     ) {}
 
     public function store(DeadLetter $deadLetter): void

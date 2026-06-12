@@ -33,6 +33,7 @@ class Message
     public readonly string $id;
     public readonly int $createdAt;
 
+    /** @param array<string, mixed> $payload */
     protected function __construct(
         public readonly string $key,
         public readonly string $name,

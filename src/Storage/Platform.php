@@ -30,6 +30,10 @@ interface Platform
     /** Insert-or-ignore for the deduplication table. */
     public function insertDeduplicationSql(): string;
 
-    /** DDL for outbox_messages, message_deduplication, dead_letters. */
+    /**
+     * DDL for outbox_messages, message_deduplication, dead_letters.
+     *
+     * @return list<string>
+     */
     public function schemaSql(): array;
 }

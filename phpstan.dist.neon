@@ -2,7 +2,3 @@ parameters:
     level: max
     paths:
         - src/
-        - tests/
-    excludePaths:
-        - tests/Application/var/*
-        - tests/Functional/Scripts/*

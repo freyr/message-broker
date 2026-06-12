@@ -25,6 +25,7 @@ final readonly class OutboxProducer
         private string $lane = 'default',
     ) {}
 
+    /** @param array<string, mixed> $headers */
     public function produce(Message $message, array $headers = []): void
     {
         // Poison prevention at the door (D17): a row that reaches the outbox

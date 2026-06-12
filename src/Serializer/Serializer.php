@@ -13,7 +13,10 @@ namespace Freyr\MessageBroker\Serializer;
  */
 interface Serializer
 {
-    /** @param array{metadata: array<string, mixed>, payload: array<string, mixed>} $wire */
+    /**
+     * @param array<string, mixed> $wire the two-section document
+     *        (metadata + payload sections, see Message::wire())
+     */
     public function serialize(array $wire): string;
 
     /** e.g. 'application/json', 'avro/binary' */

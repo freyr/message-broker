@@ -45,7 +45,7 @@ final class AmqpConsumer
         private readonly PDO $pdo,
         private readonly PdoDeduplicationStore $deduplication,
         private readonly AmqpRetryPolicy $retryPolicy,
-        private readonly PdoDeadLetterStore $deadLetters,
+        private readonly PdoDeadLetterStore $deadLetters, // @phpstan-ignore property.onlyWritten (skeleton: read once slice 1 implements dead-lettering)
         private readonly string $name = 'default', // dedup scope
         // TODO slice 1: optional ErrorHandler hook for logging/metrics.
     ) {}
@@ -63,8 +63,11 @@ final class AmqpConsumer
 
     private function handle(AMQPMessage $delivery): void
     {
+        /** @var array<string, mixed> $properties */
+        $properties = $delivery->get_properties();
+
         try {
-            $incoming = $this->deserializer->deserialize($delivery->getBody(), $delivery->get_properties());
+            $incoming = $this->deserializer->deserialize($delivery->getBody(), $properties);
         } catch (Throwable $error) {
             // Malformed never improves: no retry, straight to the DLQ.
             $this->deadLetterRaw($delivery, $error);

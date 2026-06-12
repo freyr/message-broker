@@ -25,6 +25,14 @@ final readonly class HandlerRegistry
 
     public function denormalize(IncomingMessage $incoming, Binding $binding): object
     {
-        return $this->denormalizer->denormalize($incoming->payload, $binding->class);
+        $message = $this->denormalizer->denormalize($incoming->payload, $binding->class);
+
+        if (!$message instanceof $binding->class) {
+            throw new \RuntimeException(
+                "Denormalizing '{$incoming->messageName}' did not produce a {$binding->class}",
+            );
+        }
+
+        return $message;
     }
 }

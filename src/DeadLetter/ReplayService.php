@@ -14,8 +14,8 @@ use Freyr\MessageBroker\Outbox\OutboxStore;
 final readonly class ReplayService
 {
     public function __construct(
-        private PdoDeadLetterStore $deadLetters,
-        private OutboxStore $outbox,
+        private PdoDeadLetterStore $deadLetters, // @phpstan-ignore property.onlyWritten (skeleton: read once slice 1 implements replay)
+        private OutboxStore $outbox, // @phpstan-ignore property.onlyWritten (skeleton: read once slice 1 implements replay)
     ) {}
 
     public function replay(string $deadLetterId): void

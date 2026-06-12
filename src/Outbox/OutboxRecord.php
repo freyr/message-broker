@@ -10,6 +10,10 @@ namespace Freyr\MessageBroker\Outbox;
  */
 final readonly class OutboxRecord
 {
+    /**
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $headers
+     */
     public function __construct(
         public string $id,            // UUIDv7, from Message
         public string $lane,          // producer/relay seam

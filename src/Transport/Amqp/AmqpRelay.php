@@ -48,6 +48,7 @@ final class AmqpRelay
     public function run(): void
     {
         // TODO slice 1: pcntl signal handling, idle backoff.
+        // @phpstan-ignore while.alwaysTrue (long-running worker loop, exits via signals in slice 1)
         while (true) {
             $this->drainOnce();
         }

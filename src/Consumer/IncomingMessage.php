@@ -12,6 +12,10 @@ namespace Freyr\MessageBroker\Consumer;
  */
 final readonly class IncomingMessage
 {
+    /**
+     * @param array<string, mixed> $payload
+     * @param array<string, mixed> $headers
+     */
     public function __construct(
         public string $messageId,
         public string $messageName,

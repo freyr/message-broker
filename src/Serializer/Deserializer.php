@@ -13,5 +13,6 @@ use Freyr\MessageBroker\Consumer\IncomingMessage;
  */
 interface Deserializer
 {
+    /** @param array<string, mixed> $headers */
     public function deserialize(string $bytes, array $headers = []): IncomingMessage;
 }

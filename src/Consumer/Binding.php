@@ -17,6 +17,7 @@ use Closure;
  */
 final readonly class Binding
 {
+    /** @param class-string $class */
     public function __construct(
         public string $class,
         public Closure $handler,
