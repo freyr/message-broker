@@ -41,6 +41,16 @@ final class FileSchemaStoreTest extends TestCase
         new FileSchemaStore([])->schemaFor('order.unknown');
     }
 
+    public function testMalformedSchemaFileThrowsDomainException(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('is not valid');
+
+        new FileSchemaStore([
+            'order.malformed' => __DIR__.'/../../../Fixtures/schemas/malformed.avsc',
+        ])->schemaFor('order.malformed');
+    }
+
     public function testUnreadableFileThrows(): void
     {
         $this->expectException(\RuntimeException::class);

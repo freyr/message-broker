@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Serializer\Avro;
 
 use Apache\Avro\Schema\AvroSchema;
+use Apache\Avro\Schema\AvroSchemaParseException;
 
 /**
  * The committed-schema source of truth (spec A1): hand-written payload-record
@@ -46,12 +47,23 @@ final class FileSchemaStore
 
     public function schemaFor(string $messageName): AvroSchema
     {
-        if (!isset($this->parsed[$messageName])) {
-            $schema = AvroSchema::parse($this->schemaJsonFor($messageName));
-            assert($schema instanceof AvroSchema);
-            $this->parsed[$messageName] = $schema;
+        if (isset($this->parsed[$messageName])) {
+            return $this->parsed[$messageName];
         }
 
-        return $this->parsed[$messageName];
+        try {
+            $schema = AvroSchema::parse($this->schemaJsonFor($messageName));
+        } catch (AvroSchemaParseException $error) {
+            throw new \RuntimeException(
+                "Avro schema for message '{$messageName}' is not valid: {$error->getMessage()}",
+                previous: $error,
+            );
+        }
+
+        if (!$schema instanceof AvroSchema) {
+            throw new \RuntimeException("Avro schema for message '{$messageName}' did not parse to an AvroSchema");
+        }
+
+        return $this->parsed[$messageName] = $schema;
     }
 }
