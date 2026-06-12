@@ -28,12 +28,14 @@
         "symfony/uid": "^7.0"
     },
     "require-dev": {
+        "apache/avro": "^1.12",
         "php-amqplib/php-amqplib": "^3.7",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.0|^12.0",
         "symplify/easy-coding-standard": "^13.0"
     },
     "suggest": {
+        "apache/avro": "Required for the Avro serializer (Confluent wire format)",
         "php-amqplib/php-amqplib": "Required for the AMQP transport",
         "ext-rdkafka": "Required for the Kafka transport (future slice)",
         "aws/aws-sdk-php": "Required for the SQS transport (future slice)"
