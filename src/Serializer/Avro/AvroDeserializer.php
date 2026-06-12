@@ -6,7 +6,6 @@ namespace Freyr\MessageBroker\Serializer\Avro;
 
 use Apache\Avro\Datum\AvroIOBinaryDecoder;
 use Apache\Avro\Datum\AvroIODatumReader;
-use Apache\Avro\IO\AvroStringIO;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\Serializer\Deserializer;
 use Freyr\MessageBroker\Serializer\MalformedMessage;
@@ -48,19 +47,7 @@ final class AvroDeserializer implements Deserializer
         $schema = $this->registry->schemaById($frame->schemaId);
         $reader = $this->readers[$frame->schemaId] ??= new AvroIODatumReader($schema, $schema);
 
-        $io = new class($frame->avroBytes) extends AvroStringIO {
-            public bool $hadShortRead = false;
-
-            public function read(mixed $len): string
-            {
-                $result = parent::read($len);
-                if (is_int($len) && $len > 0 && \strlen($result) < $len) {
-                    $this->hadShortRead = true;
-                }
-
-                return $result;
-            }
-        };
+        $io = new TruncationDetectingStringIO($frame->avroBytes);
 
         try {
             $payload = $reader->read(new AvroIOBinaryDecoder($io));
