@@ -18,7 +18,8 @@ services:
       AMQP_USER: guest
       AMQP_PASSWORD: guest
       AMQP_VHOST: "/"
-      AVRO_REGISTRY_URL: "http://apicurio:8080/apis/ccompat/v7"
+      AVRO_REGISTRY_URL: "http://schema-registry:8081"
+      REDIS_DSN: "redis://redis:6379"
     depends_on:
       mysql:
         condition: service_healthy
@@ -26,7 +27,9 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      apicurio:
+      schema-registry:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   mysql:
@@ -78,19 +81,81 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
 
-  apicurio:
-    image: apicurio/apicurio-registry-mem:2.6.13.Final
-    ports:
-      - "8082:8080"
+  # Single-node KRaft broker. Backs Confluent Schema Registry (the _schemas
+  # topic) and is reused by the optional Debezium profile's connect service.
+  kafka:
+    image: confluentinc/cp-kafka:7.7.1
+    environment:
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qg"
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health/ready"]
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+
+  # Confluent Schema Registry (native Confluent API at the root — no ccompat
+  # prefix). Stores schemas in the _schemas topic on the single-node kafka,
+  # so the store topic replication factor must be 1.
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.7.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: "http://0.0.0.0:8081"
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: "PLAINTEXT://kafka:9092"
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: "1"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/subjects >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 20
-      start_period: 20s
+      retries: 10
+
+  # --- Debezium spike (optional; never starts with the default stack) ---
+  # Start with: docker compose --profile debezium up -d
+  # Reuses the default `kafka` broker above. CDC requires the mysql service to
+  # run with ROW binlog; see docker/debezium/README.md for the override + steps.
+  connect:
+    profiles: ["debezium"]
+    image: debezium/connect:2.7.3.Final
+    depends_on:
+      - kafka
+      - mysql
+    environment:
+      BOOTSTRAP_SERVERS: "kafka:9092"
+      GROUP_ID: "mb-debezium"
+      CONFIG_STORAGE_TOPIC: "mb_connect_configs"
+      OFFSET_STORAGE_TOPIC: "mb_connect_offsets"
+      STATUS_STORAGE_TOPIC: "mb_connect_statuses"
+    ports:
+      - "8083:8083"
 
 volumes:
   mysql_data:
   postgres_data:
   rabbitmq_data:
-

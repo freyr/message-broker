@@ -14,7 +14,7 @@ use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
-use Freyr\MessageBroker\Serializer\JsonSerializer;
+use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlacedDto;
@@ -101,13 +101,13 @@ final class EndToEndTest extends FunctionalTestCase
 
         $this->platform = new MySqlPlatform();
         $this->outbox = new OutboxStore(self::$pdo, $this->platform);
-        $this->producer = new OutboxProducer($this->outbox, lane: self::LANE);
+        $this->producer = new OutboxProducer($this->outbox, new JsonWireFormat(), lane: self::LANE);
         $this->deadLetters = new PdoDeadLetterStore(self::$pdo, $this->platform);
         $this->relay = new AmqpRelay(
             outbox: $this->outbox,
             amqp: $this->relayChannel,
             publish: new AmqpPublishConfig(exchange: self::EXCHANGE),
-            serializer: new JsonSerializer(),
+            contentType: JsonWireFormat::CONTENT_TYPE,
             lane: self::LANE,
         );
     }
@@ -196,7 +196,7 @@ final class EndToEndTest extends FunctionalTestCase
 
         // Downstream recovered: replay rides the outbox + relay again.
         $this->handlerFails = false;
-        $replay = new ReplayService($this->deadLetters, $this->outbox);
+        $replay = new ReplayService($this->deadLetters, $this->outbox, new JsonWireFormat());
         $replay->replay($deadLetters[0]->id, lane: self::LANE);
 
         self::assertSame(1, $this->relay->drainOnce());

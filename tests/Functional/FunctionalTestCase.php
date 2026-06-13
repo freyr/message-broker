@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional;
 
+use Freyr\MessageBroker\Serializer\Format;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
 use PDO;
 use PHPUnit\Framework\TestCase;
@@ -12,6 +13,12 @@ use RuntimeException;
 abstract class FunctionalTestCase extends TestCase
 {
     protected static PDO $pdo;
+
+    /** Subclasses producing Avro bodies override this. */
+    protected static function outboxFormat(): Format
+    {
+        return Format::Json;
+    }
 
     public static function setUpBeforeClass(): void
     {
@@ -25,7 +32,10 @@ abstract class FunctionalTestCase extends TestCase
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         ]);
 
-        foreach ((new MySqlPlatform())->schemaSql() as $ddl) {
+        // Force outbox_messages to THIS class's format (body column type
+        // differs); dedup + dead_letters are format-independent (IF NOT EXISTS).
+        self::$pdo->exec('DROP TABLE IF EXISTS outbox_messages');
+        foreach ((new MySqlPlatform())->schemaSql(static::outboxFormat()) as $ddl) {
             self::$pdo->exec($ddl);
         }
     }

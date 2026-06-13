@@ -28,6 +28,18 @@ final class FileSchemaStore
         private readonly array $paths,
     ) {}
 
+    /**
+     * The mapped subjects (= message_names). The schema:register command
+     * drives off exactly this list, so CI registers precisely the subjects
+     * the producer will look up.
+     *
+     * @return list<string>
+     */
+    public function subjects(): array
+    {
+        return array_keys($this->paths);
+    }
+
     public function schemaJsonFor(string $messageName): string
     {
         if (isset($this->raw[$messageName])) {

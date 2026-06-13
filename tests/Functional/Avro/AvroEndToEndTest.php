@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional\Avro;
 
+use Freyr\MessageBroker\Cache\ArrayCachePool;
 use Freyr\MessageBroker\Consumer\Binding;
 use Freyr\MessageBroker\Consumer\HandlerRegistry;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
@@ -14,16 +15,16 @@ use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\Avro\AvroDeserializer;
-use Freyr\MessageBroker\Serializer\Avro\AvroSerializer;
-use Freyr\MessageBroker\Serializer\Avro\AvroWireValidator;
+use Freyr\MessageBroker\Serializer\Avro\AvroWireFormat;
 use Freyr\MessageBroker\Serializer\Avro\FileSchemaStore;
 use Freyr\MessageBroker\Serializer\Avro\HttpSchemaRegistry;
 use Freyr\MessageBroker\Serializer\Avro\RegistryUnavailable;
+use Freyr\MessageBroker\Serializer\Avro\SchemaNotFound;
+use Freyr\MessageBroker\Serializer\Format;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Tests\Fixtures\NeverRegistered;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlacedDto;
-use Freyr\MessageBroker\Tests\Fixtures\RecordingErrorHandler;
 use Freyr\MessageBroker\Tests\Functional\FunctionalTestCase;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
@@ -38,11 +39,13 @@ use Symfony\Component\Serializer\Normalizer\ObjectNormalizer;
 use Symfony\Component\Serializer\Serializer;
 
 /**
- * The slice 2 promise: produce (Avro-validated) → outbox (JSON document) →
- * relay (Confluent-framed Avro + x-* headers) → RabbitMQ → consumer
- * (registry-backed decode) → typed handler — plus the failure circle
- * (DLQ stores a readable, replayable document) and both operational
- * failure modes (registry down; schema never registered).
+ * The Avro promise (slice 3, encode-at-produce): produce (Avro encoded at the
+ * door → outbox `body` = Confluent-framed bytes, envelope in the `metadata`
+ * column) → relay (byte-pump: verbatim body + individual x-message-* headers) →
+ * RabbitMQ → consumer (registry-backed decode) → typed handler — plus the
+ * failure circle (DLQ stores a readable, replayable document) and both
+ * operational failure modes (registry down; schema never registered, which now
+ * fails at produce time, not the relay).
  */
 final class AvroEndToEndTest extends FunctionalTestCase
 {
@@ -52,6 +55,11 @@ final class AvroEndToEndTest extends FunctionalTestCase
     private const string QUEUE = 'mb_avro_e2e_q';
     private const string LANE = 'avro_e2e';
     private const string SCHEMA_PATH = __DIR__.'/../../Fixtures/schemas/order_placed.avsc';
+
+    protected static function outboxFormat(): Format
+    {
+        return Format::Avro;
+    }
 
     private static AMQPStreamConnection $amqp;
 
@@ -93,15 +101,12 @@ final class AvroEndToEndTest extends FunctionalTestCase
         $channel = self::$amqp->channel();
         $channel->queue_delete(self::QUEUE);
         $channel->queue_delete(self::QUEUE.'.wait.100');
-        $channel->queue_delete('mb_avro_unregistered_q');
-        $channel->queue_delete('mb_avro_unregistered_q.wait.100');
         $channel->exchange_delete(self::EXCHANGE);
-        $channel->exchange_delete('mb_avro_unregistered');
         $channel->close();
         self::$amqp->close();
 
-        // The block-then-drain test registers 'order.never_registered' to prove
-        // the lane drains after CI registration.  Delete it here so other tests
+        // The unregistered-schema test registers 'order.never_registered' to prove
+        // produce succeeds after registration.  Delete it here so other tests
         // (HttpSchemaRegistryTest) can still assert that the subject is absent.
         self::deleteSchema('order.never_registered');
     }
@@ -133,15 +138,15 @@ final class AvroEndToEndTest extends FunctionalTestCase
 
         $this->producer = new OutboxProducer(
             $this->outbox,
+            new AvroWireFormat($this->schemas, new HttpSchemaRegistry(self::registryUrl())),
             lane: self::LANE,
-            validator: new AvroWireValidator($this->schemas),
         );
 
         $this->relay = new AmqpRelay(
             outbox: $this->outbox,
             amqp: $this->relayChannel,
             publish: new AmqpPublishConfig(exchange: self::EXCHANGE),
-            serializer: new AvroSerializer($this->schemas, new HttpSchemaRegistry(self::registryUrl())),
+            contentType: AvroWireFormat::CONTENT_TYPE,
             lane: self::LANE,
         );
     }
@@ -200,13 +205,14 @@ final class AvroEndToEndTest extends FunctionalTestCase
         ]);
         self::$pdo->commit();
 
-        // Outbox row body is a JSON document (encode-at-relay proof — raw Avro lives only in AMQP).
-        $outboxBody = self::$pdo->query('SELECT body FROM outbox_messages LIMIT 1')?->fetchColumn();
-        self::assertIsString($outboxBody, 'outbox row must exist');
-        $decoded = json_decode($outboxBody, true);
-        self::assertIsArray($decoded, 'outbox body must be valid JSON');
-        self::assertArrayHasKey('payload', $decoded, 'outbox body must contain payload section');
-        self::assertArrayHasKey('metadata', $decoded, 'outbox body must contain metadata section');
+        // Outbox row body is the FINAL Confluent-framed Avro bytes (encode-at-produce).
+        $row = self::$pdo->query('SELECT metadata, body FROM outbox_messages LIMIT 1')?->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($row, 'outbox row must exist');
+        $frame = \Freyr\MessageBroker\Serializer\Avro\ConfluentFrame::parse((string) $row['body']);
+        self::assertGreaterThan(0, $frame->schemaId, 'body carries a Confluent frame with a registry id');
+        $metadata = json_decode((string) $row['metadata'], true);
+        self::assertSame($message->id, $metadata['message_id'], 'metadata column holds the envelope');
+        self::assertSame('order.placed', $metadata['message_name']);
 
         self::assertSame(1, $this->relay->drainOnce());
         $this->consumer()
@@ -257,7 +263,10 @@ final class AvroEndToEndTest extends FunctionalTestCase
 
         // Downstream recovered: replay rides the outbox + relay again.
         $this->handlerFails = false;
-        $replay = new ReplayService($this->deadLetters, $this->outbox);
+        $replay = new ReplayService($this->deadLetters, $this->outbox, new AvroWireFormat(
+            $this->schemas,
+            new HttpSchemaRegistry(self::registryUrl(), new ArrayCachePool())
+        ));
         $replay->replay($deadLetters[0]->id, lane: self::LANE);
 
         self::assertSame(1, $this->relay->drainOnce());
@@ -289,7 +298,7 @@ final class AvroEndToEndTest extends FunctionalTestCase
         // tearDown closes the channel, requeuing the unacked delivery; setUp's
         // queue_purge cleans it for the next test.
         try {
-            $this->consumer(registryUrl: 'http://apicurio:9')
+            $this->consumer(registryUrl: 'http://schema-registry:9')
                 ->run(messageLimit: 1, idleTimeoutSec: 10);
             self::fail('RegistryUnavailable was expected to propagate out of run()');
         } catch (RegistryUnavailable) {
@@ -304,86 +313,75 @@ final class AvroEndToEndTest extends FunctionalTestCase
         );
     }
 
-    public function testUnregisteredSchemaBlocksLaneThenDrainsAfterRegistration(): void
+    public function testUnregisteredSchemaFailsAtProduceThenSucceedsAfterRegistration(): void
     {
-        // Separate lane so the blocked head cannot interfere with the main lane.
-        $unregisteredLane = 'avro_unregistered';
-        $unregisteredExchange = 'mb_avro_unregistered';
-        $unregisteredQueue = 'mb_avro_unregistered_q';
-
-        $unregisteredRelayChannel = self::$amqp->channel();
-        $unregisteredRelayChannel->exchange_declare($unregisteredExchange, 'topic', false, true, false);
-        $unregisteredRelayChannel->queue_declare($unregisteredQueue, false, true, false, false);
-        $unregisteredRelayChannel->queue_bind($unregisteredQueue, $unregisteredExchange, 'order.*');
-        $unregisteredRelayChannel->queue_purge($unregisteredQueue);
-
-        $unregisteredOutbox = new OutboxStore(self::$pdo, $this->platform);
-
-        $errorHandler = new RecordingErrorHandler();
-
-        // Tiny backoff so the backed-off head becomes available again almost
-        // immediately — this lets the second drainOnce() succeed without a
-        // long sleep.
-        $unregisteredRelay = new AmqpRelay(
-            outbox: $unregisteredOutbox,
-            amqp: $unregisteredRelayChannel,
-            publish: new AmqpPublishConfig(exchange: $unregisteredExchange),
-            serializer: new AvroSerializer(
-                $this->schemas,
-                // Fresh registry instance — no cache from the main tests.
-                // HttpSchemaRegistry only caches successes; a SchemaNotFound on
-                // the first drain leaves no cache entry, so the SAME instance
-                // retries the lookup after registration.
-                new HttpSchemaRegistry(self::registryUrl()),
-            ),
-            lane: $unregisteredLane,
-            backoff: Backoff::exponential(initialDelayMs: 1, maxDelayMs: 1),
-            errorHandler: $errorHandler,
+        $producer = new OutboxProducer(
+            $this->outbox,
+            // Fresh registry instance + cold ArrayCachePool: a SchemaNotFound
+            // is not cached, so the retry after registration looks it up again.
+            new AvroWireFormat($this->schemas, new HttpSchemaRegistry(self::registryUrl(), new ArrayCachePool())),
+            lane: 'avro_unregistered',
         );
 
-        $unregisteredProducer = new OutboxProducer(
-            $unregisteredOutbox,
-            lane: $unregisteredLane,
-            validator: new AvroWireValidator($this->schemas),
-        );
-
-        // Locally valid — the validator passes because the .avsc file exists.
-        // The subject 'order.never_registered' is NOT registered in the registry.
+        // 'order.never_registered' has a committed .avsc (payload encodes) but
+        // is NOT registered — produce throws SchemaNotFound, inside the txn.
         self::$pdo->beginTransaction();
-        $unregisteredProducer->produce(NeverRegistered::create());
-        self::$pdo->commit();
+        try {
+            $producer->produce(NeverRegistered::create());
+            self::fail('produce must throw for an unregistered subject');
+        } catch (SchemaNotFound) {
+            // expected — the encode validated the payload, the id lookup 404'd
+        }
+        self::$pdo->rollBack();
 
-        // D17: relay backs off the head — 0 rows published, alert surfaced.
-        self::assertSame(0, $unregisteredRelay->drainOnce(), 'relay must block, not publish unregistered schema');
-
-        // The outbox row is preserved — no data loss.
-        $laneCount = self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE lane = '{$unregisteredLane}'");
-        self::assertSame(1, $laneCount, 'outbox row must remain for the blocked lane');
-
-        // The error handler must have been called to surface the alert.
-        self::assertGreaterThanOrEqual(1, count($errorHandler->calls), 'error handler must record the relay failure');
-
-        // Attempts counter must be 1 after one blocked drain.
-        $attempts = self::fetchInt(
-            "SELECT attempts FROM outbox_messages WHERE lane = '{$unregisteredLane}' LIMIT 1",
+        self::assertSame(
+            0,
+            self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE lane = 'avro_unregistered'"),
+            'a non-publishable message never commits (E5/D17)',
         );
-        self::assertSame(1, $attempts, 'head must be backed off with attempts = 1');
 
-        // --- Phase 2: register the schema and prove the lane drains ---
-
-        // Play the CI registration role for 'order.never_registered'.
+        // Play the CI registration role, then produce succeeds.
         $schemaJson = file_get_contents(self::SCHEMA_PATH);
         self::assertNotFalse($schemaJson);
         self::registerSchema('order.never_registered', $schemaJson);
 
-        // The backoff is 1 ms — the head is already available.  Reuse the
-        // SAME relay instance (proving failed lookups are not cached) and drain.
-        usleep(5_000); // 5 ms — well past the 1 ms backoff
-        self::assertSame(1, $unregisteredRelay->drainOnce(), 'lane must drain after schema is registered');
+        self::$pdo->beginTransaction();
+        $producer->produce(NeverRegistered::create());
+        self::$pdo->commit();
 
-        $laneCountAfter = self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE lane = '{$unregisteredLane}'");
-        self::assertSame(0, $laneCountAfter, 'outbox must be empty after the lane drains');
+        self::assertSame(
+            1,
+            self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE lane = 'avro_unregistered'"),
+            'after registration the row commits',
+        );
+    }
 
-        $unregisteredRelayChannel->close();
+    public function testProduceTimeRegistryOutageFailsTheBusinessTransactionCleanly(): void
+    {
+        $producer = new OutboxProducer(
+            $this->outbox,
+            // Registry pointed at a dead port + cold cache: the id lookup fails.
+            new AvroWireFormat($this->schemas, new HttpSchemaRegistry(
+                'http://schema-registry:9',
+                new ArrayCachePool(),
+                timeoutSec: 1.0
+            )),
+            lane: self::LANE,
+        );
+
+        self::$pdo->beginTransaction();
+        try {
+            $producer->produce(OrderPlaced::create('o-cold', 1));
+            self::fail('RegistryUnavailable was expected on the cold produce path');
+        } catch (RegistryUnavailable) {
+            // expected — cold path needs the registry; steady state never does
+        }
+        self::$pdo->rollBack();
+
+        self::assertSame(
+            0,
+            self::fetchInt('SELECT COUNT(*) FROM outbox_messages'),
+            'nothing commits on a registry outage'
+        );
     }
 }

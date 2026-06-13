@@ -9,6 +9,7 @@ use Apache\Avro\Datum\AvroIODatumReader;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\Serializer\Deserializer;
 use Freyr\MessageBroker\Serializer\MalformedMessage;
+use Freyr\MessageBroker\Serializer\MetadataHeader;
 
 /**
  * Consumer stage 1 → 2 for Avro queues: envelope from the x-* transport
@@ -32,14 +33,7 @@ final class AvroDeserializer implements Deserializer
     /** @param array<string, mixed> $headers */
     public function deserialize(string $bytes, array $headers = []): IncomingMessage
     {
-        $messageId = $headers['x-message-id'] ?? null;
-        $messageName = $headers['x-message-name'] ?? null;
-        $createdAt = $headers['x-created-at'] ?? null;
-        if (!is_string($messageId) || !is_string($messageName) || !is_int($createdAt)) {
-            throw new MalformedMessage(
-                'Avro delivery requires x-message-id (string), x-message-name (string) and x-created-at (epoch ms int) headers',
-            );
-        }
+        $meta = MetadataHeader::parse($headers);
 
         $frame = ConfluentFrame::parse($bytes);
 
@@ -68,9 +62,9 @@ final class AvroDeserializer implements Deserializer
 
         /** @var array<string, mixed> $payload */
         return new IncomingMessage(
-            messageId: $messageId,
-            messageName: $messageName,
-            createdAt: $createdAt,
+            messageId: $meta['message_id'],
+            messageName: $meta['message_name'],
+            createdAt: $meta['created_at'],
             payload: $payload,
             headers: $headers,
         );

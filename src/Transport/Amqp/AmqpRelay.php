@@ -8,7 +8,7 @@ use Freyr\MessageBroker\ErrorHandler;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
-use Freyr\MessageBroker\Serializer\Serializer;
+use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Time\EpochMillis;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Message\AMQPMessage;
@@ -16,6 +16,8 @@ use PhpAmqpLib\Wire\AMQPTable;
 use Throwable;
 
 /**
+ * No Serializer dependency — the relay pumps bytes and explodes the metadata column into individual x-message-* headers; it never parses the body.
+ *
  * Dedicated AMQP relay: drains ONE outbox lane to ONE exchange, always
  * preserving total order within the lane (D17).
  *
@@ -51,7 +53,7 @@ final class AmqpRelay
         private readonly OutboxStore $outbox,
         private readonly AMQPChannel $amqp,
         private readonly AmqpPublishConfig $publish,
-        private readonly Serializer $serializer,
+        private readonly string $contentType,
         private readonly string $lane = 'default',
         private readonly int $batchSize = 100,
         ?Backoff $backoff = null,
@@ -116,14 +118,19 @@ final class AmqpRelay
         }
 
         foreach ($batch as $record) {
-            $wire = $this->serializer->serialize($record->body);
-            $message = new AMQPMessage($wire->bytes, [
-                'content_type' => $wire->contentType,
+            // Explode the metadata column into individual x-message-* headers
+            // (E7); produce-time headers ride alongside. array_merge order puts
+            // the envelope headers last, so they win on any key collision. The
+            // relay never parses the body.
+            $headers = array_merge($record->headers, MetadataHeader::explode($record->metadata));
+
+            $message = new AMQPMessage($record->body, [
+                'content_type' => $this->contentType,
                 'message_id' => $record->id,
                 'delivery_mode' => AMQPMessage::DELIVERY_MODE_PERSISTENT,
-                'application_headers' => new AMQPTable(array_merge($record->headers, $wire->headers)),
+                'application_headers' => new AMQPTable($headers),
             ]);
-            $routingKey = str_replace('{message_name}', $record->messageName, $this->publish->routingKeyTemplate);
+            $routingKey = str_replace('{message_name}', $record->messageName(), $this->publish->routingKeyTemplate);
             $this->amqp->basic_publish($message, $this->publish->exchange, $routingKey);
         }
 
@@ -142,7 +149,7 @@ final class AmqpRelay
         $this->errorHandler?->handle($error, [
             'lane' => $this->lane,
             'message_id' => $head->id,
-            'message_name' => $head->messageName,
+            'message_name' => $head->messageName(),
             'attempt' => $attempt,
             'retry_in_ms' => $delayMs,
         ]);

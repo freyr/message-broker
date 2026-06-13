@@ -5,7 +5,8 @@ declare(strict_types=1);
 use Freyr\MessageBroker\Message;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
-use Freyr\MessageBroker\Serializer\JsonSerializer;
+use Freyr\MessageBroker\Serializer\Format;
+use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpRelay;
@@ -37,7 +38,7 @@ $pdo = new PDO(
     ],
 );
 $platform = new MySqlPlatform();
-foreach ($platform->schemaSql() as $ddl) {
+foreach ($platform->schemaSql(Format::Json) as $ddl) {
     $pdo->exec($ddl);
 }
 $pdo->exec("DELETE FROM outbox_messages WHERE lane = 'bench'");
@@ -56,7 +57,7 @@ $channel->queue_bind('mb_bench_q', 'mb_bench', '#');
 $channel->queue_purge('mb_bench_q');
 
 $store = new OutboxStore($pdo, $platform);
-$producer = new OutboxProducer($store, lane: 'bench');
+$producer = new OutboxProducer($store, new JsonWireFormat(), lane: 'bench');
 
 $run = static function (bool $confirms) use ($n, $pdo, $producer, $store, $amqp): array {
     $start = hrtime(true);
@@ -70,7 +71,7 @@ $run = static function (bool $confirms) use ($n, $pdo, $producer, $store, $amqp)
         outbox: $store,
         amqp: $channel,
         publish: new AmqpPublishConfig(exchange: 'mb_bench', publisherConfirms: $confirms),
-        serializer: new JsonSerializer(),
+        contentType: JsonWireFormat::CONTENT_TYPE,
         lane: 'bench',
         batchSize: $n,
     );

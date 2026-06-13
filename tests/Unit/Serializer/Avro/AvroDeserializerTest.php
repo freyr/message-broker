@@ -12,6 +12,7 @@ use Freyr\MessageBroker\Serializer\Avro\AvroDeserializer;
 use Freyr\MessageBroker\Serializer\Avro\ConfluentFrame;
 use Freyr\MessageBroker\Serializer\Avro\RegistryUnavailable;
 use Freyr\MessageBroker\Serializer\MalformedMessage;
+use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Tests\Fixtures\StubSchemaRegistry;
 use PHPUnit\Framework\TestCase;
 
@@ -32,9 +33,9 @@ final class AvroDeserializerTest extends TestCase
     private function headers(): array
     {
         return [
-            'x-message-id' => '0190d2f3-4a5b-7c8d-9e0f-1a2b3c4d5e6f',
-            'x-message-name' => 'order.placed',
-            'x-created-at' => 1_749_722_400_123,
+            MetadataHeader::MESSAGE_ID => '0190d2f3-4a5b-7c8d-9e0f-1a2b3c4d5e6f',
+            MetadataHeader::MESSAGE_NAME => 'order.placed',
+            MetadataHeader::CREATED_AT => 1_749_722_400_123,
         ];
     }
 

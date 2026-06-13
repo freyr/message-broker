@@ -7,7 +7,7 @@ namespace Freyr\MessageBroker\Tests\Functional;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
-use Freyr\MessageBroker\Serializer\JsonSerializer;
+use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingErrorHandler;
@@ -59,7 +59,7 @@ final class AmqpRelayTest extends FunctionalTestCase
         $this->channel->queue_purge(self::QUEUE);
 
         $this->store = new OutboxStore(self::$pdo, new MySqlPlatform());
-        $this->producer = new OutboxProducer($this->store, lane: 'orders');
+        $this->producer = new OutboxProducer($this->store, new JsonWireFormat(), lane: 'orders');
     }
 
     protected function tearDown(): void
@@ -73,7 +73,7 @@ final class AmqpRelayTest extends FunctionalTestCase
             outbox: $this->store,
             amqp: $this->channel,
             publish: new AmqpPublishConfig(exchange: self::EXCHANGE),
-            serializer: new JsonSerializer(),
+            contentType: JsonWireFormat::CONTENT_TYPE,
             lane: 'orders',
         );
     }
@@ -101,10 +101,7 @@ final class AmqpRelayTest extends FunctionalTestCase
         self::assertCount(3, $received);
         self::assertSame(
             [$first->id, $second->id, $third->id],
-            array_map(
-                static fn ($d): string => json_decode($d->getBody(), true)['metadata']['message_id'],
-                $received,
-            ),
+            array_map(static fn ($d): string => (string) $d->get_properties()['message_id'], $received),
             'messages must arrive in production order',
         );
         self::assertSame('order.placed', $received[0]->getRoutingKey(), 'routing key derives from message_name');
@@ -146,7 +143,7 @@ final class AmqpRelayTest extends FunctionalTestCase
             outbox: $this->store,
             amqp: $badChannel,
             publish: new AmqpPublishConfig(exchange: 'missing_exchange_404'),
-            serializer: new JsonSerializer(),
+            contentType: JsonWireFormat::CONTENT_TYPE,
             lane: 'orders',
             backoff: Backoff::exponential(initialDelayMs: 60_000, maxDelayMs: 600_000),
             errorHandler: $errorHandler,
@@ -180,7 +177,7 @@ final class AmqpRelayTest extends FunctionalTestCase
 
     public function testDrainTouchesOnlyItsOwnLane(): void
     {
-        $other = new OutboxProducer($this->store, lane: 'notifications');
+        $other = new OutboxProducer($this->store, new JsonWireFormat(), lane: 'notifications');
         $other->produce(OrderPlaced::create('o-1', 100));
 
         $published = $this->relay()

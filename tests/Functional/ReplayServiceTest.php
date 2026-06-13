@@ -8,6 +8,8 @@ use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Serializer\JsonWireFormat;
+use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use PDO;
@@ -23,7 +25,10 @@ final class ReplayServiceTest extends FunctionalTestCase
         parent::setUp();
         $platform = new MySqlPlatform();
         $this->deadLetters = new PdoDeadLetterStore(self::$pdo, $platform);
-        $this->replay = new ReplayService($this->deadLetters, new OutboxStore(self::$pdo, $platform));
+        $this->replay = new ReplayService($this->deadLetters, new OutboxStore(
+            self::$pdo,
+            $platform
+        ), new JsonWireFormat());
     }
 
     public function testReplayReenqueuesIntoOutboxUnderGivenLane(): void
@@ -48,12 +53,15 @@ final class ReplayServiceTest extends FunctionalTestCase
         self::assertIsArray($row);
         self::assertSame($message->id, $row['id'], 'original message id is preserved');
         self::assertSame('orders', $row['lane']);
-        self::assertSame('order.placed', $row['message_name']);
-        // assertEquals: MySQL JSON columns normalize object key order.
-        self::assertEquals(
-            json_decode((string) json_encode($message->wire()), true),
+
+        $metadata = json_decode((string) $row['metadata'], true);
+        self::assertSame('order.placed', $metadata['message_name']);
+        self::assertSame($message->id, $metadata['message_id']);
+
+        self::assertSame(
+            $message->wire()['payload'],
             json_decode((string) $row['body'], true),
-            'original wire document is preserved',
+            'payload is re-encoded into the outbox body',
         );
 
         $replayed = $this->deadLetters->find($deadLetter->id);
@@ -76,9 +84,9 @@ final class ReplayServiceTest extends FunctionalTestCase
             body: (string) json_encode($message->wire()),
             headers: [
                 'x-attempt' => 2,
-                'x-message-id' => 'stale-id',
-                'x-message-name' => 'stale-name',
-                'x-created-at' => 'stale-ts',
+                MetadataHeader::MESSAGE_ID => 'stale-id',
+                MetadataHeader::MESSAGE_NAME => 'stale-name',
+                MetadataHeader::CREATED_AT => 1,
                 'correlation_id' => 'corr-replay',
             ],
             error: new RuntimeException('died on attempt 2'),
@@ -100,9 +108,9 @@ final class ReplayServiceTest extends FunctionalTestCase
         self::assertSame('corr-replay', $headers['correlation_id']);
 
         self::assertArrayNotHasKey('x-attempt', $headers, 'x-attempt must be stripped so the retry budget resets');
-        self::assertArrayNotHasKey('x-message-id', $headers, 'stale x-message-id must be stripped');
-        self::assertArrayNotHasKey('x-message-name', $headers, 'stale x-message-name must be stripped');
-        self::assertArrayNotHasKey('x-created-at', $headers, 'stale x-created-at must be stripped');
+        self::assertArrayNotHasKey(MetadataHeader::MESSAGE_ID, $headers, 'stale envelope headers must be stripped');
+        self::assertArrayNotHasKey(MetadataHeader::MESSAGE_NAME, $headers, 'stale envelope headers must be stripped');
+        self::assertArrayNotHasKey(MetadataHeader::CREATED_AT, $headers, 'stale envelope headers must be stripped');
     }
 
     public function testReplayUnknownIdThrows(): void

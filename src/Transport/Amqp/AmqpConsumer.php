@@ -13,6 +13,7 @@ use Freyr\MessageBroker\ErrorHandler;
 use Freyr\MessageBroker\Retry\RetryAction;
 use Freyr\MessageBroker\Serializer\Deserializer;
 use Freyr\MessageBroker\Serializer\MalformedMessage;
+use Freyr\MessageBroker\Serializer\MetadataHeader;
 use PDO;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Exception\AMQPTimeoutException;
@@ -240,17 +241,25 @@ final class AmqpConsumer
     ): void {
         $appHeaders = $this->applicationHeaders($properties);
 
-        // Prefer x-message-id / x-message-name from application headers when
-        // present (set by the Avro relay): improves dlq:show triage for
-        // stage-1 failures where the frame was parsed but the schema id was
-        // rejected.  Fall back to the AMQP message_id property and 'unknown'.
-        $xMessageId = $appHeaders['x-message-id'] ?? null;
-        $xMessageName = $appHeaders['x-message-name'] ?? null;
-        $messageId = $properties['message_id'] ?? null;
+        // Best-effort triage: prefer the x-message-* envelope headers; fall back
+        // to the AMQP message_id property and 'unknown'. Stage-1 raw dead
+        // letters are never replayed, so this only improves dlq:show output.
+        $messageId = 'unknown';
+        $messageName = 'unknown';
+        try {
+            $meta = MetadataHeader::parse($appHeaders);
+            $messageId = $meta['message_id'];
+            $messageName = $meta['message_name'];
+        } catch (MalformedMessage) {
+            $propId = $properties['message_id'] ?? null;
+            if (is_string($propId)) {
+                $messageId = $propId;
+            }
+        }
 
         $this->storeDeadLetter(
-            messageId: is_string($xMessageId) ? $xMessageId : (is_string($messageId) ? $messageId : 'unknown'),
-            messageName: is_string($xMessageName) ? $xMessageName : 'unknown',
+            messageId: $messageId,
+            messageName: $messageName,
             body: $delivery->getBody(),
             headers: $appHeaders,
             error: $error,

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Storage;
 
+use Freyr\MessageBroker\Serializer\Format;
+
 /**
  * SQL dialect seam. MySQL ships first (slice 1), PostgreSQL second (slice 2).
  * Only the statements that differ between platforms live here.
@@ -31,9 +33,10 @@ interface Platform
     public function insertDeduplicationSql(): string;
 
     /**
-     * DDL for outbox_messages, message_deduplication, dead_letters.
+     * DDL for outbox_messages (format-specific body column), message_deduplication,
+     * dead_letters. JSON setup → body JSON; Avro setup → body LONGBLOB (E1).
      *
      * @return list<string>
      */
-    public function schemaSql(): array;
+    public function schemaSql(Format $format): array;
 }

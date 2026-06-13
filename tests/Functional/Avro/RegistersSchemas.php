@@ -21,22 +21,8 @@ trait RegistersSchemas
 
     private static function registerSchema(string $subject, string $schemaJson): void
     {
-        $url = self::registryUrl().'/subjects/'.rawurlencode($subject).'/versions';
-        $response = file_get_contents($url, false, stream_context_create([
-            'http' => [
-                'method' => 'POST',
-                'header' => 'Content-Type: application/vnd.schemaregistry.v1+json',
-                'content' => json_encode([
-                    'schema' => $schemaJson,
-                ], JSON_THROW_ON_ERROR),
-                'ignore_errors' => true,
-                'timeout' => 5.0,
-            ],
-        ]));
-
-        if ($response === false) {
-            throw new RuntimeException("Cannot register schema for '{$subject}' at {$url}");
-        }
+        new \Freyr\MessageBroker\Serializer\Avro\HttpSchemaRegistrar(self::registryUrl())
+            ->register($subject, $schemaJson);
     }
 
     /**

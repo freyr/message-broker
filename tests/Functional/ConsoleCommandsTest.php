@@ -16,6 +16,7 @@ use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Time\EpochMillis;
 use RuntimeException;
@@ -111,7 +112,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         self::assertStringContainsString('boom', $show->getDisplay());
 
         $replay = new CommandTester(new DlqReplayCommand(
-            new ReplayService($this->deadLetters, new OutboxStore(self::$pdo, $this->platform)),
+            new ReplayService($this->deadLetters, new OutboxStore(self::$pdo, $this->platform), new JsonWireFormat()),
             $this->deadLetters,
         ));
         $replay->execute([
@@ -128,5 +129,17 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $purge->execute([]);
         $purge->assertCommandIsSuccessful();
         self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM dead_letters'));
+    }
+
+    public function testSetupSchemaAvroFormatUsesLongblobBody(): void
+    {
+        $tester = new CommandTester(new SetupSchemaCommand(self::$pdo, $this->platform));
+        $tester->execute([
+            '--format' => 'avro',
+            '--dump-sql' => true,
+        ]);
+
+        $tester->assertCommandIsSuccessful();
+        self::assertStringContainsString('body LONGBLOB', $tester->getDisplay());
     }
 }

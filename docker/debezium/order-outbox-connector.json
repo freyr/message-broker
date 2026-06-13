@@ -1,0 +1,29 @@
+{
+  "name": "mb-order-outbox",
+  "config": {
+    "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+    "tasks.max": "1",
+    "database.hostname": "mysql",
+    "database.port": "3306",
+    "database.user": "root",
+    "database.password": "root",
+    "database.server.id": "184054",
+    "topic.prefix": "mb",
+    "database.include.list": "message_broker_test",
+    "table.include.list": "message_broker_test.outbox_messages",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "mb_schema_history",
+    "transforms": "outbox",
+    "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+    "transforms.outbox.table.field.event.id": "id",
+    "transforms.outbox.table.field.event.key": "message_key",
+    "transforms.outbox.table.field.event.payload": "body",
+    "transforms.outbox.table.field.event.timestamp": "created_at",
+    "transforms.outbox.table.fields.additional.placement": "id:header:x-message-id,message_name:header:x-message-name,created_at:header:x-created-at",
+    "transforms.outbox.route.by.field": "lane",
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "io.debezium.converters.BinaryDataConverter",
+    "value.converter.delegate.converter.type": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.delegate.converter.type.schemas.enable": "false"
+  }
+}

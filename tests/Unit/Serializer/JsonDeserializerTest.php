@@ -6,7 +6,7 @@ namespace Freyr\MessageBroker\Tests\Unit\Serializer;
 
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\MalformedMessage;
-use PHPUnit\Framework\Attributes\DataProvider;
+use Freyr\MessageBroker\Serializer\MetadataHeader;
 use PHPUnit\Framework\TestCase;
 
 final class JsonDeserializerTest extends TestCase
@@ -18,20 +18,16 @@ final class JsonDeserializerTest extends TestCase
         $this->deserializer = new JsonDeserializer();
     }
 
-    public function testDeserializesValidTwoSectionDocument(): void
+    public function testDeserializesPayloadBodyWithEnvelopeHeaders(): void
     {
         $bytes = (string) json_encode([
-            'metadata' => [
-                'message_id' => '0190a8b0-0000-7000-8000-000000000001',
-                'message_name' => 'order.placed',
-                'created_at' => 1765476000123,
-            ],
-            'payload' => [
-                'order_id' => 'o-1',
-            ],
+            'order_id' => 'o-1',
         ]);
 
         $incoming = $this->deserializer->deserialize($bytes, [
+            MetadataHeader::MESSAGE_ID => '0190a8b0-0000-7000-8000-000000000001',
+            MetadataHeader::MESSAGE_NAME => 'order.placed',
+            MetadataHeader::CREATED_AT => 1765476000123,
             'x-custom' => 'h-1',
         ]);
 
@@ -41,37 +37,41 @@ final class JsonDeserializerTest extends TestCase
         self::assertSame([
             'order_id' => 'o-1',
         ], $incoming->payload);
-        self::assertSame([
-            'x-custom' => 'h-1',
-        ], $incoming->headers);
+        self::assertSame('h-1', $incoming->headers['x-custom']);
     }
 
-    /** @param non-empty-string $bytes */
-    #[DataProvider('malformedDocuments')]
-    public function testRejectsMalformedDocuments(string $bytes): void
+    public function testMissingEnvelopeHeaderThrowsMalformedMessage(): void
+    {
+        $bytes = (string) json_encode([
+            'order_id' => 'o-1',
+        ]);
+
+        $this->expectException(MalformedMessage::class);
+
+        $this->deserializer->deserialize($bytes, []);
+    }
+
+    public function testNonJsonBodyThrowsMalformedMessage(): void
     {
         $this->expectException(MalformedMessage::class);
 
-        $this->deserializer->deserialize($bytes);
+        $this->deserializer->deserialize('{{{not json', [
+            MetadataHeader::MESSAGE_ID => 'm-1',
+            MetadataHeader::MESSAGE_NAME => 'order.placed',
+            MetadataHeader::CREATED_AT => 1765476000123,
+        ]);
     }
 
-    /** @return iterable<string, array{string}> */
-    public static function malformedDocuments(): iterable
+    public function testBodyNotDecodingToObjectThrowsMalformedMessage(): void
     {
-        yield 'not json at all' => ['{{{'];
-        yield 'json but not an object' => ['"just a string"'];
-        yield 'missing metadata section' => ['{"payload":{}}'];
-        yield 'missing payload section' => ['{"metadata":{"message_id":"x","message_name":"y","created_at":1}}'];
-        yield 'metadata not an object' => ['{"metadata":"nope","payload":{}}'];
-        yield 'payload not an object' => [
-            '{"metadata":{"message_id":"x","message_name":"y","created_at":1},"payload":"nope"}',
-        ];
-        yield 'message_id not a string' => [
-            '{"metadata":{"message_id":1,"message_name":"y","created_at":1},"payload":{}}',
-        ];
-        yield 'message_name missing' => ['{"metadata":{"message_id":"x","created_at":1},"payload":{}}'];
-        yield 'created_at not an integer' => [
-            '{"metadata":{"message_id":"x","message_name":"y","created_at":"2026-01-01"},"payload":{}}',
-        ];
+        $bytes = (string) json_encode('just a string');
+
+        $this->expectException(MalformedMessage::class);
+
+        $this->deserializer->deserialize($bytes, [
+            MetadataHeader::MESSAGE_ID => 'm-1',
+            MetadataHeader::MESSAGE_NAME => 'order.placed',
+            MetadataHeader::CREATED_AT => 1765476000123,
+        ]);
     }
 }

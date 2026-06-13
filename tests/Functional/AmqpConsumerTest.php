@@ -11,6 +11,7 @@ use Freyr\MessageBroker\Consumer\PdoDeduplicationStore;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
+use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlacedDto;
 use Freyr\MessageBroker\Time\EpochMillis;
@@ -20,6 +21,7 @@ use Freyr\MessageBroker\Transport\Amqp\AmqpRetryPolicy;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
+use PhpAmqpLib\Wire\AMQPTable;
 use RuntimeException;
 use Symfony\Component\Serializer\NameConverter\CamelCaseToSnakeCaseNameConverter;
 use Symfony\Component\Serializer\Normalizer\ObjectNormalizer;
@@ -108,37 +110,45 @@ final class AmqpConsumerTest extends FunctionalTestCase
         );
     }
 
-    private function publish(string $body, string $messageId = 'm-1'): void
+    /** @param array<string, mixed> $metadata */
+    private function publish(string $payloadJson, array $metadata, string $messageId = 'm-1'): void
     {
         $this->channel->basic_publish(
-            new AMQPMessage($body, [
+            new AMQPMessage($payloadJson, [
                 'content_type' => 'application/json',
                 'message_id' => $messageId,
                 'delivery_mode' => AMQPMessage::DELIVERY_MODE_PERSISTENT,
+                // Explode the envelope into individual x-message-* headers,
+                // exactly as the relay does — that is the wire contract.
+                'application_headers' => new AMQPTable(MetadataHeader::explode($metadata)),
             ]),
             '',
             self::QUEUE,
         );
     }
 
-    private function document(string $messageId = 'm-1', string $name = 'order.placed'): string
+    /**
+     * @return array{0: string, 1: array<string, mixed>} [payloadJson, metadata]
+     */
+    private function message(string $messageId = 'm-1', string $name = 'order.placed'): array
     {
-        return (string) json_encode([
-            'metadata' => [
+        return [
+            (string) json_encode([
+                'order_id' => 'o-77',
+                'total_cents' => 4999,
+            ]),
+            [
                 'message_id' => $messageId,
                 'message_name' => $name,
                 'created_at' => EpochMillis::now(),
             ],
-            'payload' => [
-                'order_id' => 'o-77',
-                'total_cents' => 4999,
-            ],
-        ]);
+        ];
     }
 
     public function testConsumesDeliveryIntoTypedHandlerAndRecordsDeduplication(): void
     {
-        $this->publish($this->document('m-1'));
+        [$body, $meta] = $this->message('m-1');
+        $this->publish($body, $meta);
 
         $this->consumer()
             ->run(messageLimit: 1, idleTimeoutSec: 10);
@@ -159,8 +169,9 @@ final class AmqpConsumerTest extends FunctionalTestCase
 
     public function testDuplicateDeliveryIsAckedButSkipsTheHandler(): void
     {
-        $this->publish($this->document('m-1'));
-        $this->publish($this->document('m-1'));
+        [$body, $meta] = $this->message('m-1');
+        $this->publish($body, $meta);
+        $this->publish($body, $meta);
 
         $this->consumer()
             ->run(messageLimit: 2, idleTimeoutSec: 10);
@@ -170,7 +181,7 @@ final class AmqpConsumerTest extends FunctionalTestCase
 
     public function testMalformedBodyDeadLettersImmediatelyWithoutRetry(): void
     {
-        $this->publish('{{{not json', messageId: 'm-bad');
+        $this->publish('{{{not json', $this->message('m-bad')[1], messageId: 'm-bad');
 
         $this->consumer()
             ->run(messageLimit: 1, idleTimeoutSec: 10);
@@ -182,7 +193,8 @@ final class AmqpConsumerTest extends FunctionalTestCase
 
     public function testUnknownMessageNameDeadLetters(): void
     {
-        $this->publish($this->document('m-1', name: 'nobody.handles.this'));
+        [$body, $meta] = $this->message('m-1', name: 'nobody.handles.this');
+        $this->publish($body, $meta);
 
         $this->consumer()
             ->run(messageLimit: 1, idleTimeoutSec: 10);
@@ -203,7 +215,8 @@ final class AmqpConsumerTest extends FunctionalTestCase
             throw new RuntimeException('handler always fails');
         };
 
-        $this->publish($this->document('m-1'));
+        [$body, $meta] = $this->message('m-1');
+        $this->publish($body, $meta);
 
         // maxAttempts=2, backoff fixed at 100ms: attempt 1 → wait queue →
         // redelivered after TTL → attempt 2 → exhausted → DLQ.

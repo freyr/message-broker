@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Console;
 
+use Freyr\MessageBroker\Serializer\Format;
 use Freyr\MessageBroker\Storage\Platform;
 use PDO;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -27,12 +28,22 @@ final class SetupSchemaCommand extends Command
 
     protected function configure(): void
     {
-        $this->addOption('dump-sql', null, InputOption::VALUE_NONE, 'Print the DDL instead of executing it');
+        $this
+            ->addOption('format', null, InputOption::VALUE_REQUIRED, 'Wire format: json or avro', 'json')
+            ->addOption('dump-sql', null, InputOption::VALUE_NONE, 'Print the DDL instead of executing it');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        foreach ($this->platform->schemaSql() as $ddl) {
+        $formatOption = $input->getOption('format');
+        $format = is_string($formatOption) ? Format::tryFrom($formatOption) : null;
+        if ($format === null) {
+            $output->writeln('<error>--format must be "json" or "avro".</error>');
+
+            return Command::INVALID;
+        }
+
+        foreach ($this->platform->schemaSql($format) as $ddl) {
             if ($input->getOption('dump-sql') === true) {
                 $output->writeln($ddl.';');
                 continue;
@@ -42,7 +53,7 @@ final class SetupSchemaCommand extends Command
         }
 
         if ($input->getOption('dump-sql') !== true) {
-            $output->writeln('<info>Schema is up to date.</info>');
+            $output->writeln("<info>Schema is up to date ({$format->value}).</info>");
         }
 
         return Command::SUCCESS;

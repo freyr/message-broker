@@ -5,59 +5,52 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Outbox;
 
 use Freyr\MessageBroker\Message;
-use Freyr\MessageBroker\Serializer\WireValidator;
+use Freyr\MessageBroker\Serializer\WireFormat;
+use InvalidArgumentException;
 
 /**
  * Shared outbox producer — the single write-side entry point.
  *
  * Writes through the APPLICATION's PDO connection (inside OutboxStore), so the
  * outbox row commits or rolls back atomically with the application's own state
- * change. No middleware, no transaction orchestration by the library.
+ * change. The wire format encodes the payload at produce time (E2): the row's
+ * `body` holds the final wire bytes, the `metadata` column holds the envelope.
  *
  * A lane is a named drain of the outbox table: one producer instance writes to
  * one lane; exactly one relay process serves one lane on one transport, which
- * is what guarantees total in-order publishing per lane.
+ * guarantees total in-order publishing per lane.
  */
 final readonly class OutboxProducer
 {
     public function __construct(
         private OutboxStore $store,
+        private WireFormat $wireFormat,
         private string $lane = 'default',
-        private ?WireValidator $validator = null,
     ) {}
 
     /** @param array<string, mixed> $headers */
     public function produce(Message $message, array $headers = []): void
     {
-        // Poison prevention at the door (D17): a row that reaches the outbox
-        // is publishable by definition — the relay never dead-letters.
-        // Throws inside the application's transaction; nothing is committed.
-        $this->assertPublishable($message);
-
-        $this->store->insert(new OutboxRecord(
-            id: $message->id,
-            lane: $this->lane,
-            messageName: $message->name,
-            key: $message->key,
-            body: $message->wire(),
-            headers: $headers,
-            createdAt: $message->createdAt,
-        ));
-    }
-
-    private function assertPublishable(Message $message): void
-    {
         if ($message->key === '' || $message->name === '') {
-            throw new \InvalidArgumentException('Message key and name must be non-empty');
+            throw new InvalidArgumentException('Message key and name must be non-empty');
         }
 
         $wire = $message->wire();
 
-        // Structural check: the wire document must serialize.
-        json_encode($wire, JSON_THROW_ON_ERROR);
+        // Encode at the door (E5/D17): the real encode IS the conformance
+        // check. A non-publishable payload throws here (JsonException /
+        // AvroIOTypeException) inside the application's transaction — nothing
+        // commits, and the bytes that were validated are the bytes stored.
+        $body = $this->wireFormat->encode($message->name, $wire['payload']);
 
-        // Per-lane serializer conformance (D17 poison prevention, spec A3):
-        // e.g. AvroWireValidator on Avro lanes — local schema, no registry.
-        $this->validator?->assertPublishable($wire);
+        $this->store->insert(new OutboxRecord(
+            id: $message->id,
+            lane: $this->lane,
+            key: $message->key,
+            metadata: $wire['metadata'],
+            body: $body,
+            headers: $headers,
+            createdAt: $message->createdAt,
+        ));
     }
 }

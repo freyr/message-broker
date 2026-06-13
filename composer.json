@@ -21,6 +21,7 @@
     "require": {
         "php": ">=8.4",
         "ext-pdo": "*",
+        "psr/cache": "^3.0",
         "symfony/clock": "^8.1",
         "symfony/console": "^7.0",
         "symfony/property-access": "^7.0",
@@ -38,6 +39,7 @@
         "apache/avro": "Required for the Avro serializer (Confluent wire format)",
         "php-amqplib/php-amqplib": "Required for the AMQP transport",
         "ext-rdkafka": "Required for the Kafka transport (future slice)",
+        "ext-redis": "Required for RedisCachePool (shared cross-process schema-id/schema cache)",
         "aws/aws-sdk-php": "Required for the SQS transport (future slice)"
     },
     "autoload": {

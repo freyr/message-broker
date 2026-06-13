@@ -4,15 +4,17 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Storage;
 
+use Freyr\MessageBroker\Serializer\Format;
+
 final readonly class MySqlPlatform implements Platform
 {
     public function insertOutboxSql(): string
     {
         return <<<'SQL'
             INSERT INTO outbox_messages
-                (id, lane, message_name, message_key, body, headers, created_at, available_at, attempts)
+                (id, lane, message_key, message_name, metadata, body, headers, created_at, available_at, attempts)
             VALUES
-                (:id, :lane, :message_name, :message_key, :body, :headers, :created_at, :available_at, 0)
+                (:id, :lane, :message_key, :message_name, :metadata, :body, :headers, :created_at, :available_at, 0)
             SQL;
     }
 
@@ -42,16 +44,22 @@ final readonly class MySqlPlatform implements Platform
             SQL;
     }
 
-    public function schemaSql(): array
+    public function schemaSql(Format $format): array
     {
+        // E1: one uniform format for the whole outbox. JSON setup stores the
+        // payload JSON in a JSON column; Avro setup stores Confluent-framed
+        // Avro bytes in a LONGBLOB.
+        $bodyType = $format === Format::Avro ? 'LONGBLOB' : 'JSON';
+
         return [
-            <<<'SQL'
+            <<<SQL
                 CREATE TABLE IF NOT EXISTS outbox_messages (
                     id CHAR(36) NOT NULL PRIMARY KEY,
                     lane VARCHAR(64) NOT NULL,
-                    message_name VARCHAR(255) NOT NULL,
                     message_key VARCHAR(255) NOT NULL,
-                    body JSON NOT NULL,
+                    message_name VARCHAR(255) NOT NULL,
+                    metadata JSON NOT NULL,
+                    body {$bodyType} NOT NULL,
                     headers JSON NOT NULL,
                     created_at DATETIME(3) NOT NULL,
                     available_at DATETIME(3) NOT NULL,

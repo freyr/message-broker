@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional\Avro;
 
 use Apache\Avro\Schema\AvroSchema;
+use Freyr\MessageBroker\Cache\ArrayCachePool;
 use Freyr\MessageBroker\Serializer\Avro\HttpSchemaRegistry;
 use Freyr\MessageBroker\Serializer\Avro\RegistryUnavailable;
 use Freyr\MessageBroker\Serializer\Avro\SchemaNotFound;
 use PHPUnit\Framework\TestCase;
 
-/** Runs against the real Apicurio container (Confluent-compat API). */
+/** Runs against the real Confluent Schema Registry container. */
 final class HttpSchemaRegistryTest extends TestCase
 {
     use RegistersSchemas;
@@ -63,7 +64,20 @@ final class HttpSchemaRegistryTest extends TestCase
     {
         $this->expectException(RegistryUnavailable::class);
 
-        new HttpSchemaRegistry('http://apicurio:9', timeoutSec: 1.0)
+        new HttpSchemaRegistry('http://schema-registry:9', timeoutSec: 1.0)
             ->schemaById(1);
+    }
+
+    public function testIdForCachesInTheInjectedPool(): void
+    {
+        $pool = new ArrayCachePool();
+        $registry = new HttpSchemaRegistry(self::registryUrl(), $pool);
+
+        $first = $registry->idFor('order.placed', self::$schemaJson);
+        // The pool now holds the id; a fresh registry over the SAME pool
+        // returns it without the schema JSON (cache key is the subject only).
+        $second = new HttpSchemaRegistry(self::registryUrl(), $pool)->idFor('order.placed', 'IGNORED-NOT-LOOKED-UP');
+
+        self::assertSame($first, $second);
     }
 }

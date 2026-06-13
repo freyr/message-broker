@@ -5,37 +5,78 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Serializer\Avro;
 
 use Apache\Avro\Schema\AvroSchema;
+use Freyr\MessageBroker\Cache\ArrayCachePool;
+use Psr\Cache\CacheItemPoolInterface;
 
 /**
  * Dependency-free Confluent-compatible registry client over PHP streams
- * (no Guzzle/PSR-7 — the surface is two GET/POST calls; D11 policy).
+ * (no Guzzle/PSR-7 — D11). Lookups cache behind an injected PSR-6 pool so a
+ * shared Redis removes cold-start hits across producer/relay/consumer
+ * restarts and processes (design §7). Cached values are scalars only:
+ * id-by-subject (int) and schema-by-id (schema JSON string). Schemas parse
+ * to AvroSchema on read, kept in a per-process parsed map so the parse cost
+ * is paid once per id per process. Schema ids are immutable once registered,
+ * so cached entries have no TTL (design §13).
  *
- * Both lookups are cached for the life of the process: relays and
- * consumers are long-running, so the registry is hit once per
- * subject/id, not per message.
+ * Only SUCCESSES are cached: a SchemaNotFound leaves no entry, so a later
+ * lookup (after out-of-band registration) retries the registry.
  */
 final class HttpSchemaRegistry implements SchemaRegistry
 {
-    /** @var array<string, int> */
-    private array $idBySubject = [];
+    private const string ID_PREFIX = 'mb.subject.id.';
 
-    /** @var array<int, AvroSchema> */
-    private array $schemaById = [];
+    private const string SCHEMA_PREFIX = 'mb.schema.json.';
 
-    /** @param string $baseUrl e.g. http://apicurio:8080/apis/ccompat/v7 */
+    private readonly CacheItemPoolInterface $cache;
+
+    /** @var array<int, AvroSchema> per-process parsed schemas */
+    private array $parsed = [];
+
+    /** @param string $baseUrl e.g. http://schema-registry:8081 (Confluent SR root) */
     public function __construct(
         private readonly string $baseUrl,
+        ?CacheItemPoolInterface $cache = null,
         private readonly float $timeoutSec = 3.0,
-    ) {}
+    ) {
+        $this->cache = $cache ?? new ArrayCachePool();
+    }
 
     public function idFor(string $subject, string $schemaJson): int
     {
-        return $this->idBySubject[$subject] ??= $this->lookupId($subject, $schemaJson);
+        // Cache key is the subject only (not subject+schemaJson). Safe because
+        // the producer always passes the deterministic FileSchemaStore schema
+        // for a subject — one schema per subject per process; a second schema
+        // VERSION under the same subject would resolve to the first's cached id
+        // within the process lifetime.
+        $item = $this->cache->getItem(self::ID_PREFIX.self::hash($subject));
+        if ($item->isHit()) {
+            $cached = $item->get();
+            if (is_int($cached)) {
+                return $cached;
+            }
+        }
+
+        $id = $this->lookupId($subject, $schemaJson);
+        $this->cache->save($item->set($id));
+
+        return $id;
     }
 
     public function schemaById(int $id): AvroSchema
     {
-        return $this->schemaById[$id] ??= $this->fetchSchema($id);
+        if (isset($this->parsed[$id])) {
+            return $this->parsed[$id];
+        }
+
+        $item = $this->cache->getItem(self::SCHEMA_PREFIX.$id);
+        $schemaJson = $item->isHit() && is_string($item->get()) ? (string) $item->get() : null;
+
+        if ($schemaJson === null) {
+            $schemaJson = $this->fetchSchemaJson($id);
+            $this->cache->save($item->set($schemaJson));
+        }
+
+        return $this->parsed[$id] = $this->parse($id, $schemaJson);
     }
 
     private function lookupId(string $subject, string $schemaJson): int
@@ -56,7 +97,7 @@ final class HttpSchemaRegistry implements SchemaRegistry
         return $id;
     }
 
-    private function fetchSchema(int $id): AvroSchema
+    private function fetchSchemaJson(int $id): string
     {
         $response = $this->request('GET', "/schemas/ids/{$id}");
 
@@ -65,7 +106,12 @@ final class HttpSchemaRegistry implements SchemaRegistry
             throw new RegistryUnavailable("Registry response for schema id {$id} carries no schema string");
         }
 
-        $parsed = AvroSchema::parse($schema);
+        return $schema;
+    }
+
+    private function parse(int $id, string $schemaJson): AvroSchema
+    {
+        $parsed = AvroSchema::parse($schemaJson);
         if (!$parsed instanceof AvroSchema) {
             throw new RegistryUnavailable("Registry returned an unparseable schema for id {$id}");
         }
@@ -81,7 +127,7 @@ final class HttpSchemaRegistry implements SchemaRegistry
             'http' => [
                 'method' => $method,
                 'timeout' => $this->timeoutSec,
-                'ignore_errors' => true, // read 4xx/5xx bodies instead of warning
+                'ignore_errors' => true,
                 'header' => implode("\r\n", [
                     'Content-Type: application/vnd.schemaregistry.v1+json',
                     'Accept: application/vnd.schemaregistry.v1+json, application/json',
@@ -98,7 +144,7 @@ final class HttpSchemaRegistry implements SchemaRegistry
         $status = $this->statusCode($http_response_header);
         if ($status === 404) {
             throw new SchemaNotFound(
-                "{$method} {$path} → 404 (schema not registered? CI registration is out-of-band)"
+                "{$method} {$path} → 404 (schema not registered? CI registration is out-of-band)",
             );
         }
         if ($status < 200 || $status >= 300) {
@@ -117,9 +163,15 @@ final class HttpSchemaRegistry implements SchemaRegistry
     /** @param list<string> $responseHeaders */
     private function statusCode(array $responseHeaders): int
     {
-        // First line: "HTTP/1.1 200 OK"
         $parts = explode(' ', $responseHeaders[0] ?? '', 3);
 
         return (int) ($parts[1] ?? 0);
+    }
+
+    private static function hash(string $subject): string
+    {
+        // Subjects (message_name) can contain '.'; never reserved PSR-6 chars,
+        // but hashing keeps keys uniform and short regardless of subject.
+        return hash('xxh128', $subject);
     }
 }

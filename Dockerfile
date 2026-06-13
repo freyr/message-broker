@@ -12,6 +12,7 @@ RUN apk add --no-cache git unzip && \
         pdo_mysql \
         pdo_pgsql \
         rdkafka \
+        redis \
         sockets \
         zip
 

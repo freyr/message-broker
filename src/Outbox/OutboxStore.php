@@ -26,13 +26,14 @@ final readonly class OutboxStore
         $statement->execute([
             'id' => $record->id,
             'lane' => $record->lane,
-            'message_name' => $record->messageName,
             'message_key' => $record->key,
-            'body' => json_encode($record->body, JSON_THROW_ON_ERROR),
+            'message_name' => $record->messageName(), // mirrors metadata.message_name; lets Debezium map it to x-message-name via stock EventRouter
+            'metadata' => json_encode($record->metadata, JSON_THROW_ON_ERROR),
+            'body' => $record->body, // final wire bytes (JSON text or Confluent-framed Avro)
             'headers' => json_encode($record->headers, JSON_THROW_ON_ERROR),
             'created_at' => EpochMillis::toDateTime($record->createdAt)->format('Y-m-d H:i:s.v'),
             'available_at' => EpochMillis::toDateTime($record->availableAt ?? $record->createdAt)->format(
-                'Y-m-d H:i:s.v'
+                'Y-m-d H:i:s.v',
             ),
         ]);
     }
@@ -118,9 +119,9 @@ final readonly class OutboxStore
         return new OutboxRecord(
             id: self::stringColumn($row, 'id'),
             lane: self::stringColumn($row, 'lane'),
-            messageName: self::stringColumn($row, 'message_name'),
             key: self::stringColumn($row, 'message_key'),
-            body: self::jsonColumn($row, 'body'),
+            metadata: self::jsonColumn($row, 'metadata'),
+            body: self::stringColumn($row, 'body'),
             headers: self::jsonColumn($row, 'headers'),
             createdAt: self::epochMilliseconds(self::stringColumn($row, 'created_at')),
             attempts: self::intColumn($row, 'attempts'),
