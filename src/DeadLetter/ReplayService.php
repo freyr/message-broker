@@ -38,11 +38,36 @@ final readonly class ReplayService
             // stable, unique fallback for transport-level keying on replay.
             key: $deadLetter->messageId,
             body: $this->decodeBody($deadLetter),
-            headers: $deadLetter->headers,
+            headers: $this->cleanHeadersForReplay($deadLetter->headers),
             createdAt: EpochMillis::now(),
         ));
 
         $this->deadLetters->markReplayed($deadLetter->id);
+    }
+
+    /**
+     * Strip headers that must not carry over to a replayed outbox record:
+     *
+     * - x-attempt: dropping it resets the full retry budget for the replay
+     *   (the counter would resume from the dead-letter's terminal attempt
+     *   and exhaust on the very first failure, giving zero effective retries).
+     * - x-message-id, x-message-name, x-created-at: derived by the lane's
+     *   serializer at relay time; keeping stale values from the previous
+     *   delivery would override freshly derived metadata for Avro lanes and
+     *   be silent noise on JSON lanes.
+     *
+     * All other headers (e.g. correlation_id) are preserved so that
+     * traceability context flows through the replay.
+     *
+     * @param array<string, mixed> $headers
+     *
+     * @return array<string, mixed>
+     */
+    private function cleanHeadersForReplay(array $headers): array
+    {
+        $strip = ['x-attempt', 'x-message-id', 'x-message-name', 'x-created-at'];
+
+        return array_diff_key($headers, array_flip($strip));
     }
 
     /** @return array<string, mixed> */
@@ -51,7 +76,7 @@ final readonly class ReplayService
         $document = json_decode($deadLetter->body, true);
         if (!is_array($document) || !isset($document['metadata'], $document['payload'])) {
             throw new \RuntimeException(
-                "Dead letter '{$deadLetter->id}' body is not a replayable wire document ".'(non-JSON bodies require transport-specific replay, see slice 5)',
+                "Dead letter '{$deadLetter->id}' body is not a replayable wire document ".'(stage-1 dead letters store raw bytes and are not replayable)',
             );
         }
 

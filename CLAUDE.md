@@ -13,3 +13,5 @@ docker compose run --rm php vendor/bin/phpunit
 docker compose run --rm php vendor/bin/phpstan analyse --memory-limit=-1
 docker compose run --rm php vendor/bin/ecs check
 ```
+
+Functional tests need MySQL + RabbitMQ + Apicurio (schema registry, Confluent-compat API) — all in compose; Avro tests register schemas out-of-band in `setUpBeforeClass()`.

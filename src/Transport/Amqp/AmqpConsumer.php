@@ -12,6 +12,7 @@ use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\ErrorHandler;
 use Freyr\MessageBroker\Retry\RetryAction;
 use Freyr\MessageBroker\Serializer\Deserializer;
+use Freyr\MessageBroker\Serializer\MalformedMessage;
 use PDO;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Exception\AMQPTimeoutException;
@@ -27,7 +28,9 @@ use Throwable;
  *     → HandlerRegistry → userland DTO         stage 3, denormalized
  *
  * Per delivery:
- *   deserialize            (failure → dead-letter immediately, ack)
+ *   deserialize            (MalformedMessage → dead-letter immediately, ack;
+ *                           transient failures, e.g. schema registry down,
+ *                           propagate → delivery requeued, process restarts)
  *   resolve binding        (unknown name → dead-letter, ack)
  *   BEGIN pdo transaction
  *     dedup acquire        (duplicate → COMMIT, ack, skip handler)
@@ -87,6 +90,9 @@ final class AmqpConsumer
             }
         }
 
+        // Transient deserialize failures intentionally propagate past this
+        // cancel; the unacked delivery is requeued on connection close —
+        // do not "fix" with a finally.
         $this->channel->basic_cancel($consumerTag);
     }
 
@@ -102,18 +108,37 @@ final class AmqpConsumer
         $attempt = $this->attemptFrom($properties);
 
         try {
-            $incoming = $this->deserializer->deserialize($delivery->getBody(), $properties);
-        } catch (Throwable $error) {
+            $incoming = $this->deserializer->deserialize(
+                $delivery->getBody(),
+                $this->applicationHeaders($properties),
+            );
+        } catch (MalformedMessage $error) {
             // Malformed never improves: no retry, straight to the DLQ.
+            // Anything else (e.g. RegistryUnavailable) propagates: the
+            // delivery stays unacked and is redelivered — a transient
+            // dependency failure must never dead-letter valid messages.
             $this->deadLetterRaw($delivery, $properties, $error, $attempt);
             $this->acknowledge($delivery);
 
             return;
+        } catch (Throwable $error) {
+            // Observe-then-rethrow: a transient dependency failure (e.g.
+            // schema registry down) must surface to operators before the
+            // process exits and the delivery requeues.
+            $messageId = $properties['message_id'] ?? null;
+            $this->errorHandler?->handle($error, [
+                'queue' => $this->queue->queue,
+                'stage' => 'deserialize',
+                'message_id' => is_string($messageId) ? $messageId : 'unknown',
+                'attempt' => $attempt,
+            ]);
+
+            throw $error;
         }
 
         $binding = $this->handlers->bindingFor($incoming->messageName);
         if ($binding === null) {
-            $this->deadLetterIncoming($delivery, $incoming, new \RuntimeException(
+            $this->deadLetterIncoming($incoming, new \RuntimeException(
                 "No handler bound for message '{$incoming->messageName}'",
             ), $attempt);
             $this->acknowledge($delivery);
@@ -152,7 +177,7 @@ final class AmqpConsumer
 
         match ($decision->action) {
             RetryAction::Retry => $this->republishToWaitQueue($delivery, $attempt + 1, $decision->delayMs),
-            RetryAction::DeadLetter => $this->deadLetterIncoming($delivery, $incoming, $error, $attempt),
+            RetryAction::DeadLetter => $this->deadLetterIncoming($incoming, $error, $attempt),
             RetryAction::Discard => null,
         };
 
@@ -213,28 +238,47 @@ final class AmqpConsumer
         Throwable $error,
         int $attempt,
     ): void {
+        $appHeaders = $this->applicationHeaders($properties);
+
+        // Prefer x-message-id / x-message-name from application headers when
+        // present (set by the Avro relay): improves dlq:show triage for
+        // stage-1 failures where the frame was parsed but the schema id was
+        // rejected.  Fall back to the AMQP message_id property and 'unknown'.
+        $xMessageId = $appHeaders['x-message-id'] ?? null;
+        $xMessageName = $appHeaders['x-message-name'] ?? null;
         $messageId = $properties['message_id'] ?? null;
 
         $this->storeDeadLetter(
-            messageId: is_string($messageId) ? $messageId : 'unknown',
-            messageName: 'unknown',
+            messageId: is_string($xMessageId) ? $xMessageId : (is_string($messageId) ? $messageId : 'unknown'),
+            messageName: is_string($xMessageName) ? $xMessageName : 'unknown',
             body: $delivery->getBody(),
-            headers: $this->applicationHeaders($properties),
+            headers: $appHeaders,
             error: $error,
             attempt: $attempt,
         );
     }
 
-    private function deadLetterIncoming(
-        AMQPMessage $delivery,
-        IncomingMessage $incoming,
-        Throwable $error,
-        int $attempt,
-    ): void {
+    private function deadLetterIncoming(IncomingMessage $incoming, Throwable $error, int $attempt): void
+    {
+        // Store the reconstructed canonical document, not the wire bytes:
+        // readable in dlq:show and replayable through the outbox regardless
+        // of the queue's wire format (JSON or Avro). Raw bytes are kept only
+        // for stage-1 failures (deadLetterRaw), which never replay anyway.
+        $document = json_encode([
+            'metadata' => [
+                'message_name' => $incoming->messageName,
+                'message_id' => $incoming->messageId,
+                'created_at' => $incoming->createdAt,
+            ],
+            'payload' => $incoming->payload,
+            // INVALID_UTF8_SUBSTITUTE: substitution preferred over a failed
+            // dead-letter write.
+        ], JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
+
         $this->storeDeadLetter(
             messageId: $incoming->messageId,
             messageName: $incoming->messageName,
-            body: $delivery->getBody(),
+            body: $document,
             headers: $incoming->headers,
             error: $error,
             attempt: $attempt,
