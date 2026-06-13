@@ -2,10 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Freyr\MessageBroker;
+namespace Freyr\MessageBroker\Outbox;
 
-use Freyr\MessageBroker\Outbox\OutboxRecord;
-use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Message;
 use Freyr\MessageBroker\Serializer\WireValidator;
 
 /**

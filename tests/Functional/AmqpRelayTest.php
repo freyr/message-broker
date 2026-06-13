@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional;
 
+use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
-use Freyr\MessageBroker\OutboxProducer;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonSerializer;
 use Freyr\MessageBroker\Storage\MySqlPlatform;

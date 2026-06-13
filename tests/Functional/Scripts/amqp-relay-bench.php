@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 use Freyr\MessageBroker\Message;
+use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
-use Freyr\MessageBroker\OutboxProducer;
 use Freyr\MessageBroker\Serializer\JsonSerializer;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
