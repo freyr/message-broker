@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Transport\Amqp;
 
-use Freyr\MessageBroker\Consumer\HandlerRegistry;
+use Freyr\MessageBroker\Consumer\MessageDispatcher;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\Consumer\PdoDeduplicationStore;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
@@ -26,18 +26,19 @@ use Throwable;
  *
  *   AMQPMessage (raw)                          stage 1, transport-native
  *     → Deserializer → IncomingMessage         stage 2, transport-agnostic
- *     → HandlerRegistry → userland DTO         stage 3, denormalized
+ *     → MessageDispatcher::dispatch($incoming)  hand-off to the app's handling
+ *                                               layer (denormalize + routing
+ *                                               live in a separate component)
  *
  * Per delivery:
  *   deserialize            (MalformedMessage → dead-letter immediately, ack;
  *                           transient failures, e.g. schema registry down,
  *                           propagate → delivery requeued, process restarts)
- *   resolve binding        (unknown name → dead-letter, ack)
  *   BEGIN pdo transaction
- *     dedup acquire        (duplicate → COMMIT, ack, skip handler)
- *     denormalize + handler($dto, $envelope)
+ *     dedup acquire        (duplicate → COMMIT, ack, skip dispatch)
+ *     dispatcher->dispatch($incoming)
  *   COMMIT → ack
- *   handler exception → ROLLBACK → retryPolicy->decide(attempt) →
+ *   dispatch exception → ROLLBACK → retryPolicy->decide(attempt) →
  *     retry  : republish to a TTL wait queue that dead-letters back to the
  *              work queue (transport-native delay), x-attempt + 1, ack
  *     dlq    : dead_letters row, ack
@@ -58,7 +59,7 @@ final class AmqpConsumer
         private readonly AMQPChannel $channel,
         private readonly AmqpQueueConfig $queue,
         private readonly Deserializer $deserializer,
-        private readonly HandlerRegistry $handlers,
+        private readonly MessageDispatcher $dispatcher,
         private readonly PDO $pdo,
         private readonly PdoDeduplicationStore $deduplication,
         private readonly AmqpRetryPolicy $retryPolicy,
@@ -137,16 +138,6 @@ final class AmqpConsumer
             throw $error;
         }
 
-        $binding = $this->handlers->bindingFor($incoming->messageName);
-        if ($binding === null) {
-            $this->deadLetterIncoming($incoming, new \RuntimeException(
-                "No handler bound for message '{$incoming->messageName}'",
-            ), $attempt);
-            $this->acknowledge($delivery);
-
-            return;
-        }
-
         try {
             $this->pdo->beginTransaction();
 
@@ -157,8 +148,7 @@ final class AmqpConsumer
                 return;
             }
 
-            $dto = $this->handlers->denormalize($incoming, $binding);
-            ($binding->handler)($dto, $incoming);
+            $this->dispatcher->dispatch($incoming);
 
             $this->pdo->commit();
             $this->acknowledge($delivery);

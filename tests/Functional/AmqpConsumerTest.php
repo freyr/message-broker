@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional;
 
-use Freyr\MessageBroker\Consumer\Binding;
-use Freyr\MessageBroker\Consumer\HandlerRegistry;
+use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\Consumer\PdoDeduplicationStore;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
@@ -13,7 +12,6 @@ use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
-use Freyr\MessageBroker\Tests\Fixtures\OrderPlacedDto;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
@@ -23,9 +21,6 @@ use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
 use RuntimeException;
-use Symfony\Component\Serializer\NameConverter\CamelCaseToSnakeCaseNameConverter;
-use Symfony\Component\Serializer\Normalizer\ObjectNormalizer;
-use Symfony\Component\Serializer\Serializer;
 
 final class AmqpConsumerTest extends FunctionalTestCase
 {
@@ -34,10 +29,10 @@ final class AmqpConsumerTest extends FunctionalTestCase
     private static AMQPStreamConnection $amqp;
     private AMQPChannel $channel;
 
-    /** @var list<array{message: OrderPlacedDto, envelope: IncomingMessage}> */
-    private array $handled = [];
+    /** @var list<IncomingMessage> */
+    private array $dispatched = [];
 
-    private ?\Closure $failingHandler = null;
+    private ?\Closure $failingDispatch = null;
 
     public static function setUpBeforeClass(): void
     {
@@ -63,7 +58,7 @@ final class AmqpConsumerTest extends FunctionalTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->handled = [];
+        $this->dispatched = [];
         $this->channel = self::$amqp->channel();
         $this->channel->queue_declare(self::QUEUE, false, true, false, false);
         $this->channel->queue_purge(self::QUEUE);
@@ -77,28 +72,18 @@ final class AmqpConsumerTest extends FunctionalTestCase
     private function consumer(int $maxAttempts = 5): AmqpConsumer
     {
         $platform = new MySqlPlatform();
-        $handler = function (OrderPlacedDto $message, IncomingMessage $envelope): void {
-            if ($this->failingHandler !== null) {
-                ($this->failingHandler)($message, $envelope);
+        $dispatch = function (IncomingMessage $incoming): void {
+            if ($this->failingDispatch !== null) {
+                ($this->failingDispatch)($incoming);
             }
-            $this->handled[] = [
-                'message' => $message,
-                'envelope' => $envelope,
-            ];
+            $this->dispatched[] = $incoming;
         };
 
         return new AmqpConsumer(
             channel: $this->channel,
             queue: new AmqpQueueConfig(self::QUEUE, prefetch: 8),
             deserializer: new JsonDeserializer(),
-            handlers: new HandlerRegistry(
-                bindings: [
-                    'order.placed' => new Binding(OrderPlacedDto::class, $handler),
-                ],
-                denormalizer: new Serializer([
-                    new ObjectNormalizer(nameConverter: new CamelCaseToSnakeCaseNameConverter()),
-                ]),
-            ),
+            dispatcher: new CallableDispatcher($dispatch),
             pdo: self::$pdo,
             deduplication: new PdoDeduplicationStore(self::$pdo, $platform),
             retryPolicy: new AmqpRetryPolicy(
@@ -145,7 +130,7 @@ final class AmqpConsumerTest extends FunctionalTestCase
         ];
     }
 
-    public function testConsumesDeliveryIntoTypedHandlerAndRecordsDeduplication(): void
+    public function testDeliveryIsDispatchedAndDeduplicationIsRecorded(): void
     {
         [$body, $meta] = $this->message('m-1');
         $this->publish($body, $meta);
@@ -153,12 +138,12 @@ final class AmqpConsumerTest extends FunctionalTestCase
         $this->consumer()
             ->run(messageLimit: 1, idleTimeoutSec: 10);
 
-        self::assertCount(1, $this->handled);
-        $dto = $this->handled[0]['message'];
-        self::assertSame('o-77', $dto->orderId);
-        self::assertSame(4999, $dto->totalCents);
-        self::assertSame('m-1', $this->handled[0]['envelope']->messageId);
-        self::assertSame('order.placed', $this->handled[0]['envelope']->messageName);
+        self::assertCount(1, $this->dispatched);
+        $incoming = $this->dispatched[0];
+        self::assertSame('o-77', $incoming->payload['order_id']);
+        self::assertSame(4999, $incoming->payload['total_cents']);
+        self::assertSame('m-1', $incoming->messageId);
+        self::assertSame('order.placed', $incoming->messageName);
 
         self::assertSame(
             1,
@@ -176,7 +161,7 @@ final class AmqpConsumerTest extends FunctionalTestCase
         $this->consumer()
             ->run(messageLimit: 2, idleTimeoutSec: 10);
 
-        self::assertCount(1, $this->handled, 'second delivery of the same message id must be skipped');
+        self::assertCount(1, $this->dispatched, 'second delivery of the same message id must be skipped');
     }
 
     public function testMalformedBodyDeadLettersImmediatelyWithoutRetry(): void
@@ -186,20 +171,26 @@ final class AmqpConsumerTest extends FunctionalTestCase
         $this->consumer()
             ->run(messageLimit: 1, idleTimeoutSec: 10);
 
-        self::assertCount(0, $this->handled);
+        self::assertCount(0, $this->dispatched);
         self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM dead_letters'));
         self::assertSame(1, self::fetchInt("SELECT COUNT(*) FROM dead_letters WHERE source = '".self::QUEUE."'"));
     }
 
-    public function testUnknownMessageNameDeadLetters(): void
+    public function testDispatchExceptionExhaustsRetryBudgetAndDeadLetters(): void
     {
+        // The broker is message-name-agnostic now: routing lives downstream.
+        // A dispatch exception surfaces here; with maxAttempts=1 the retry
+        // budget is exhausted immediately and the message goes to the DLQ.
+        $this->failingDispatch = static fn (IncomingMessage $m)
+            => throw new RuntimeException("nothing routes '{$m->messageName}'");
+
         [$body, $meta] = $this->message('m-1', name: 'nobody.handles.this');
         $this->publish($body, $meta);
 
-        $this->consumer()
+        $this->consumer(maxAttempts: 1)
             ->run(messageLimit: 1, idleTimeoutSec: 10);
 
-        self::assertCount(0, $this->handled);
+        self::assertCount(0, $this->dispatched);
         self::assertSame(
             1,
             self::fetchInt("SELECT COUNT(*) FROM dead_letters WHERE message_name = 'nobody.handles.this'"),
@@ -208,9 +199,8 @@ final class AmqpConsumerTest extends FunctionalTestCase
 
     public function testHandlerFailureRetriesViaWaitQueueThenDeadLetters(): void
     {
-        $this->failingHandler = static fn () => throw new RuntimeException('handler always fails');
         $attempts = 0;
-        $this->failingHandler = static function () use (&$attempts): void {
+        $this->failingDispatch = static function () use (&$attempts): void {
             ++$attempts;
             throw new RuntimeException('handler always fails');
         };
@@ -224,7 +214,7 @@ final class AmqpConsumerTest extends FunctionalTestCase
             ->run(messageLimit: 2, idleTimeoutSec: 10);
 
         self::assertSame(2, $attempts, 'handler must be attempted exactly maxAttempts times');
-        self::assertCount(0, $this->handled);
+        self::assertCount(0, $this->dispatched);
         self::assertSame(
             1,
             self::fetchInt("SELECT COUNT(*) FROM dead_letters WHERE message_id = 'm-1' AND attempts = 2"),
