@@ -5,8 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional\Avro;
 
 use Freyr\MessageBroker\Cache\ArrayCachePool;
-use Freyr\MessageBroker\Consumer\Binding;
-use Freyr\MessageBroker\Consumer\HandlerRegistry;
+use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\Consumer\PdoDeduplicationStore;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
@@ -24,7 +23,6 @@ use Freyr\MessageBroker\Serializer\Format;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Tests\Fixtures\NeverRegistered;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
-use Freyr\MessageBroker\Tests\Fixtures\OrderPlacedDto;
 use Freyr\MessageBroker\Tests\Functional\FunctionalTestCase;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
@@ -34,15 +32,12 @@ use Freyr\MessageBroker\Transport\Amqp\AmqpRetryPolicy;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use RuntimeException;
-use Symfony\Component\Serializer\NameConverter\CamelCaseToSnakeCaseNameConverter;
-use Symfony\Component\Serializer\Normalizer\ObjectNormalizer;
-use Symfony\Component\Serializer\Serializer;
 
 /**
  * The Avro promise (slice 3, encode-at-produce): produce (Avro encoded at the
  * door → outbox `body` = Confluent-framed bytes, envelope in the `metadata`
  * column) → relay (byte-pump: verbatim body + individual x-message-* headers) →
- * RabbitMQ → consumer (registry-backed decode) → typed handler — plus the
+ * RabbitMQ → consumer (registry-backed decode) → dispatcher — plus the
  * failure circle (DLQ stores a readable, replayable document) and both
  * operational failure modes (registry down; schema never registered, which now
  * fails at produce time, not the relay).
@@ -75,8 +70,8 @@ final class AvroEndToEndTest extends FunctionalTestCase
     private bool $handlerFails = false;
     private int $handlerAttempts = 0;
 
-    /** @var list<array{message: OrderPlacedDto, envelope: IncomingMessage}> */
-    private array $handled = [];
+    /** @var list<IncomingMessage> */
+    private array $dispatched = [];
 
     public static function setUpBeforeClass(): void
     {
@@ -114,7 +109,7 @@ final class AvroEndToEndTest extends FunctionalTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->handled = [];
+        $this->dispatched = [];
         $this->handlerFails = false;
         $this->handlerAttempts = 0;
 
@@ -159,15 +154,12 @@ final class AvroEndToEndTest extends FunctionalTestCase
 
     private function consumer(?string $registryUrl = null): AmqpConsumer
     {
-        $handler = function (OrderPlacedDto $message, IncomingMessage $envelope): void {
+        $dispatch = function (IncomingMessage $incoming): void {
             ++$this->handlerAttempts;
             if ($this->handlerFails) {
                 throw new RuntimeException('temporary downstream outage');
             }
-            $this->handled[] = [
-                'message' => $message,
-                'envelope' => $envelope,
-            ];
+            $this->dispatched[] = $incoming;
         };
 
         return new AmqpConsumer(
@@ -176,14 +168,7 @@ final class AvroEndToEndTest extends FunctionalTestCase
             deserializer: new AvroDeserializer(
                 new HttpSchemaRegistry($registryUrl ?? self::registryUrl(), timeoutSec: 1.0),
             ),
-            handlers: new HandlerRegistry(
-                bindings: [
-                    'order.placed' => new Binding(OrderPlacedDto::class, $handler),
-                ],
-                denormalizer: new Serializer([
-                    new ObjectNormalizer(nameConverter: new CamelCaseToSnakeCaseNameConverter()),
-                ]),
-            ),
+            dispatcher: new CallableDispatcher($dispatch),
             pdo: self::$pdo,
             deduplication: new PdoDeduplicationStore(self::$pdo, $this->platform),
             retryPolicy: new AmqpRetryPolicy(
@@ -195,7 +180,7 @@ final class AvroEndToEndTest extends FunctionalTestCase
         );
     }
 
-    public function testHappyPathAvroFromProduceToTypedHandler(): void
+    public function testHappyPathAvroFromProduceToDispatcher(): void
     {
         $message = OrderPlaced::create('o-42', 12_500);
 
@@ -218,14 +203,14 @@ final class AvroEndToEndTest extends FunctionalTestCase
         $this->consumer()
             ->run(messageLimit: 1, idleTimeoutSec: 10);
 
-        self::assertCount(1, $this->handled);
-        self::assertSame('o-42', $this->handled[0]['message']->orderId);
-        self::assertSame(12_500, $this->handled[0]['message']->totalCents);
-        self::assertSame($message->id, $this->handled[0]['envelope']->messageId);
-        self::assertSame($message->createdAt, $this->handled[0]['envelope']->createdAt);
+        self::assertCount(1, $this->dispatched);
+        self::assertSame('o-42', $this->dispatched[0]->payload['order_id']);
+        self::assertSame(12_500, $this->dispatched[0]->payload['total_cents']);
+        self::assertSame($message->id, $this->dispatched[0]->messageId);
+        self::assertSame($message->createdAt, $this->dispatched[0]->createdAt);
 
         // Produce-time headers survive alongside x-* library headers.
-        self::assertSame('corr-7', $this->handled[0]['envelope']->headers['correlation_id']);
+        self::assertSame('corr-7', $this->dispatched[0]->headers['correlation_id']);
 
         self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'), 'outbox drained');
         self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM dead_letters'));
@@ -247,7 +232,7 @@ final class AvroEndToEndTest extends FunctionalTestCase
             ->run(messageLimit: 2, idleTimeoutSec: 10);
 
         self::assertSame(2, $this->handlerAttempts);
-        self::assertCount(0, $this->handled);
+        self::assertCount(0, $this->dispatched);
 
         $deadLetters = $this->deadLetters->list();
         self::assertCount(1, $deadLetters);
@@ -275,8 +260,8 @@ final class AvroEndToEndTest extends FunctionalTestCase
 
         // REVIEW REQUIREMENT: replayed message with the SAME message_id passes dedup.
         // (The failed attempt rolled back its dedup row, so dedup lets it through.)
-        self::assertCount(1, $this->handled, 'replayed message must reach the fixed handler');
-        self::assertSame($message->id, $this->handled[0]['envelope']->messageId);
+        self::assertCount(1, $this->dispatched, 'replayed message must reach the fixed dispatcher');
+        self::assertSame($message->id, $this->dispatched[0]->messageId);
 
         $replayed = $this->deadLetters->find($deadLetters[0]->id);
         self::assertNotNull($replayed);
@@ -305,7 +290,7 @@ final class AvroEndToEndTest extends FunctionalTestCase
             // expected — delivery stays unacked and requeues on channel close
         }
 
-        self::assertCount(0, $this->handled);
+        self::assertCount(0, $this->dispatched);
         self::assertSame(
             0,
             self::fetchInt('SELECT COUNT(*) FROM dead_letters'),
