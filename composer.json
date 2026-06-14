@@ -24,8 +24,6 @@
         "psr/cache": "^3.0",
         "symfony/clock": "^8.1",
         "symfony/console": "^7.0",
-        "symfony/property-access": "^7.0",
-        "symfony/serializer": "^7.0",
         "symfony/uid": "^7.0"
     },
     "require-dev": {
