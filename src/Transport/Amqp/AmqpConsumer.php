@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Transport\Amqp;
 
-use Freyr\MessageBroker\Consumer\MessageDispatcher;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
+use Freyr\MessageBroker\Consumer\MessageDispatcher;
 use Freyr\MessageBroker\Consumer\PdoDeduplicationStore;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;

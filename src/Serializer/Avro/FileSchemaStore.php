@@ -10,7 +10,7 @@ use Apache\Avro\Schema\AvroSchemaParseException;
 /**
  * The committed-schema source of truth (spec A1): hand-written payload-record
  * .avsc files shipped in the application repo, mapped explicitly per
- * message_name (same explicit-map style as HandlerRegistry, D9).
+ * message_name (the same explicit subject→path map style used across the library, D9).
  *
  * Registration with the schema registry is out-of-band (CI) — this store
  * only reads local files; it never talks to the network.

@@ -21,8 +21,12 @@ final class CallableDispatcherTest extends TestCase
             messageId: 'm-1',
             messageName: 'order.placed',
             createdAt: 1_700_000_000_000,
-            payload: ['order_id' => 'o-1'],
-            headers: ['x-message-id' => 'm-1'],
+            payload: [
+                'order_id' => 'o-1',
+            ],
+            headers: [
+                'x-message-id' => 'm-1',
+            ],
         );
 
         $dispatcher->dispatch($incoming);

@@ -181,8 +181,9 @@ final class AmqpConsumerTest extends FunctionalTestCase
         // The broker is message-name-agnostic now: routing lives downstream.
         // A dispatch exception surfaces here; with maxAttempts=1 the retry
         // budget is exhausted immediately and the message goes to the DLQ.
-        $this->failingDispatch = static fn (IncomingMessage $m)
-            => throw new RuntimeException("nothing routes '{$m->messageName}'");
+        $this->failingDispatch = static fn (IncomingMessage $m) => throw new RuntimeException(
+            "nothing routes '{$m->messageName}'"
+        );
 
         [$body, $meta] = $this->message('m-1', name: 'nobody.handles.this');
         $this->publish($body, $meta);
