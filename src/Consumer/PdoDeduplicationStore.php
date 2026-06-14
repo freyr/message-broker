@@ -10,8 +10,8 @@ use PDO;
 
 /**
  * Insert-or-ignore deduplication keyed by (message_id, consumer).
- * acquire() runs INSIDE the handler's PDO transaction so the dedup entry
- * commits/rolls back atomically with the handler's changes.
+ * acquire() runs INSIDE the consumer's PDO transaction so the dedup entry
+ * commits/rolls back atomically with the dispatched work.
  */
 final readonly class PdoDeduplicationStore
 {
@@ -20,7 +20,7 @@ final readonly class PdoDeduplicationStore
         private Platform $platform,
     ) {}
 
-    /** @return bool false = already processed (duplicate), skip the handler */
+    /** @return bool false = already processed (duplicate), skip dispatch */
     public function acquire(IncomingMessage $message, string $consumer): bool
     {
         $statement = $this->pdo->prepare($this->platform->insertDeduplicationSql());

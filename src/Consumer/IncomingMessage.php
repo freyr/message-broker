@@ -6,9 +6,9 @@ namespace Freyr\MessageBroker\Consumer;
 
 /**
  * Consumer pipeline stage 2: the deserialized, transport-agnostic record.
- * Stage 3 (denormalization into the userland class) happens against
- * $payload; the envelope fields stay available to the handler alongside
- * the denormalized object.
+ * This is the hand-off record passed to MessageDispatcher::dispatch();
+ * denormalizing $payload into a userland object (and routing it) is the
+ * job of a separate component, not the broker.
  */
 final readonly class IncomingMessage
 {
