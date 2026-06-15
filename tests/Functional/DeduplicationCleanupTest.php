@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Consumer\IncomingMessage;
-use Freyr\MessageBroker\Consumer\PdoDeduplicationStore;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Time\EpochMillis;
+use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
 
 final class DeduplicationCleanupTest extends FunctionalTestCase
 {

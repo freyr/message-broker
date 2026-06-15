@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Console;
 
-use Freyr\MessageBroker\Consumer\PdoDeduplicationStore;
 use Freyr\MessageBroker\Time\EpochMillis;
+use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;

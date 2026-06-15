@@ -6,7 +6,6 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
-use Freyr\MessageBroker\Consumer\PdoDeduplicationStore;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
@@ -16,6 +15,7 @@ use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpRetryPolicy;
+use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;

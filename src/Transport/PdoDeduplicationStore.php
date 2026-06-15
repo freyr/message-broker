@@ -2,8 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Freyr\MessageBroker\Consumer;
+namespace Freyr\MessageBroker\Transport;
 
+use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Time\EpochMillis;
 use PDO;

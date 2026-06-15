@@ -6,7 +6,6 @@ namespace Freyr\MessageBroker\Transport\Amqp;
 
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\Consumer\MessageDispatcher;
-use Freyr\MessageBroker\Consumer\PdoDeduplicationStore;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\ErrorHandler;
@@ -14,6 +13,7 @@ use Freyr\MessageBroker\Retry\RetryAction;
 use Freyr\MessageBroker\Serializer\Deserializer;
 use Freyr\MessageBroker\Serializer\MalformedMessage;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
+use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
 use PDO;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Exception\AMQPTimeoutException;

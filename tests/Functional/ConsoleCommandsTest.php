@@ -11,7 +11,6 @@ use Freyr\MessageBroker\Console\DlqReplayCommand;
 use Freyr\MessageBroker\Console\DlqShowCommand;
 use Freyr\MessageBroker\Console\SetupSchemaCommand;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
-use Freyr\MessageBroker\Consumer\PdoDeduplicationStore;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
@@ -19,6 +18,7 @@ use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Time\EpochMillis;
+use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
 use RuntimeException;
 use Symfony\Component\Console\Tester\CommandTester;
 
