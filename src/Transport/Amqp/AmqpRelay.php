@@ -130,7 +130,7 @@ final class AmqpRelay
                 'delivery_mode' => AMQPMessage::DELIVERY_MODE_PERSISTENT,
                 'application_headers' => new AMQPTable($headers),
             ]);
-            $routingKey = str_replace('{message_name}', $record->messageName(), $this->publish->routingKeyTemplate);
+            $routingKey = $this->publish->routingKey->resolve($record);
             $this->amqp->basic_publish($message, $this->publish->exchange, $routingKey);
         }
 

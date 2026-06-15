@@ -13,7 +13,8 @@ final readonly class AmqpPublishConfig
 {
     public function __construct(
         public string $exchange,
-        public string $routingKeyTemplate = '{message_name}', // e.g. 'order.placed'
+        // MessageKey only with x-consistent-hash + SAC (near-FIFO); see RoutingKeyStrategy.
+        public RoutingKeyStrategy $routingKey = RoutingKeyStrategy::MessageName,
         public bool $publisherConfirms = true,
     ) {}
 }
