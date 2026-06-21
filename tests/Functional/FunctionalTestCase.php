@@ -55,8 +55,10 @@ abstract class FunctionalTestCase extends TestCase
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         ]);
 
-        // Force outbox_messages to THIS class's format (body column type
-        // differs on MySQL); dedup + dead_letters are format-independent.
+        // Always recreate the full schema so column types stay in sync with the
+        // current DDL (e.g. CHAR vs VARCHAR on PG); order matters for FK safety.
+        self::$pdo->exec('DROP TABLE IF EXISTS dead_letters');
+        self::$pdo->exec('DROP TABLE IF EXISTS message_deduplication');
         self::$pdo->exec('DROP TABLE IF EXISTS outbox_messages');
         foreach (static::platform()->schemaSql(static::outboxFormat()) as $ddl) {
             self::$pdo->exec($ddl);

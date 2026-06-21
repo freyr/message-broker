@@ -119,7 +119,7 @@ final readonly class PostgreSqlPlatform implements Platform
                 CREATE TABLE IF NOT EXISTS dead_letters (
                     id CHAR(36) NOT NULL PRIMARY KEY,
                     source VARCHAR(255) NOT NULL,
-                    message_id CHAR(36) NOT NULL,
+                    message_id VARCHAR(255) NOT NULL,
                     message_name VARCHAR(255) NOT NULL,
                     body BYTEA NOT NULL,
                     headers JSONB NOT NULL,

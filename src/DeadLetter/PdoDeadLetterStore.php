@@ -14,7 +14,7 @@ final readonly class PdoDeadLetterStore
 
     public function __construct(
         private PDO $pdo,
-        private Platform $platform, // @phpstan-ignore property.onlyWritten (dialect statements move here with slice 2)
+        private Platform $platform,
     ) {}
 
     public function store(DeadLetter $deadLetter): void
@@ -27,19 +27,21 @@ final readonly class PdoDeadLetterStore
                 (:id, :source, :message_id, :message_name, :body, :headers, :error_class, :error_message, :error_trace,
                  :attempts, :failed_at, NULL)
             SQL);
-        $statement->execute([
-            'id' => $deadLetter->id,
-            'source' => $deadLetter->source,
-            'message_id' => $deadLetter->messageId,
-            'message_name' => $deadLetter->messageName,
-            'body' => $deadLetter->body,
-            'headers' => json_encode($deadLetter->headers, JSON_THROW_ON_ERROR),
-            'error_class' => $deadLetter->errorClass,
-            'error_message' => $deadLetter->errorMessage,
-            'error_trace' => $deadLetter->errorTrace,
-            'attempts' => $deadLetter->attempts,
-            'failed_at' => EpochMillis::toDateTime($deadLetter->failedAt)->format(self::DATETIME_FORMAT),
-        ]);
+        $statement->bindValue('id', $deadLetter->id);
+        $statement->bindValue('source', $deadLetter->source);
+        $statement->bindValue('message_id', $deadLetter->messageId);
+        $statement->bindValue('message_name', $deadLetter->messageName);
+        $this->platform->bindBody($statement, 'body', $deadLetter->body);
+        $statement->bindValue('headers', json_encode($deadLetter->headers, JSON_THROW_ON_ERROR));
+        $statement->bindValue('error_class', $deadLetter->errorClass);
+        $statement->bindValue('error_message', $deadLetter->errorMessage);
+        $statement->bindValue('error_trace', $deadLetter->errorTrace);
+        $statement->bindValue('attempts', $deadLetter->attempts, PDO::PARAM_INT);
+        $statement->bindValue(
+            'failed_at',
+            EpochMillis::toDateTime($deadLetter->failedAt)->format(self::DATETIME_FORMAT)
+        );
+        $statement->execute();
     }
 
     public function find(string $id): ?DeadLetter
@@ -55,7 +57,7 @@ final readonly class PdoDeadLetterStore
         }
 
         /** @var array<string, mixed> $row */
-        return self::hydrate($row);
+        return $this->hydrate($row);
     }
 
     /** @return list<DeadLetter> */
@@ -93,7 +95,7 @@ final readonly class PdoDeadLetterStore
         /** @var list<array<string, mixed>> $rows */
         $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
 
-        return array_map(self::hydrate(...), $rows);
+        return array_map($this->hydrate(...), $rows);
     }
 
     /** Replay keeps the row for audit — marks replayed_at instead of deleting. */
@@ -122,7 +124,7 @@ final readonly class PdoDeadLetterStore
     }
 
     /** @param array<string, mixed> $row */
-    private static function hydrate(array $row): DeadLetter
+    private function hydrate(array $row): DeadLetter
     {
         $decodedHeaders = json_decode(self::string($row, 'headers'), true, 512, JSON_THROW_ON_ERROR);
 
@@ -134,7 +136,7 @@ final readonly class PdoDeadLetterStore
             source: self::string($row, 'source'),
             messageId: self::string($row, 'message_id'),
             messageName: self::string($row, 'message_name'),
-            body: self::string($row, 'body'),
+            body: $this->platform->readBody($row['body'] ?? null),
             headers: $headers,
             errorClass: self::string($row, 'error_class'),
             errorMessage: self::string($row, 'error_message'),
@@ -163,8 +165,9 @@ final readonly class PdoDeadLetterStore
 
     private static function epochMilliseconds(string $storedDateTime): int
     {
-        $dateTime = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s.v', $storedDateTime, new \DateTimeZone('UTC'));
-        if ($dateTime === false) {
+        try {
+            $dateTime = new \DateTimeImmutable($storedDateTime, new \DateTimeZone('UTC'));
+        } catch (\Exception) {
             throw new \RuntimeException("Unparseable stored timestamp: {$storedDateTime}");
         }
 
