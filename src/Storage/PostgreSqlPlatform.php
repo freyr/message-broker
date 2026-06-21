@@ -9,13 +9,14 @@ use PDO;
 use PDOStatement;
 
 /**
- * PostgreSQL dialect (DDL deferred to slice 4). Differences from MySQL:
+ * PostgreSQL dialect. Differences from MySQL:
  *   - INSERT IGNORE            → INSERT ... ON CONFLICT DO NOTHING
  *   - GET_LOCK(name)           → pg_try_advisory_lock(int) — PG advisory locks
  *                                take integer keys, not strings, so the lane is
  *                                hashed server-side via hashtext()
  *   - JSON columns             → JSONB
  *   - DATETIME(3)              → TIMESTAMP(3) (UTC by convention, like MySQL)
+ *   - body column              → BYTEA (opaque wire bytes, both JSON and Avro)
  */
 final readonly class PostgreSqlPlatform implements Platform
 {

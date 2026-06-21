@@ -31,6 +31,8 @@ make phpstan
 make cs-check
 ```
 
+`make test` runs the suite against MySQL; `make test-pgsql` runs it against PostgreSQL; `make test-all` runs both. Functional tests pass on either engine (the `DB_ENGINE` env var selects it).
+
 ## License
 
 MIT

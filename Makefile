@@ -1,4 +1,4 @@
-.PHONY: help build logs shell test
+.PHONY: help build logs shell test test-pgsql test-all
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -15,8 +15,13 @@ logs: ## Show container logs
 shell: ## Open shell in PHP container
 	docker compose run --rm php sh
 
-test: ## Run tests
+test: ## Run tests against MySQL
 	docker compose run --rm php vendor/bin/phpunit
+
+test-pgsql: ## Run tests against PostgreSQL
+	docker compose run --rm -e DB_ENGINE=pgsql php vendor/bin/phpunit
+
+test-all: test test-pgsql ## Run tests against both engines
 
 phpstan: ## Run PHPStan
 	docker compose run --rm php vendor/bin/phpstan analyse --memory-limit=-1
