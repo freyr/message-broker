@@ -19,7 +19,7 @@ Strict per-key FIFO is **a Kafka capability**, not the point of the library — 
 ## Requirements
 
 - PHP ≥ 8.4
-- MySQL 8+ or PostgreSQL 13+ (PostgreSQL support in progress)
+- MySQL 8+ or PostgreSQL 13+
 - A supported transport client, e.g. `php-amqplib/php-amqplib` for AMQP
 
 ## Development

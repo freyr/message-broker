@@ -35,7 +35,8 @@ final readonly class PostgreSqlPlatform implements Platform
         // Session-scoped, self-releasing on disconnect — same semantics as
         // MySQL GET_LOCK. Returns true on success, false if owned elsewhere.
         // NOTE: hashtext() can collide across lane names (int4 keyspace) —
-        // false contention is safe but stalls; assess in slice 4.
+        // false contention is safe but stalls; harden to a 64-bit hash only if
+        // collisions are observed in practice.
         return 'SELECT pg_try_advisory_lock(hashtext(:lane))';
     }
 
