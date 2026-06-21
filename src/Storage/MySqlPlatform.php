@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Storage;
 
 use Freyr\MessageBroker\Serializer\Format;
+use PDO;
+use PDOStatement;
 
 final readonly class MySqlPlatform implements Platform
 {
@@ -42,6 +44,21 @@ final readonly class MySqlPlatform implements Platform
             INSERT IGNORE INTO message_deduplication (message_id, consumer, message_name, created_at)
             VALUES (:message_id, :consumer, :message_name, :created_at)
             SQL;
+    }
+
+    public function bindBody(PDOStatement $statement, string $name, string $body): void
+    {
+        // MySQL accepts a plain string into both JSON and *BLOB columns.
+        $statement->bindValue($name, $body);
+    }
+
+    public function readBody(mixed $value): string
+    {
+        if (!is_string($value)) {
+            throw new \RuntimeException('Body column is not a string');
+        }
+
+        return $value;
     }
 
     public function schemaSql(Format $format): array

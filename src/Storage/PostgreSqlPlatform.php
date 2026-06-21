@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Storage;
 
 use Freyr\MessageBroker\Serializer\Format;
+use PDO;
+use PDOStatement;
 
 /**
  * PostgreSQL dialect (DDL deferred to slice 4). Differences from MySQL:
@@ -54,6 +56,29 @@ final readonly class PostgreSqlPlatform implements Platform
             VALUES (:message_id, :consumer, :message_name, :created_at)
             ON CONFLICT (message_id, consumer) DO NOTHING
             SQL;
+    }
+
+    public function bindBody(PDOStatement $statement, string $name, string $body): void
+    {
+        // BYTEA requires a binary bind; PARAM_LOB makes pdo_pgsql send binary
+        // format. JSON text bound this way round-trips through BYTEA unchanged.
+        $statement->bindValue($name, $body, PDO::PARAM_LOB);
+    }
+
+    public function readBody(mixed $value): string
+    {
+        // pdo_pgsql returns BYTEA as a stream resource.
+        if (is_resource($value)) {
+            $contents = stream_get_contents($value);
+
+            return $contents === false ? '' : $contents;
+        }
+
+        if (!is_string($value)) {
+            throw new \RuntimeException('Body column is not a string or stream');
+        }
+
+        return $value;
     }
 
     public function schemaSql(Format $format): array

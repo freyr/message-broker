@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Storage;
 
 use Freyr\MessageBroker\Serializer\Format;
+use PDOStatement;
 
 /**
  * SQL dialect seam. MySQL ships first (slice 1), PostgreSQL second (slice 2).
@@ -39,4 +40,17 @@ interface Platform
      * @return list<string>
      */
     public function schemaSql(Format $format): array;
+
+    /**
+     * Bind the body parameter on a prepared statement. The body is opaque wire
+     * bytes; PostgreSQL stores it as BYTEA and needs a binary (PARAM_LOB) bind,
+     * MySQL accepts a plain string into JSON/BLOB columns. The dialect owns this.
+     */
+    public function bindBody(PDOStatement $statement, string $name, string $body): void;
+
+    /**
+     * Normalize a body column read back from the database into a string.
+     * PostgreSQL returns BYTEA as a stream resource; MySQL returns a string.
+     */
+    public function readBody(mixed $value): string;
 }

@@ -33,4 +33,20 @@ final class PostgreSqlPlatformTest extends TestCase
             self::assertStringContainsString('body BYTEA NOT NULL', $ddl);
         }
     }
+
+    public function testReadBodyReadsStreamResource(): void
+    {
+        $stream = fopen('php://memory', 'r+');
+        self::assertIsResource($stream);
+        fwrite($stream, "\x00\x01binary");
+        rewind($stream);
+
+        self::assertSame("\x00\x01binary", (new PostgreSqlPlatform())->readBody($stream));
+        fclose($stream);
+    }
+
+    public function testReadBodyPassesThroughString(): void
+    {
+        self::assertSame('{"a":1}', (new PostgreSqlPlatform())->readBody('{"a":1}'));
+    }
 }
