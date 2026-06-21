@@ -23,19 +23,20 @@ final readonly class OutboxStore
     public function insert(OutboxRecord $record): void
     {
         $statement = $this->pdo->prepare($this->platform->insertOutboxSql());
-        $statement->execute([
-            'id' => $record->id,
-            'lane' => $record->lane,
-            'message_key' => $record->key,
-            'message_name' => $record->messageName(), // mirrors metadata.message_name; lets Debezium map it to x-message-name via stock EventRouter
-            'metadata' => json_encode($record->metadata, JSON_THROW_ON_ERROR),
-            'body' => $record->body, // final wire bytes (JSON text or Confluent-framed Avro)
-            'headers' => json_encode($record->headers, JSON_THROW_ON_ERROR),
-            'created_at' => EpochMillis::toDateTime($record->createdAt)->format('Y-m-d H:i:s.v'),
-            'available_at' => EpochMillis::toDateTime($record->availableAt ?? $record->createdAt)->format(
-                'Y-m-d H:i:s.v',
-            ),
-        ]);
+        $statement->bindValue('id', $record->id);
+        $statement->bindValue('lane', $record->lane);
+        $statement->bindValue('message_key', $record->key);
+        // mirrors metadata.message_name; lets Debezium map it to x-message-name via stock EventRouter
+        $statement->bindValue('message_name', $record->messageName());
+        $statement->bindValue('metadata', json_encode($record->metadata, JSON_THROW_ON_ERROR));
+        $this->platform->bindBody($statement, 'body', $record->body); // final wire bytes (JSON text or Avro)
+        $statement->bindValue('headers', json_encode($record->headers, JSON_THROW_ON_ERROR));
+        $statement->bindValue('created_at', EpochMillis::toDateTime($record->createdAt)->format('Y-m-d H:i:s.v'));
+        $statement->bindValue(
+            'available_at',
+            EpochMillis::toDateTime($record->availableAt ?? $record->createdAt)->format('Y-m-d H:i:s.v'),
+        );
+        $statement->execute();
     }
 
     /**
@@ -50,7 +51,12 @@ final readonly class OutboxStore
             'lane' => $lane,
         ]);
 
-        return (int) $statement->fetchColumn() === 1;
+        $result = $statement->fetchColumn();
+
+        // MySQL GET_LOCK → 1/'1'; PG pg_try_advisory_lock → true (PHP bool) or 't'.
+        // PDO type map differs: pdo_pgsql returns PHP bool; pdo_mysql returns int/string.
+        // @phpstan-ignore identical.alwaysFalse (pdo_pgsql returns PHP bool despite PDOStatement::fetchColumn() signature)
+        return $result === 1 || $result === '1' || $result === true || $result === 't';
     }
 
     /**
@@ -70,7 +76,7 @@ final readonly class OutboxStore
         /** @var list<array<string, mixed>> $rows */
         $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
 
-        return array_map(self::hydrate(...), $rows);
+        return array_map($this->hydrate(...), $rows);
     }
 
     /** Successful publish — the row's job is done. Rows leave ONLY this way. */
@@ -114,14 +120,14 @@ final readonly class OutboxStore
     }
 
     /** @param array<string, mixed> $row */
-    private static function hydrate(array $row): OutboxRecord
+    private function hydrate(array $row): OutboxRecord
     {
         return new OutboxRecord(
             id: self::stringColumn($row, 'id'),
             lane: self::stringColumn($row, 'lane'),
             key: self::stringColumn($row, 'message_key'),
             metadata: self::jsonColumn($row, 'metadata'),
-            body: self::stringColumn($row, 'body'),
+            body: $this->platform->readBody($row['body'] ?? null),
             headers: self::jsonColumn($row, 'headers'),
             createdAt: self::epochMilliseconds(self::stringColumn($row, 'created_at')),
             attempts: self::intColumn($row, 'attempts'),
@@ -169,13 +175,12 @@ final readonly class OutboxStore
 
     private static function epochMilliseconds(string $storedDateTime): int
     {
-        $dateTime = \DateTimeImmutable::createFromFormat(
-            'Y-m-d H:i:s.v',
-            $storedDateTime,
-            new \DateTimeZone('UTC'),
-        );
-
-        if ($dateTime === false) {
+        // The DateTimeImmutable constructor accepts variable fractional-second
+        // digits (PG trims trailing zeros, e.g. '...56.7'); createFromFormat
+        // with a fixed 'v' mask does not.
+        try {
+            $dateTime = new \DateTimeImmutable($storedDateTime, new \DateTimeZone('UTC'));
+        } catch (\Exception) {
             throw new \RuntimeException("Unparseable stored timestamp: {$storedDateTime}");
         }
 
