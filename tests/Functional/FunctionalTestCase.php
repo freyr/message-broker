@@ -6,6 +6,8 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Serializer\Format;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
+use Freyr\MessageBroker\Storage\Platform;
+use Freyr\MessageBroker\Storage\PostgreSqlPlatform;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -20,22 +22,43 @@ abstract class FunctionalTestCase extends TestCase
         return Format::Json;
     }
 
+    protected static function dbEngine(): string
+    {
+        return getenv('DB_ENGINE') ?: 'mysql';
+    }
+
+    protected static function isPostgres(): bool
+    {
+        return self::dbEngine() === 'pgsql';
+    }
+
+    protected static function platform(): Platform
+    {
+        return self::isPostgres() ? new PostgreSqlPlatform() : new MySqlPlatform();
+    }
+
     public static function setUpBeforeClass(): void
     {
-        $dsn = getenv('MYSQL_DSN') ?: throw new RuntimeException('MYSQL_DSN not set');
+        [$dsn, $user, $password] = self::isPostgres()
+            ? [getenv('POSTGRES_DSN'), getenv('POSTGRES_USER'), getenv('POSTGRES_PASSWORD')]
+            : [getenv('MYSQL_DSN'), getenv('MYSQL_USER'), getenv('MYSQL_PASSWORD')];
+
+        if (!is_string($dsn) || $dsn === '') {
+            throw new RuntimeException(self::dbEngine().' DSN not set');
+        }
 
         if (!str_contains($dsn, '_test')) {
             throw new RuntimeException('Refusing to run: database name must contain "_test"');
         }
 
-        self::$pdo = new PDO($dsn, getenv('MYSQL_USER') ?: '', getenv('MYSQL_PASSWORD') ?: '', [
+        self::$pdo = new PDO($dsn, $user ?: '', $password ?: '', [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         ]);
 
         // Force outbox_messages to THIS class's format (body column type
-        // differs); dedup + dead_letters are format-independent (IF NOT EXISTS).
+        // differs on MySQL); dedup + dead_letters are format-independent.
         self::$pdo->exec('DROP TABLE IF EXISTS outbox_messages');
-        foreach ((new MySqlPlatform())->schemaSql(static::outboxFormat()) as $ddl) {
+        foreach (static::platform()->schemaSql(static::outboxFormat()) as $ddl) {
             self::$pdo->exec($ddl);
         }
     }
