@@ -58,8 +58,54 @@ final readonly class PostgreSqlPlatform implements Platform
 
     public function schemaSql(Format $format): array
     {
-        // TODO slice 4: JSONB metadata; body JSONB (json) / BYTEA (avro);
-        // TIMESTAMP(3); index (lane, id). $format selects the body type.
-        return [];
+        // The body is opaque wire bytes (the relay byte-pumps it; Debezium reads
+        // it with a binary converter). On PG it is BYTEA for BOTH formats — JSON
+        // text round-trips through BYTEA unchanged, and we avoid per-format binding
+        // rules. metadata/headers stay JSONB (they ARE decoded/queried). $format
+        // therefore does not change PG column types; it does on MySQL (JSON vs BLOB).
+        return [
+            <<<'SQL'
+                CREATE TABLE IF NOT EXISTS outbox_messages (
+                    id CHAR(36) NOT NULL PRIMARY KEY,
+                    lane VARCHAR(64) NOT NULL,
+                    message_key VARCHAR(255) NOT NULL,
+                    message_name VARCHAR(255) NOT NULL,
+                    metadata JSONB NOT NULL,
+                    body BYTEA NOT NULL,
+                    headers JSONB NOT NULL,
+                    created_at TIMESTAMP(3) NOT NULL,
+                    available_at TIMESTAMP(3) NOT NULL,
+                    attempts SMALLINT NOT NULL DEFAULT 0
+                )
+                SQL,
+            <<<'SQL'
+                CREATE INDEX IF NOT EXISTS idx_outbox_drain ON outbox_messages (lane, id)
+                SQL,
+            <<<'SQL'
+                CREATE TABLE IF NOT EXISTS message_deduplication (
+                    message_id CHAR(36) NOT NULL,
+                    consumer VARCHAR(128) NOT NULL,
+                    message_name VARCHAR(255) NOT NULL,
+                    created_at TIMESTAMP(3) NOT NULL,
+                    PRIMARY KEY (message_id, consumer)
+                )
+                SQL,
+            <<<'SQL'
+                CREATE TABLE IF NOT EXISTS dead_letters (
+                    id CHAR(36) NOT NULL PRIMARY KEY,
+                    source VARCHAR(255) NOT NULL,
+                    message_id CHAR(36) NOT NULL,
+                    message_name VARCHAR(255) NOT NULL,
+                    body BYTEA NOT NULL,
+                    headers JSONB NOT NULL,
+                    error_class VARCHAR(255) NOT NULL,
+                    error_message TEXT NOT NULL,
+                    error_trace TEXT NOT NULL,
+                    attempts SMALLINT NOT NULL DEFAULT 0,
+                    failed_at TIMESTAMP(3) NOT NULL,
+                    replayed_at TIMESTAMP(3) NULL
+                )
+                SQL,
+        ];
     }
 }
