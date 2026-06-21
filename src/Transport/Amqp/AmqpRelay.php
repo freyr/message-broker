@@ -130,8 +130,9 @@ final class AmqpRelay
                 'delivery_mode' => AMQPMessage::DELIVERY_MODE_PERSISTENT,
                 'application_headers' => new AMQPTable($headers),
             ]);
-            $routingKey = $this->publish->routingKey->resolve($record);
-            $this->amqp->basic_publish($message, $this->publish->exchange, $routingKey);
+            // Route by message name (the message type). Per-key routing is a
+            // postponed lane mode (see AmqpPublishConfig); no knob here today.
+            $this->amqp->basic_publish($message, $this->publish->exchange, $record->messageName());
         }
 
         if ($this->publish->publisherConfirms) {
