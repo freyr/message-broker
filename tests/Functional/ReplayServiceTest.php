@@ -10,7 +10,6 @@ use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
-use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use PDO;
 use RuntimeException;
@@ -23,7 +22,7 @@ final class ReplayServiceTest extends FunctionalTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $platform = new MySqlPlatform();
+        $platform = static::platform();
         $this->deadLetters = new PdoDeadLetterStore(self::$pdo, $platform);
         $this->replay = new ReplayService($this->deadLetters, new OutboxStore(
             self::$pdo,
@@ -60,7 +59,7 @@ final class ReplayServiceTest extends FunctionalTestCase
 
         self::assertSame(
             $message->wire()['payload'],
-            json_decode((string) $row['body'], true),
+            json_decode(static::platform()->readBody($row['body']), true),
             'payload is re-encoded into the outbox body',
         );
 

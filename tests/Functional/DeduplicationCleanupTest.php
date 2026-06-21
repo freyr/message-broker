@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Consumer\IncomingMessage;
-use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
 
@@ -16,7 +15,7 @@ final class DeduplicationCleanupTest extends FunctionalTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->store = new PdoDeduplicationStore(self::$pdo, new MySqlPlatform());
+        $this->store = new PdoDeduplicationStore(self::$pdo, static::platform());
     }
 
     public function testAcquireIsAtomicPerMessageAndConsumer(): void
@@ -32,9 +31,12 @@ final class DeduplicationCleanupTest extends FunctionalTestCase
     {
         $this->store->acquire($this->incoming('m-old'), 'orders_consumer');
         $this->store->acquire($this->incoming('m-fresh'), 'orders_consumer');
-        self::$pdo->exec(
-            "UPDATE message_deduplication SET created_at = DATE_SUB(NOW(3), INTERVAL 8 DAY) WHERE message_id = 'm-old'",
-        );
+        $eightDaysAgo = EpochMillis::toDateTime(EpochMillis::now() - 8 * 86_400_000)->format('Y-m-d H:i:s.v');
+        $aged = self::$pdo->prepare('UPDATE message_deduplication SET created_at = :ts WHERE message_id = :id');
+        $aged->execute([
+            'ts' => $eightDaysAgo,
+            'id' => 'm-old',
+        ]);
 
         $removed = $this->store->cleanup(beforeEpochMs: EpochMillis::now() - 7 * 86_400_000);
 

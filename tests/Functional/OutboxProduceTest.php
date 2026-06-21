@@ -7,7 +7,6 @@ namespace Freyr\MessageBroker\Tests\Functional;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
-use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Fixtures\Unserializable;
 use InvalidArgumentException;
@@ -22,7 +21,7 @@ final class OutboxProduceTest extends FunctionalTestCase
     {
         parent::setUp();
         $this->producer = new OutboxProducer(
-            store: new OutboxStore(self::$pdo, new MySqlPlatform()),
+            store: new OutboxStore(self::$pdo, static::platform()),
             wireFormat: new JsonWireFormat(),
             lane: 'orders',
         );
@@ -51,7 +50,7 @@ final class OutboxProduceTest extends FunctionalTestCase
         self::assertSame([
             'order_id' => 'o-123',
             'total_cents' => 4999,
-        ], json_decode((string) $row['body'], true, flags: JSON_THROW_ON_ERROR));
+        ], json_decode(static::platform()->readBody($row['body']), true, flags: JSON_THROW_ON_ERROR));
 
         // metadata column holds the envelope.
         $metadata = json_decode((string) $row['metadata'], true, flags: JSON_THROW_ON_ERROR);

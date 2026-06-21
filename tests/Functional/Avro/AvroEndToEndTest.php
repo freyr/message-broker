@@ -19,7 +19,7 @@ use Freyr\MessageBroker\Serializer\Avro\HttpSchemaRegistry;
 use Freyr\MessageBroker\Serializer\Avro\RegistryUnavailable;
 use Freyr\MessageBroker\Serializer\Avro\SchemaNotFound;
 use Freyr\MessageBroker\Serializer\Format;
-use Freyr\MessageBroker\Storage\MySqlPlatform;
+use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Tests\Fixtures\NeverRegistered;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Functional\FunctionalTestCase;
@@ -60,7 +60,7 @@ final class AvroEndToEndTest extends FunctionalTestCase
 
     private AMQPChannel $channel;
     private AMQPChannel $relayChannel;
-    private MySqlPlatform $platform;
+    private Platform $platform;
     private OutboxStore $outbox;
     private OutboxProducer $producer;
     private PdoDeadLetterStore $deadLetters;
@@ -120,7 +120,7 @@ final class AvroEndToEndTest extends FunctionalTestCase
         $this->channel->queue_bind(self::QUEUE, self::EXCHANGE, 'order.*');
         $this->channel->queue_purge(self::QUEUE);
 
-        $this->platform = new MySqlPlatform();
+        $this->platform = static::platform();
         $this->outbox = new OutboxStore(self::$pdo, $this->platform);
         $this->deadLetters = new PdoDeadLetterStore(self::$pdo, $this->platform);
 
@@ -193,7 +193,7 @@ final class AvroEndToEndTest extends FunctionalTestCase
         // Outbox row body is the FINAL Confluent-framed Avro bytes (encode-at-produce).
         $row = self::$pdo->query('SELECT metadata, body FROM outbox_messages LIMIT 1')?->fetch(\PDO::FETCH_ASSOC);
         self::assertIsArray($row, 'outbox row must exist');
-        $frame = \Freyr\MessageBroker\Serializer\Avro\ConfluentFrame::parse((string) $row['body']);
+        $frame = \Freyr\MessageBroker\Serializer\Avro\ConfluentFrame::parse(static::platform()->readBody($row['body']));
         self::assertGreaterThan(0, $frame->schemaId, 'body carries a Confluent frame with a registry id');
         $metadata = json_decode((string) $row['metadata'], true);
         self::assertSame($message->id, $metadata['message_id'], 'metadata column holds the envelope');

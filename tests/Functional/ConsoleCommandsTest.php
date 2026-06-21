@@ -16,7 +16,7 @@ use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
-use Freyr\MessageBroker\Storage\MySqlPlatform;
+use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
 use RuntimeException;
@@ -24,13 +24,13 @@ use Symfony\Component\Console\Tester\CommandTester;
 
 final class ConsoleCommandsTest extends FunctionalTestCase
 {
-    private MySqlPlatform $platform;
+    private Platform $platform;
     private PdoDeadLetterStore $deadLetters;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->platform = new MySqlPlatform();
+        $this->platform = static::platform();
         $this->deadLetters = new PdoDeadLetterStore(self::$pdo, $this->platform);
     }
 
@@ -55,15 +55,21 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $tester->execute([]);
 
         $tester->assertCommandIsSuccessful();
-        self::assertSame(1, self::fetchInt("SELECT COUNT(*) FROM information_schema.tables
-            WHERE table_schema = DATABASE() AND table_name = 'outbox_messages'"));
+        $schemaPredicate = static::isPostgres() ? 'table_schema = current_schema()' : 'table_schema = DATABASE()';
+        self::assertSame(1, self::fetchInt(
+            "SELECT COUNT(*) FROM information_schema.tables
+             WHERE {$schemaPredicate} AND table_name = 'outbox_messages'",
+        ));
     }
 
     public function testDedupCleanupParsesDurationAndPrunes(): void
     {
         $store = new PdoDeduplicationStore(self::$pdo, $this->platform);
         $store->acquire(new IncomingMessage('m-old', 'order.placed', EpochMillis::now(), []), 'c');
-        self::$pdo->exec('UPDATE message_deduplication SET created_at = DATE_SUB(NOW(3), INTERVAL 8 DAY)');
+        $eightDaysAgo = EpochMillis::toDateTime(EpochMillis::now() - 8 * 86_400_000)->format('Y-m-d H:i:s.v');
+        self::$pdo->prepare('UPDATE message_deduplication SET created_at = :ts')->execute([
+            'ts' => $eightDaysAgo,
+        ]);
         $store->acquire(new IncomingMessage('m-new', 'order.placed', EpochMillis::now(), []), 'c');
 
         $tester = new CommandTester(new DedupCleanupCommand($store));
@@ -140,6 +146,9 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         ]);
 
         $tester->assertCommandIsSuccessful();
-        self::assertStringContainsString('body LONGBLOB', $tester->getDisplay());
+        self::assertStringContainsString(
+            static::isPostgres() ? 'body BYTEA' : 'body LONGBLOB',
+            $tester->getDisplay(),
+        );
     }
 }

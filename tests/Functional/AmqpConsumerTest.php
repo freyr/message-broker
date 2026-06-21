@@ -10,7 +10,6 @@ use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
-use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
@@ -71,7 +70,7 @@ final class AmqpConsumerTest extends FunctionalTestCase
 
     private function consumer(int $maxAttempts = 5): AmqpConsumer
     {
-        $platform = new MySqlPlatform();
+        $platform = static::platform();
         $dispatch = function (IncomingMessage $incoming): void {
             if ($this->failingDispatch !== null) {
                 ($this->failingDispatch)($incoming);

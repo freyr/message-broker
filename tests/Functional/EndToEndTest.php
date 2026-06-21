@@ -13,7 +13,7 @@ use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
-use Freyr\MessageBroker\Storage\MySqlPlatform;
+use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
@@ -45,7 +45,7 @@ final class EndToEndTest extends FunctionalTestCase
     private static AMQPStreamConnection $amqp;
     private AMQPChannel $channel;        // consumer + topology
     private AMQPChannel $relayChannel;   // confirms are channel-global: the relay owns its channel
-    private MySqlPlatform $platform;
+    private Platform $platform;
     private OutboxStore $outbox;
     private OutboxProducer $producer;
     private PdoDeadLetterStore $deadLetters;
@@ -94,7 +94,7 @@ final class EndToEndTest extends FunctionalTestCase
         $this->channel->queue_bind(self::QUEUE, self::EXCHANGE, 'order.*');
         $this->channel->queue_purge(self::QUEUE);
 
-        $this->platform = new MySqlPlatform();
+        $this->platform = static::platform();
         $this->outbox = new OutboxStore(self::$pdo, $this->platform);
         $this->producer = new OutboxProducer($this->outbox, new JsonWireFormat(), lane: self::LANE);
         $this->deadLetters = new PdoDeadLetterStore(self::$pdo, $this->platform);

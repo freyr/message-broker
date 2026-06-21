@@ -6,7 +6,6 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
-use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Time\EpochMillis;
 use RuntimeException;
 
@@ -17,7 +16,7 @@ final class DeadLetterStoreTest extends FunctionalTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->store = new PdoDeadLetterStore(self::$pdo, new MySqlPlatform());
+        $this->store = new PdoDeadLetterStore(self::$pdo, static::platform());
     }
 
     public function testFromFailureCapturesErrorChainAndTimestamps(): void

@@ -8,9 +8,9 @@ use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
-use Freyr\MessageBroker\Storage\MySqlPlatform;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingErrorHandler;
+use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpRelay;
 use PhpAmqpLib\Channel\AMQPChannel;
@@ -58,7 +58,7 @@ final class AmqpRelayTest extends FunctionalTestCase
         $this->channel->queue_bind(self::QUEUE, self::EXCHANGE, '#');
         $this->channel->queue_purge(self::QUEUE);
 
-        $this->store = new OutboxStore(self::$pdo, new MySqlPlatform());
+        $this->store = new OutboxStore(self::$pdo, static::platform());
         $this->producer = new OutboxProducer($this->store, new JsonWireFormat(), lane: 'orders');
     }
 
@@ -117,10 +117,14 @@ final class AmqpRelayTest extends FunctionalTestCase
         $this->producer->produce($next);
 
         // Simulate a failed publish backing off the head: available_at in the future.
+        $oneHourAhead = EpochMillis::toDateTime(EpochMillis::now() + 3_600_000)->format('Y-m-d H:i:s.v');
         $statement = self::$pdo->prepare(
-            'UPDATE outbox_messages SET available_at = DATE_ADD(NOW(3), INTERVAL 1 HOUR), attempts = 1 WHERE id = ?',
+            'UPDATE outbox_messages SET available_at = :available_at, attempts = 1 WHERE id = :id',
         );
-        $statement->execute([$head->id]);
+        $statement->execute([
+            'available_at' => $oneHourAhead,
+            'id' => $head->id,
+        ]);
 
         $published = $this->relay()
             ->drainOnce();
@@ -153,12 +157,18 @@ final class AmqpRelayTest extends FunctionalTestCase
 
         // Nothing left the outbox; only the head was backed off.
         self::assertSame(2, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
+        $now = EpochMillis::toDateTime(EpochMillis::now())->format('Y-m-d H:i:s.v');
+        $backedOff = self::$pdo->prepare(
+            'SELECT COUNT(*) FROM outbox_messages
+             WHERE id = :id AND attempts = 1 AND available_at > :now',
+        );
+        $backedOff->execute([
+            'id' => $head->id,
+            'now' => $now,
+        ]);
         self::assertSame(
             1,
-            self::fetchInt(
-                "SELECT COUNT(*) FROM outbox_messages WHERE id = '{$head->id}'
-                 AND attempts = 1 AND available_at > NOW(3)",
-            ),
+            (int) $backedOff->fetchColumn(),
             'head must be backed off into the future with attempts incremented',
         );
         self::assertSame(
