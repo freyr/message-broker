@@ -85,7 +85,7 @@ final readonly class MySqlPlatform implements Platform
                 SQL,
             <<<'SQL'
                 CREATE TABLE IF NOT EXISTS message_deduplication (
-                    message_id CHAR(36) NOT NULL,
+                    message_id VARCHAR(255) NOT NULL,
                     consumer VARCHAR(128) NOT NULL,
                     message_name VARCHAR(255) NOT NULL,
                     created_at DATETIME(3) NOT NULL,
@@ -96,7 +96,7 @@ final readonly class MySqlPlatform implements Platform
                 CREATE TABLE IF NOT EXISTS dead_letters (
                     id CHAR(36) NOT NULL PRIMARY KEY,
                     source VARCHAR(255) NOT NULL,
-                    message_id CHAR(36) NOT NULL,
+                    message_id VARCHAR(255) NOT NULL,
                     message_name VARCHAR(255) NOT NULL,
                     body MEDIUMBLOB NOT NULL,
                     headers JSON NOT NULL,

@@ -39,7 +39,7 @@ final readonly class PdoDeadLetterStore
         $statement->bindValue('attempts', $deadLetter->attempts, PDO::PARAM_INT);
         $statement->bindValue(
             'failed_at',
-            EpochMillis::toDateTime($deadLetter->failedAt)->format(self::DATETIME_FORMAT)
+            EpochMillis::toDateTime($deadLetter->failedAt)->format(self::DATETIME_FORMAT),
         );
         $statement->execute();
     }
