@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Storage;
 
 use Freyr\MessageBroker\Serializer\Format;
-use PDO;
 use PDOStatement;
 
 final readonly class MySqlPlatform implements Platform
