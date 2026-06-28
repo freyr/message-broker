@@ -140,12 +140,15 @@ final class KafkaRelay
             throw new RuntimeException('Kafka flush did not confirm the batch: '.rd_kafka_err2str($result));
         }
 
+        // The delivery-report callback (setDrMsgCb, fired by poll()) mutates
+        // $this->deliveryErrors; phpstan cannot see that cross-callback write and
+        // narrows the property to array{} after the reset above.
+        // @phpstan-ignore notIdentical.alwaysFalse
         if ($this->deliveryErrors !== []) {
             throw new RuntimeException('Kafka delivery failed: '.implode('; ', $this->deliveryErrors));
         }
     }
 
-    /** @phpstan-impure */
     private function producer(): Producer
     {
         if ($this->producer !== null) {
