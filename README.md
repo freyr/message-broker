@@ -33,6 +33,16 @@ make cs-check
 
 `make test` runs the suite against MySQL; `make test-pgsql` runs it against PostgreSQL; `make test-all` runs both. Functional tests pass on either engine (the `DB_ENGINE` env var selects it).
 
+### Kafka transport
+
+A native `ext-rdkafka` relay and consumer (`src/Transport/Kafka/`). Register a
+relay/consumer per lane exactly like AMQP — `RelayRunCommand`/`ConsumeCommand`
+take `lane => fn()` closures. The relay produces `message_key → partition` under
+an idempotent `murmur2_random` producer (strict per-key FIFO); the consumer
+commits offsets only after the dedup/dispatch transaction (at-least-once +
+dedup = exactly-once processing). Kafka functional tests run on MySQL and need
+the `kafka` compose service (`KAFKA_BROKERS`, already wired).
+
 ## License
 
 MIT
