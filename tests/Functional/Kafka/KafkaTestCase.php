@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional\Kafka;
 
+use Freyr\MessageBroker\Serializer\Format;
 use Freyr\MessageBroker\Tests\Functional\FunctionalTestCase;
 use RdKafka\Conf;
 use RdKafka\KafkaConsumer;
@@ -17,6 +18,34 @@ use RdKafka\Message as KafkaMessage;
  */
 abstract class KafkaTestCase extends FunctionalTestCase
 {
+    /**
+     * MySQL's JSON column type rejects non-JSON bytes (e.g. malformed-body DLQ
+     * tests). Using Format::Avro switches the MySQL body column to LONGBLOB,
+     * which accepts any bytes. PostgreSQL always uses BYTEA regardless of this
+     * setting. The wire format used by producers/consumers is still JSON.
+     */
+    protected static function outboxFormat(): Format
+    {
+        return Format::Avro;
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        // Release session-scoped advisory locks (MySQL: GET_LOCK, PG: advisory)
+        // so subsequent test classes can acquire lane locks on their own fresh
+        // connections. Ignores errors — the connection may have been replaced.
+        try {
+            if (self::isPostgres()) {
+                self::$pdo->exec('SELECT pg_advisory_unlock_all()');
+            } else {
+                self::$pdo->exec('SELECT RELEASE_ALL_LOCKS()');
+            }
+        } catch (\Throwable) {
+            // Ignore.
+        }
+        parent::tearDownAfterClass();
+    }
+
     protected static function brokers(): string
     {
         return getenv('KAFKA_BROKERS') ?: 'kafka:9092';
