@@ -80,4 +80,16 @@ final class MetadataHeaderTest extends TestCase
             MetadataHeader::CREATED_AT => 'not-an-int',
         ]);
     }
+
+    public function testParseCoercesNumericStringCreatedAt(): void
+    {
+        // Kafka headers are untyped bytes: x-created-at rides as a numeric string.
+        $meta = MetadataHeader::parse([
+            MetadataHeader::MESSAGE_ID => 'm-1',
+            MetadataHeader::MESSAGE_NAME => 'order.placed',
+            MetadataHeader::CREATED_AT => '1749722400123',
+        ]);
+
+        self::assertSame(1_749_722_400_123, $meta['created_at']);
+    }
 }

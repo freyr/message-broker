@@ -47,9 +47,9 @@ final class MetadataHeader
 
     /**
      * Read the envelope triple back from the individual `x-message-*` headers
-     * (E7). Matches the shipped slice-2 deserializer exactly: `x-created-at`
-     * must arrive as an int (AMQPTable int64 `l`). Extra `x-<key>` fields stay
-     * on `IncomingMessage::$headers` but are not required to build the envelope.
+     * (E7). `x-created-at` arrives as an int (AMQP int64) or a numeric string
+     * (Kafka byte headers); both yield an int. Extra `x-<key>` fields stay on
+     * `IncomingMessage::$headers` but are not required to build the envelope.
      *
      * @param array<string, mixed> $headers transport headers
      *
@@ -60,6 +60,14 @@ final class MetadataHeader
         $messageId = $headers[self::MESSAGE_ID] ?? null;
         $messageName = $headers[self::MESSAGE_NAME] ?? null;
         $createdAt = $headers[self::CREATED_AT] ?? null;
+
+        // Kafka headers are untyped bytes — x-created-at arrives as a numeric
+        // string ("1749722400123"); AMQP delivers a typed int64. Accept both:
+        // coerce an all-digit string to int, then require an int below.
+        if (is_string($createdAt) && $createdAt !== '' && ctype_digit($createdAt)) {
+            $createdAt = (int) $createdAt;
+        }
+
         if (!is_string($messageId) || !is_string($messageName) || !is_int($createdAt)) {
             throw new MalformedMessage(
                 'Delivery requires '.self::MESSAGE_ID.' (string), '.self::MESSAGE_NAME.' (string) and '.self::CREATED_AT.' (epoch ms int) headers',
