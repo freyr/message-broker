@@ -44,6 +44,10 @@ use Throwable;
  *
  * Offset commit is injectable (default: synchronous commit) so failure between
  * the DB commit and the offset commit can be exercised in tests.
+ *
+ * This object runs a single `run()` to completion and must not be reused afterward:
+ * `run()` closes its consumer in a `finally`, so a second `run()` on the same
+ * instance would operate on a closed consumer.
  */
 final class KafkaConsumer
 {
@@ -71,6 +75,10 @@ final class KafkaConsumer
      * Blocks until stopped (SIGTERM/SIGINT via pcntl), the optional message
      * limit is reached, or the topic stays silent for the idle window. Limit
      * and timeout exist for tests and batch operation.
+     *
+     * `$idleTimeoutSec = null` means run until stopped (no idle timeout); pass a positive
+     * number for tests/batch operation. `0` is not a meaningful value (it would stop on
+     * the first idle poll before any message).
      */
     public function run(?int $messageLimit = null, ?int $idleTimeoutSec = null): void
     {
