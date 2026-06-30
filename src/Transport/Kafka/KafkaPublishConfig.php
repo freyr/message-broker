@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Transport\Kafka;
 
+use InvalidArgumentException;
+
 /**
  * Transport-native relay/publish configuration: Kafka vocabulary only
  * (bootstrap brokers, topic) — AMQP and SQS relays have their own config
@@ -17,5 +19,9 @@ final readonly class KafkaPublishConfig
     public function __construct(
         public string $brokers,
         public string $topic,
-    ) {}
+    ) {
+        if ($brokers === '' || $topic === '') {
+            throw new InvalidArgumentException('Kafka brokers and topic must be non-empty');
+        }
+    }
 }
