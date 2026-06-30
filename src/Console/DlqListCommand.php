@@ -28,7 +28,8 @@ final class DlqListCommand extends Command
             ->addOption('name', null, InputOption::VALUE_REQUIRED, 'Filter by message name')
             ->addOption('source', null, InputOption::VALUE_REQUIRED, 'Filter by source queue/topic')
             ->addOption('since', null, InputOption::VALUE_REQUIRED, "Only failures younger than, e.g. '24h'")
-            ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Maximum rows', '100');
+            ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Maximum rows', '100')
+            ->addOption('offset', null, InputOption::VALUE_REQUIRED, 'Skip this many rows', '0');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -37,12 +38,14 @@ final class DlqListCommand extends Command
         $source = $input->getOption('source');
         $since = $input->getOption('since');
         $limit = $input->getOption('limit');
+        $offset = $input->getOption('offset');
 
         $deadLetters = $this->store->list(
             messageName: is_string($name) ? $name : null,
             source: is_string($source) ? $source : null,
             sinceMs: is_string($since) ? EpochMillis::now() - Duration::toMilliseconds($since) : null,
             limit: is_numeric($limit) ? (int) $limit : 100,
+            offset: is_numeric($offset) ? (int) $offset : 0,
         );
 
         if ($deadLetters === []) {

@@ -250,6 +250,41 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM dead_letters'), 'only matching rows purged');
     }
 
+    public function testDedupCleanupDryRunReportsWithoutDeleting(): void
+    {
+        $store = new PdoDeduplicationStore(self::$pdo, $this->platform);
+        $store->acquire(new IncomingMessage('m-old', 'order.placed', EpochMillis::now(), []), 'c');
+        $eightDaysAgo = EpochMillis::toDateTime(EpochMillis::now() - 8 * 86_400_000)->format('Y-m-d H:i:s.v');
+        self::$pdo->prepare('UPDATE message_deduplication SET created_at = :ts')->execute([
+            'ts' => $eightDaysAgo,
+        ]);
+
+        $tester = new CommandTester(new DedupCleanupCommand($store));
+        $tester->execute([
+            '--older-than' => '7d',
+            '--dry-run' => true,
+        ]);
+
+        $tester->assertCommandIsSuccessful();
+        self::assertStringContainsString('1', $tester->getDisplay());
+        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM message_deduplication'), 'dry-run deletes nothing');
+    }
+
+    public function testDlqListRespectsOffset(): void
+    {
+        $this->seedDeadLetter('m-1', 'order.placed');
+        $this->seedDeadLetter('m-2', 'order.placed');
+
+        $list = new CommandTester(new DlqListCommand($this->deadLetters));
+        $list->execute([
+            '--limit' => '1',
+            '--offset' => '1',
+        ]);
+        $list->assertCommandIsSuccessful();
+        // exactly one data row rendered (header + 1)
+        self::assertSame(1, substr_count($list->getDisplay(), 'order.placed'));
+    }
+
     private function seedDeadLetter(string $id, string $name): void
     {
         $this->deadLetters->store(DeadLetter::fromFailure(

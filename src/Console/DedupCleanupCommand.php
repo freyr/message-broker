@@ -26,7 +26,9 @@ final class DedupCleanupCommand extends Command
 
     protected function configure(): void
     {
-        $this->addOption('older-than', null, InputOption::VALUE_REQUIRED, "Age threshold, e.g. '7d', '24h'", '7d');
+        $this
+            ->addOption('older-than', null, InputOption::VALUE_REQUIRED, "Age threshold, e.g. '7d', '24h'", '7d')
+            ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Report how many would be pruned; delete nothing');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -38,7 +40,17 @@ final class DedupCleanupCommand extends Command
             return Command::INVALID;
         }
 
-        $removed = $this->store->cleanup(EpochMillis::now() - Duration::toMilliseconds($olderThan));
+        $threshold = EpochMillis::now() - Duration::toMilliseconds($olderThan);
+        if ($input->getOption('dry-run') === true) {
+            $count = $this->store->countOlderThan($threshold);
+            $output->writeln(
+                "<info>[dry-run] {$count} deduplication entries older than {$olderThan} would be removed.</info>"
+            );
+
+            return Command::SUCCESS;
+        }
+
+        $removed = $this->store->cleanup($threshold);
         $output->writeln("<info>Removed {$removed} deduplication entries older than {$olderThan}.</info>");
 
         return Command::SUCCESS;
