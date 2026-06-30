@@ -133,7 +133,11 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         );
 
         $purge = new CommandTester(new DlqPurgeCommand($this->deadLetters));
-        $purge->execute([]);
+        $purge->execute([
+            '--force' => true,
+        ], [
+            'interactive' => false,
+        ]);
         $purge->assertCommandIsSuccessful();
         self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM dead_letters'));
     }
@@ -210,6 +214,40 @@ final class ConsoleCommandsTest extends FunctionalTestCase
 
         $replay->assertCommandIsSuccessful();
         self::assertSame(1, self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE lane = 'orders'"));
+    }
+
+    public function testPurgeFailsClosedWithoutForceButDryRunPreviews(): void
+    {
+        $this->seedDeadLetter('m-p1', 'order.placed');
+        $this->seedDeadLetter('m-p2', 'order.cancelled');
+
+        $purge = fn (): CommandTester => new CommandTester(new DlqPurgeCommand($this->deadLetters));
+
+        $closed = $purge();
+        self::assertSame(Command::FAILURE, $closed->execute([], [
+            'interactive' => false,
+        ]));
+        self::assertSame(2, self::fetchInt('SELECT COUNT(*) FROM dead_letters'), 'nothing purged without --force');
+
+        $dry = $purge();
+        $dry->execute([
+            '--dry-run' => true,
+            '--name' => 'order.placed',
+        ], [
+            'interactive' => false,
+        ]);
+        $dry->assertCommandIsSuccessful();
+        self::assertSame(2, self::fetchInt('SELECT COUNT(*) FROM dead_letters'), 'dry-run changes nothing');
+
+        $forced = $purge();
+        $forced->execute([
+            '--force' => true,
+            '--name' => 'order.placed',
+        ], [
+            'interactive' => false,
+        ]);
+        $forced->assertCommandIsSuccessful();
+        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM dead_letters'), 'only matching rows purged');
     }
 
     private function seedDeadLetter(string $id, string $name): void
