@@ -8,6 +8,7 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
@@ -31,6 +32,12 @@ final class ConsumeCommand extends Command
     protected function configure(): void
     {
         $this->addArgument('name', InputArgument::REQUIRED, 'Registered consumer name');
+        $this->addOption(
+            'require-signals',
+            null,
+            InputOption::VALUE_NONE,
+            'Fail if ext-pcntl (graceful shutdown) is unavailable',
+        );
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -44,6 +51,15 @@ final class ConsumeCommand extends Command
         }
 
         $output->writeln("<info>Consuming '{$name}' — SIGTERM/SIGINT to stop.</info>");
+        $warning = SignalSupport::warning(extension_loaded('pcntl'));
+        if ($warning !== null) {
+            if ($input->getOption('require-signals')) {
+                $output->writeln("<error>{$warning}</error>");
+
+                return Command::FAILURE;
+            }
+            $output->writeln("<comment>{$warning}</comment>");
+        }
         ($this->consumers[$name])();
 
         return Command::SUCCESS;
