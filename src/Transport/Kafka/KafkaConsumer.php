@@ -17,6 +17,8 @@ use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
 use PDO;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use RdKafka\Conf;
 use RdKafka\KafkaConsumer as RdKafkaConsumer;
 use RdKafka\Message as KafkaMessage;
@@ -69,6 +71,7 @@ final class KafkaConsumer
         private readonly string $name = 'default', // dedup scope
         private readonly ?ErrorHandler $errorHandler = null,
         private readonly ?Closure $offsetCommitter = null,
+        private readonly LoggerInterface $logger = new NullLogger(),
     ) {}
 
     /**
@@ -142,12 +145,16 @@ final class KafkaConsumer
         } catch (Throwable $error) {
             // Transient (e.g. registry down): surface, do NOT commit — the
             // message is redelivered when the dependency recovers.
-            $this->errorHandler?->handle($error, [
+            $context = [
                 'topic' => $this->config->topic,
                 'stage' => 'deserialize',
                 'partition' => $message->partition,
                 'offset' => $message->offset,
-            ]);
+            ];
+            $this->logger->error('Consumer deserialize failed (transient); redelivering', [
+                'exception' => $error,
+            ] + $context);
+            $this->errorHandler?->handle($error, $context);
 
             throw $error;
         }
@@ -173,13 +180,17 @@ final class KafkaConsumer
 
                 $decision = $this->retryPolicy->decide($attempt, $error);
 
-                $this->errorHandler?->handle($error, [
+                $context = [
                     'topic' => $this->config->topic,
                     'message_id' => $incoming->messageId,
                     'message_name' => $incoming->messageName,
                     'attempt' => $attempt,
                     'action' => $decision->action->name,
-                ]);
+                ];
+                $this->logger->warning('Consumer dispatch failed', [
+                    'exception' => $error,
+                ] + $context);
+                $this->errorHandler?->handle($error, $context);
 
                 if ($decision->action === RetryAction::Retry) {
                     if ($decision->delayMs > 0) {

@@ -11,6 +11,8 @@ use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\IdleSleep;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use RdKafka\Conf;
 use RdKafka\Producer;
 use RdKafka\ProducerTopic;
@@ -56,6 +58,7 @@ final class KafkaRelay
         private readonly ?ErrorHandler $errorHandler = null,
         private readonly int $idleSleepMs = 200,
         private readonly int $flushTimeoutMs = 5_000,
+        private readonly LoggerInterface $logger = new NullLogger(),
     ) {
         $this->backoff = $backoff ?? Backoff::exponential(initialDelayMs: 1_000, maxDelayMs: 300_000);
     }
@@ -193,13 +196,17 @@ final class KafkaRelay
         $delayMs = $this->backoff->delayForAttempt($attempt);
         $this->outbox->scheduleRetry($head->id, EpochMillis::now() + $delayMs);
 
-        $this->errorHandler?->handle($error, [
+        $context = [
             'lane' => $this->lane,
             'message_id' => $head->id,
             'message_name' => $head->messageName(),
             'attempt' => $attempt,
             'retry_in_ms' => $delayMs,
-        ]);
+        ];
+        $this->logger->warning('Relay publish failed; lane backing off', [
+            'exception' => $error,
+        ] + $context);
+        $this->errorHandler?->handle($error, $context);
     }
 
     private function registerSignalHandlers(): void

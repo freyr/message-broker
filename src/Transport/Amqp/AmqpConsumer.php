@@ -19,6 +19,8 @@ use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Exception\AMQPTimeoutException;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Throwable;
 
 /**
@@ -66,6 +68,7 @@ final class AmqpConsumer
         private readonly PdoDeadLetterStore $deadLetters,
         private readonly string $name = 'default', // dedup scope
         private readonly ?ErrorHandler $errorHandler = null,
+        private readonly LoggerInterface $logger = new NullLogger(),
     ) {}
 
     /**
@@ -128,12 +131,16 @@ final class AmqpConsumer
             // schema registry down) must surface to operators before the
             // process exits and the delivery requeues.
             $messageId = $properties['message_id'] ?? null;
-            $this->errorHandler?->handle($error, [
+            $context = [
                 'queue' => $this->queue->queue,
                 'stage' => 'deserialize',
                 'message_id' => is_string($messageId) ? $messageId : 'unknown',
                 'attempt' => $attempt,
-            ]);
+            ];
+            $this->logger->error('Consumer deserialize failed (transient); requeueing', [
+                'exception' => $error,
+            ] + $context);
+            $this->errorHandler?->handle($error, $context);
 
             throw $error;
         }
@@ -172,13 +179,17 @@ final class AmqpConsumer
             RetryAction::Discard => null,
         };
 
-        $this->errorHandler?->handle($error, [
+        $context = [
             'queue' => $this->queue->queue,
             'message_id' => $incoming->messageId,
             'message_name' => $incoming->messageName,
             'attempt' => $attempt,
             'action' => $decision->action->name,
-        ]);
+        ];
+        $this->logger->warning('Consumer dispatch failed', [
+            'exception' => $error,
+        ] + $context);
+        $this->errorHandler?->handle($error, $context);
 
         $this->acknowledge($delivery);
     }

@@ -21,6 +21,7 @@
         "php": ">=8.4",
         "ext-pdo": "*",
         "psr/cache": "^3.0",
+        "psr/log": "^3.0",
         "symfony/clock": "^8.1",
         "symfony/console": "^7.0",
         "symfony/uid": "^7.0"

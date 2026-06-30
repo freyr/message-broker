@@ -10,11 +10,13 @@ use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingErrorHandler;
+use Freyr\MessageBroker\Tests\Fixtures\RecordingLogger;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpRelay;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
+use Psr\Log\LogLevel;
 
 final class AmqpRelayTest extends FunctionalTestCase
 {
@@ -229,5 +231,36 @@ final class AmqpRelayTest extends FunctionalTestCase
         self::assertFalse($standby->tryAcquireLane('orders'), 'relay still holds it before shutdown');
         $relay->shutdown();
         self::assertTrue($standby->tryAcquireLane('orders'), 'lane is free after shutdown');
+    }
+
+    public function testPublishFailureLogsBackoffWarningEvenWithoutAnErrorHandler(): void
+    {
+        // Flush advisory-lock re-entrancy accumulated by self::$pdo in prior tests
+        // so this relay can acquire the contested 'orders' lane (see the sibling
+        // retry test for the full rationale).
+        $flushSql = static::isPostgres() ? 'SELECT pg_advisory_unlock_all()' : 'SELECT RELEASE_ALL_LOCKS()';
+        self::$pdo->query($flushSql)->fetchAll();
+
+        $this->producer->produce(OrderPlaced::create('o-1', 100));
+
+        $logger = new RecordingLogger();
+        $badChannel = self::$amqp->channel();
+        $failing = new AmqpRelay(
+            outbox: $this->store,
+            amqp: $badChannel,
+            publish: new AmqpPublishConfig(exchange: 'missing_exchange_404'),
+            contentType: JsonWireFormat::CONTENT_TYPE,
+            lane: 'orders',
+            backoff: Backoff::exponential(initialDelayMs: 60_000, maxDelayMs: 600_000),
+            logger: $logger,
+        );
+
+        self::assertSame(0, $failing->drainOnce());
+
+        $warnings = array_filter($logger->records, static fn (array $r): bool => $r['level'] === LogLevel::WARNING);
+        self::assertNotEmpty($warnings, 'a backoff must be logged even when no ErrorHandler is set');
+        $first = array_values($warnings)[0];
+        self::assertArrayHasKey('retry_in_ms', $first['context']);
+        self::assertArrayHasKey('exception', $first['context']);
     }
 }
