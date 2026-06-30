@@ -58,7 +58,13 @@ final class SchemaTaxonomyTest extends TestCase
         @file_get_contents(
             self::registryUrl().'/config/'.rawurlencode($subject),
             false,
-            stream_context_create(['http' => ['method' => 'DELETE', 'ignore_errors' => true, 'timeout' => 5.0]]),
+            stream_context_create([
+                'http' => [
+                    'method' => 'DELETE',
+                    'ignore_errors' => true,
+                    'timeout' => 5.0,
+                ],
+            ]),
         );
     }
 }
