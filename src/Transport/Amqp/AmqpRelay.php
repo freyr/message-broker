@@ -10,6 +10,7 @@ use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Time\EpochMillis;
+use Freyr\MessageBroker\Transport\IdleSleep;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
@@ -41,7 +42,7 @@ use Throwable;
  */
 final class AmqpRelay
 {
-    private ?bool $laneAcquired = null;
+    private bool $laneAcquired = false;
 
     private bool $confirmsEnabled = false;
 
@@ -69,10 +70,14 @@ final class AmqpRelay
     {
         $this->registerSignalHandlers();
 
-        while (!$this->shouldStop) {
-            if ($this->drainOnce() === 0) {
-                usleep($this->idleSleepMs * 1_000);
+        try {
+            while (!$this->shouldStop) {
+                if ($this->drainOnce() === 0) {
+                    usleep(IdleSleep::micros($this->idleSleepMs, intdiv($this->idleSleepMs, 4)));
+                }
             }
+        } finally {
+            $this->shutdown();
         }
     }
 
@@ -81,12 +86,23 @@ final class AmqpRelay
         $this->shouldStop = true;
     }
 
+    /** Release the owned lane so a standby relay takes over at once. Idempotent. */
+    public function shutdown(): void
+    {
+        if ($this->laneAcquired) {
+            $this->outbox->releaseLane($this->lane);
+            $this->laneAcquired = false;
+        }
+    }
+
     /** One pass over the owned lane. @return int rows published and deleted */
     public function drainOnce(): int
     {
-        $this->laneAcquired ??= $this->outbox->tryAcquireLane($this->lane);
         if (!$this->laneAcquired) {
-            return 0; // another relay owns this lane
+            $this->laneAcquired = $this->outbox->tryAcquireLane($this->lane);
+            if (!$this->laneAcquired) {
+                return 0; // owned elsewhere — retry next tick so a standby can take over
+            }
         }
 
         $prefix = $this->outbox->lanePrefix($this->lane, $this->batchSize);

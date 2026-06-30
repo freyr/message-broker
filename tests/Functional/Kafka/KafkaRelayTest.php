@@ -70,4 +70,38 @@ final class KafkaRelayTest extends KafkaTestCase
         self::assertSame(0, $this->relay()->drainOnce());
         self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
     }
+
+    public function testRelayRetriesAcquisitionAfterRivalReleasesAndReleasesOnShutdown(): void
+    {
+        // Flush any advisory-lock re-entrancy accumulated by self::$pdo in prior
+        // tests: MySQL GET_LOCK and PG pg_try_advisory_lock both stack holds across
+        // calls on the same connection, so earlier drainOnce() calls would block the
+        // rival connection below until the session is fully cleared. Use query/fetchAll
+        // to consume the result set; exec() on a SELECT leaves it unbuffered on MySQL.
+        $flushSql = static::isPostgres() ? 'SELECT pg_advisory_unlock_all()' : 'SELECT RELEASE_ALL_LOCKS()';
+        self::$pdo->query($flushSql)->fetchAll();
+
+        // A rival on a separate connection holds the lane first.
+        $rival = new OutboxStore(self::newConnection(), static::platform());
+        self::assertTrue($rival->tryAcquireLane('orders'));
+
+        $this->producer->produce(OrderPlaced::create('o-1', 100));
+
+        // SAME relay instance: first drain can't acquire the contested lane…
+        $relay = $this->relay();
+        self::assertSame(0, $relay->drainOnce());
+        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
+
+        // …the rival releases, and the SAME instance must retry and drain
+        // (the old cached-false behavior would stay stuck at 0 forever).
+        $rival->releaseLane('orders');
+        self::assertSame(1, $relay->drainOnce());
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
+
+        // shutdown() frees the lane for a standby connection immediately.
+        $standby = new OutboxStore(self::newConnection(), static::platform());
+        self::assertFalse($standby->tryAcquireLane('orders'), 'relay still holds it before shutdown');
+        $relay->shutdown();
+        self::assertTrue($standby->tryAcquireLane('orders'), 'lane is free after shutdown');
+    }
 }
