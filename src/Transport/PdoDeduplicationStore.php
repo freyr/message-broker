@@ -45,4 +45,15 @@ final readonly class PdoDeduplicationStore
 
         return $statement->rowCount();
     }
+
+    /** Count entries created before the given instant (dry-run for cleanup). */
+    public function countOlderThan(int $beforeEpochMs): int
+    {
+        $statement = $this->pdo->prepare('SELECT COUNT(*) FROM message_deduplication WHERE created_at < :threshold');
+        $statement->execute([
+            'threshold' => EpochMillis::toDateTime($beforeEpochMs)->format('Y-m-d H:i:s.v'),
+        ]);
+
+        return (int) $statement->fetchColumn();
+    }
 }

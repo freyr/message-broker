@@ -101,6 +101,31 @@ final class DeadLetterStoreTest extends FunctionalTestCase
         self::assertCount(0, $this->store->list());
     }
 
+    public function testCountAndOffsetAndFilteredPurge(): void
+    {
+        $store = new PdoDeadLetterStore(self::$pdo, static::platform());
+        foreach (['order.placed', 'order.placed', 'order.cancelled'] as $i => $name) {
+            $store->store(DeadLetter::fromFailure(
+                source: 'orders_q',
+                messageId: "m-{$i}",
+                messageName: $name,
+                body: '{}',
+                headers: [],
+                error: new RuntimeException('boom'),
+                attempts: 1,
+            ));
+        }
+
+        self::assertSame(3, $store->count());
+        self::assertSame(2, $store->count(messageName: 'order.placed'));
+        self::assertCount(1, $store->list(limit: 1, offset: 0));
+        self::assertCount(1, $store->list(limit: 1, offset: 2));
+
+        // Filtered purge removes only the matching rows.
+        self::assertSame(2, $store->purge(messageName: 'order.placed'));
+        self::assertSame(1, $store->count());
+    }
+
     private function deadLetter(string $messageId, string $messageName = 'order.placed'): DeadLetter
     {
         return DeadLetter::fromFailure(

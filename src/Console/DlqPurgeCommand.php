@@ -35,7 +35,7 @@ final class DlqPurgeCommand extends Command
     {
         $olderThan = $input->getOption('older-than');
         $purged = $this->store->purge(
-            is_string($olderThan) ? EpochMillis::now() - Duration::toMilliseconds($olderThan) : null,
+            olderThanMs: is_string($olderThan) ? EpochMillis::now() - Duration::toMilliseconds($olderThan) : null,
         );
 
         $output->writeln("<info>Purged {$purged} dead letters.</info>");

@@ -66,6 +66,7 @@ final readonly class PdoDeadLetterStore
         ?string $source = null,
         ?int $sinceMs = null,
         int $limit = 100,
+        int $offset = 0,
     ): array {
         $conditions = [];
         $parameters = [];
@@ -84,18 +85,43 @@ final readonly class PdoDeadLetterStore
 
         $where = $conditions === [] ? '' : 'WHERE '.implode(' AND ', $conditions);
         $statement = $this->pdo->prepare(
-            "SELECT * FROM dead_letters {$where} ORDER BY failed_at DESC, id DESC LIMIT :limit",
+            "SELECT * FROM dead_letters {$where} ORDER BY failed_at DESC, id DESC LIMIT :limit OFFSET :offset",
         );
         foreach ($parameters as $name => $value) {
             $statement->bindValue($name, $value);
         }
         $statement->bindValue('limit', $limit, PDO::PARAM_INT);
+        $statement->bindValue('offset', $offset, PDO::PARAM_INT);
         $statement->execute();
 
         /** @var list<array<string, mixed>> $rows */
         $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
 
         return array_map($this->hydrate(...), $rows);
+    }
+
+    public function count(?string $messageName = null, ?string $source = null, ?int $sinceMs = null): int
+    {
+        $conditions = [];
+        $parameters = [];
+        if ($messageName !== null) {
+            $conditions[] = 'message_name = :message_name';
+            $parameters['message_name'] = $messageName;
+        }
+        if ($source !== null) {
+            $conditions[] = 'source = :source';
+            $parameters['source'] = $source;
+        }
+        if ($sinceMs !== null) {
+            $conditions[] = 'failed_at >= :since';
+            $parameters['since'] = EpochMillis::toDateTime($sinceMs)->format(self::DATETIME_FORMAT);
+        }
+
+        $where = $conditions === [] ? '' : 'WHERE '.implode(' AND ', $conditions);
+        $statement = $this->pdo->prepare("SELECT COUNT(*) FROM dead_letters {$where}");
+        $statement->execute($parameters);
+
+        return (int) $statement->fetchColumn();
     }
 
     /** Replay keeps the row for audit — marks replayed_at instead of deleting. */
@@ -108,17 +134,26 @@ final readonly class PdoDeadLetterStore
         ]);
     }
 
-    public function purge(?int $olderThanMs = null): int
+    public function purge(?string $messageName = null, ?string $source = null, ?int $olderThanMs = null): int
     {
-        if ($olderThanMs === null) {
-            $statement = $this->pdo->prepare('DELETE FROM dead_letters');
-            $statement->execute();
-        } else {
-            $statement = $this->pdo->prepare('DELETE FROM dead_letters WHERE failed_at < :threshold');
-            $statement->execute([
-                'threshold' => EpochMillis::toDateTime($olderThanMs)->format(self::DATETIME_FORMAT),
-            ]);
+        $conditions = [];
+        $parameters = [];
+        if ($messageName !== null) {
+            $conditions[] = 'message_name = :message_name';
+            $parameters['message_name'] = $messageName;
         }
+        if ($source !== null) {
+            $conditions[] = 'source = :source';
+            $parameters['source'] = $source;
+        }
+        if ($olderThanMs !== null) {
+            $conditions[] = 'failed_at < :threshold';
+            $parameters['threshold'] = EpochMillis::toDateTime($olderThanMs)->format(self::DATETIME_FORMAT);
+        }
+
+        $where = $conditions === [] ? '' : 'WHERE '.implode(' AND ', $conditions);
+        $statement = $this->pdo->prepare("DELETE FROM dead_letters {$where}");
+        $statement->execute($parameters);
 
         return $statement->rowCount();
     }
