@@ -11,9 +11,10 @@ use PDOStatement;
 /**
  * PostgreSQL dialect. Differences from MySQL:
  *   - INSERT IGNORE            → INSERT ... ON CONFLICT DO NOTHING
- *   - GET_LOCK(name)           → pg_try_advisory_lock(int) — PG advisory locks
+ *   - GET_LOCK(name)           → pg_try_advisory_lock(bigint) — PG advisory locks
  *                                take integer keys, not strings, so the lane is
- *                                hashed server-side via hashtext()
+ *                                hashed to int8 via hashtextextended() (PG10+),
+ *                                avoiding the int4 collisions of hashtext()
  *   - JSON columns             → JSONB
  *   - DATETIME(3)              → TIMESTAMP(3) (UTC by convention, like MySQL)
  *   - body column              → BYTEA (opaque wire bytes, both JSON and Avro)
@@ -34,10 +35,11 @@ final readonly class PostgreSqlPlatform implements Platform
     {
         // Session-scoped, self-releasing on disconnect — same semantics as
         // MySQL GET_LOCK. Returns true on success, false if owned elsewhere.
-        // NOTE: hashtext() can collide across lane names (int4 keyspace) —
-        // false contention is safe but stalls; harden to a 64-bit hash only if
-        // collisions are observed in practice.
-        return 'SELECT pg_try_advisory_lock(hashtext(:lane))';
+        // hashtextextended(:lane::text, 0::bigint) gives an int8 keyspace
+        // (PG10+), so lane names do not collide on the narrow int4
+        // hashtext() range. Note: the PG function name has no underscore
+        // (hashtextextended), unlike the colloquial hashtext_extended.
+        return 'SELECT pg_try_advisory_lock(hashtextextended(:lane::text, 0::bigint))';
     }
 
     public function selectLanePrefixSql(): string

@@ -49,4 +49,12 @@ final class PostgreSqlPlatformTest extends TestCase
     {
         self::assertSame('{"a":1}', (new PostgreSqlPlatform())->readBody('{"a":1}'));
     }
+
+    public function testLaneLockUsesInt8HashToAvoidCollisions(): void
+    {
+        self::assertStringContainsString(
+            'pg_try_advisory_lock(hashtextextended(:lane::text, 0::bigint))',
+            (new PostgreSqlPlatform())->tryAcquireLaneSql(),
+        );
+    }
 }
