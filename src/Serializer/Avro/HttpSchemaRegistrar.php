@@ -31,6 +31,14 @@ final class HttpSchemaRegistrar implements SchemaRegistrar
                 'schema' => $schemaJson,
             ], JSON_THROW_ON_ERROR),
         );
+        if ($status === 409) {
+            throw new IncompatibleSchema(
+                "Schema for '{$subject}' violates the subject's compatibility policy (HTTP 409): {$raw}",
+            );
+        }
+        if ($status === 422) {
+            throw new InvalidSchema("Schema for '{$subject}' is invalid (HTTP 422): {$raw}");
+        }
         if ($status < 200 || $status >= 300) {
             throw new RegistryUnavailable("POST /subjects/{$subject}/versions → HTTP {$status}: {$raw}");
         }
