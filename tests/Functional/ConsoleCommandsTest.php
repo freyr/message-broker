@@ -20,6 +20,7 @@ use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
 use RuntimeException;
+use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
 final class ConsoleCommandsTest extends FunctionalTestCase
@@ -150,5 +151,86 @@ final class ConsoleCommandsTest extends FunctionalTestCase
             static::isPostgres() ? 'body BYTEA' : 'body LONGBLOB',
             $tester->getDisplay(),
         );
+    }
+
+    public function testReplayAllFailsClosedWithoutForceOnNonTty(): void
+    {
+        $this->seedDeadLetter('m-a', 'order.placed');
+
+        $replay = new CommandTester(new DlqReplayCommand(
+            new ReplayService($this->deadLetters, new OutboxStore(self::$pdo, $this->platform), new JsonWireFormat()),
+            $this->deadLetters,
+        ));
+        $status = $replay->execute([
+            '--all' => true,
+        ], [
+            'interactive' => false,
+        ]);
+
+        self::assertSame(Command::FAILURE, $status);
+        self::assertStringContainsString('--force', $replay->getDisplay());
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
+    }
+
+    public function testReplayAllDryRunPreviewsWithoutReplaying(): void
+    {
+        $this->seedDeadLetter('m-b', 'order.placed');
+
+        $replay = new CommandTester(new DlqReplayCommand(
+            new ReplayService($this->deadLetters, new OutboxStore(self::$pdo, $this->platform), new JsonWireFormat()),
+            $this->deadLetters,
+        ));
+        $replay->execute([
+            '--all' => true,
+            '--dry-run' => true,
+        ], [
+            'interactive' => false,
+        ]);
+
+        $replay->assertCommandIsSuccessful();
+        self::assertStringContainsString('1', $replay->getDisplay());
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'), 'dry-run changes nothing');
+    }
+
+    public function testReplayAllWithForceReplays(): void
+    {
+        $this->seedDeadLetter('m-c', 'order.placed');
+
+        $replay = new CommandTester(new DlqReplayCommand(
+            new ReplayService($this->deadLetters, new OutboxStore(self::$pdo, $this->platform), new JsonWireFormat()),
+            $this->deadLetters,
+        ));
+        $replay->execute([
+            '--all' => true,
+            '--force' => true,
+            '--lane' => 'orders',
+        ], [
+            'interactive' => false,
+        ]);
+
+        $replay->assertCommandIsSuccessful();
+        self::assertSame(1, self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE lane = 'orders'"));
+    }
+
+    private function seedDeadLetter(string $id, string $name): void
+    {
+        $this->deadLetters->store(DeadLetter::fromFailure(
+            source: 'orders_q',
+            messageId: $id,
+            messageName: $name,
+            body: (string) json_encode([
+                'metadata' => [
+                    'message_id' => $id,
+                    'message_name' => $name,
+                    'created_at' => EpochMillis::now(),
+                ],
+                'payload' => [
+                    'order_id' => 'o-1',
+                ],
+            ]),
+            headers: [],
+            error: new RuntimeException('boom'),
+            attempts: 5,
+        ));
     }
 }
