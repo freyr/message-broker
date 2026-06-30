@@ -1,6 +1,6 @@
 # Freyr Message Broker
 
-Standalone PHP messaging library: transactional outbox with total per-lane ordering, consumer-side deduplication and dead-lettering with replay, and per-transport producers and consumers — AMQP first, Kafka and SQS planned. Plain PDO storage (MySQL, PostgreSQL), no framework coupling.
+Standalone PHP messaging library: transactional outbox with total per-lane ordering, consumer-side deduplication and dead-lettering with replay, and per-transport producers and consumers — AMQP and Kafka. Plain PDO storage (MySQL, PostgreSQL), no framework coupling.
 
 ## What it is
 
@@ -10,7 +10,6 @@ It is **multi-transport by design** so you adopt it within your existing infrast
 
 - **AMQP (RabbitMQ)** — competing-consumer queues, routed by message type. Best-effort per-key ordering (consistent-hash + single active consumer) is a **postponed** lane mode — not yet built; AMQP does **not** offer strict FIFO.
 - **Kafka** — the partitioned log via `ext-rdkafka` or Debezium CDC (planned). This is the transport for **strict** per-key FIFO.
-- **SQS** — standard and FIFO queues (planned).
 
 Strict per-key FIFO is **a Kafka capability**, not the point of the library — one of the things its exactly-once core makes possible on the partitioned log. AMQP's per-key ordering, when built, will be best-effort only; strict ordering that survives failures is routed to Kafka.
 

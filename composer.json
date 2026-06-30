@@ -1,6 +1,6 @@
 {
     "name": "freyr/message-broker",
-    "description": "Standalone messaging library: transactional outbox, deduplication, per-transport producers and consumers (AMQP, Kafka, SQS) with retries, DLQ and replay",
+    "description": "Standalone messaging library: transactional outbox, deduplication, per-transport producers and consumers (AMQP, Kafka) with retries, DLQ and replay",
     "type": "library",
     "license": "MIT",
     "keywords": [
@@ -10,7 +10,6 @@
         "deduplication",
         "amqp",
         "kafka",
-        "sqs",
         "dlq"
     ],
     "authors": [
@@ -37,8 +36,7 @@
         "apache/avro": "Required for the Avro serializer (Confluent wire format)",
         "php-amqplib/php-amqplib": "Required for the AMQP transport",
         "ext-rdkafka": "Required for the Kafka transport (relay + consumer)",
-        "ext-redis": "Required for RedisCachePool (shared cross-process schema-id/schema cache)",
-        "aws/aws-sdk-php": "Required for the SQS transport (future slice)"
+        "ext-redis": "Required for RedisCachePool (shared cross-process schema-id/schema cache)"
     },
     "autoload": {
         "psr-4": {
