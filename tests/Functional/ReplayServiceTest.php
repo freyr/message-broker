@@ -7,10 +7,12 @@ namespace Freyr\MessageBroker\Tests\Functional;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
+use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
+use Freyr\MessageBroker\Tests\Fixtures\RecordingEvents;
 use PDO;
 use RuntimeException;
 
@@ -117,5 +119,31 @@ final class ReplayServiceTest extends FunctionalTestCase
         $this->expectException(RuntimeException::class);
 
         $this->replay->replay('does-not-exist', lane: 'orders');
+    }
+
+    public function testReplayFiresReplayedEvent(): void
+    {
+        $events = new RecordingEvents();
+        $replay = new ReplayService(
+            $this->deadLetters,
+            new OutboxStore(self::$pdo, static::platform()),
+            new JsonWireFormat(),
+            $events,
+        );
+        $message = OrderPlaced::create('o-1', 4999);
+        $deadLetter = DeadLetter::fromFailure(
+            source: 'orders_q',
+            messageId: $message->id,
+            messageName: $message->name,
+            body: (string) json_encode($message->wire()),
+            headers: [],
+            error: new RuntimeException('boom'),
+            attempts: 5,
+        );
+        $this->deadLetters->store($deadLetter);
+
+        $replay->replay($deadLetter->id, lane: 'orders');
+
+        self::assertContains(BrokerEvents::REPLAYED, $events->names());
     }
 }

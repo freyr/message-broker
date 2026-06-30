@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\DeadLetter;
 
+use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
@@ -27,6 +28,7 @@ final readonly class ReplayService
         private PdoDeadLetterStore $deadLetters,
         private OutboxStore $outbox,
         private WireFormat $wireFormat,
+        private ?BrokerEvents $events = null,
     ) {}
 
     public function replay(string $deadLetterId, string $lane = 'default'): void
@@ -55,6 +57,12 @@ final readonly class ReplayService
         ));
 
         $this->deadLetters->markReplayed($deadLetter->id);
+
+        $this->events?->record(BrokerEvents::REPLAYED, [
+            'message_id' => $deadLetter->messageId,
+            'message_name' => $messageName,
+            'lane' => $lane,
+        ]);
     }
 
     /**

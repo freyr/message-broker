@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Outbox;
 
 use Freyr\MessageBroker\Message;
+use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Serializer\WireFormat;
 use InvalidArgumentException;
 
@@ -26,6 +27,7 @@ final readonly class OutboxProducer
         private OutboxStore $store,
         private WireFormat $wireFormat,
         private string $lane = 'default',
+        private ?BrokerEvents $events = null,
     ) {}
 
     /** @param array<string, mixed> $headers */
@@ -52,5 +54,11 @@ final readonly class OutboxProducer
             headers: $headers,
             createdAt: $message->createdAt,
         ));
+
+        $this->events?->record(BrokerEvents::PRODUCED, [
+            'lane' => $this->lane,
+            'message_id' => $message->id,
+            'message_name' => $message->name,
+        ]);
     }
 }

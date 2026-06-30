@@ -8,6 +8,7 @@ use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
+use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
@@ -15,6 +16,7 @@ use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
+use Freyr\MessageBroker\Tests\Fixtures\RecordingEvents;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
@@ -113,7 +115,7 @@ final class EndToEndTest extends FunctionalTestCase
         $this->relayChannel->close();
     }
 
-    private function consumer(): AmqpConsumer
+    private function consumer(?BrokerEvents $events = null): AmqpConsumer
     {
         $dispatch = function (IncomingMessage $incoming): void {
             ++$this->handlerAttempts;
@@ -136,6 +138,7 @@ final class EndToEndTest extends FunctionalTestCase
             ),
             deadLetters: $this->deadLetters,
             name: 'e2e_consumer',
+            events: $events,
         );
     }
 
@@ -193,5 +196,51 @@ final class EndToEndTest extends FunctionalTestCase
         $replayed = $this->deadLetters->find($deadLetters[0]->id);
         self::assertNotNull($replayed);
         self::assertNotNull($replayed->replayedAt, 'dead letter kept for audit, marked replayed');
+    }
+
+    public function testDispatchFiresDispatchedEvent(): void
+    {
+        $events = new RecordingEvents();
+        $this->producer->produce(OrderPlaced::create('o-1', 100));
+        self::assertSame(1, $this->relay->drainOnce());
+
+        $this->consumer($events)
+            ->run(messageLimit: 1, idleTimeoutSec: 10);
+
+        self::assertCount(1, $this->dispatched);
+        self::assertContains(BrokerEvents::DISPATCHED, $events->names());
+    }
+
+    public function testDuplicateDeliveryFiresDeduplicatedEvent(): void
+    {
+        $events = new RecordingEvents();
+        $message = OrderPlaced::create('o-dup', 100);
+
+        // Pre-seed dedup as if this consumer already processed the message.
+        (new PdoDeduplicationStore(self::$pdo, $this->platform))->acquire(
+            new IncomingMessage($message->id, $message->name, $message->createdAt, []),
+            'e2e_consumer',
+        );
+
+        $this->producer->produce($message);
+        self::assertSame(1, $this->relay->drainOnce());
+        $this->consumer($events)
+            ->run(messageLimit: 1, idleTimeoutSec: 10);
+
+        self::assertCount(0, $this->dispatched, 'duplicate is not dispatched');
+        self::assertContains(BrokerEvents::DEDUPLICATED, $events->names());
+    }
+
+    public function testDeadLetterFiresDeadLetteredEvent(): void
+    {
+        $events = new RecordingEvents();
+        $this->producer->produce(OrderPlaced::create('o-dlq', 100));
+        self::assertSame(1, $this->relay->drainOnce());
+
+        $this->handlerFails = true;
+        $this->consumer($events)
+            ->run(messageLimit: 2, idleTimeoutSec: 10);
+
+        self::assertContains(BrokerEvents::DEAD_LETTERED, $events->names());
     }
 }

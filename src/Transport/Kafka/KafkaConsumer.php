@@ -10,6 +10,7 @@ use Freyr\MessageBroker\Consumer\MessageDispatcher;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\ErrorHandler;
+use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Retry\RetryAction;
 use Freyr\MessageBroker\Serializer\Deserializer;
 use Freyr\MessageBroker\Serializer\MalformedMessage;
@@ -72,6 +73,7 @@ final class KafkaConsumer
         private readonly ?ErrorHandler $errorHandler = null,
         private readonly ?Closure $offsetCommitter = null,
         private readonly LoggerInterface $logger = new NullLogger(),
+        private readonly ?BrokerEvents $events = null,
     ) {}
 
     /**
@@ -167,11 +169,21 @@ final class KafkaConsumer
 
                 if (!$this->deduplication->acquire($incoming, $this->name)) {
                     $this->pdo->commit();
+                    $this->events?->record(BrokerEvents::DEDUPLICATED, [
+                        'consumer' => $this->name,
+                        'message_id' => $incoming->messageId,
+                        'message_name' => $incoming->messageName,
+                    ]);
                     break; // duplicate → advance
                 }
 
                 $this->dispatcher->dispatch($incoming);
                 $this->pdo->commit();
+                $this->events?->record(BrokerEvents::DISPATCHED, [
+                    'consumer' => $this->name,
+                    'message_id' => $incoming->messageId,
+                    'message_name' => $incoming->messageName,
+                ]);
                 break; // success → advance
             } catch (Throwable $error) {
                 if ($this->pdo->inTransaction()) {
@@ -282,6 +294,12 @@ final class KafkaConsumer
             error: $error,
             attempts: $attempt,
         ));
+
+        $this->events?->record(BrokerEvents::DEAD_LETTERED, [
+            'source' => $this->config->topic,
+            'message_id' => $messageId,
+            'message_name' => $messageName,
+        ]);
     }
 
     private function consumer(): RdKafkaConsumer

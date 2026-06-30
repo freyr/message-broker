@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional;
 
+use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingErrorHandler;
+use Freyr\MessageBroker\Tests\Fixtures\RecordingEvents;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingLogger;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
@@ -262,5 +264,35 @@ final class AmqpRelayTest extends FunctionalTestCase
         $first = array_values($warnings)[0];
         self::assertArrayHasKey('retry_in_ms', $first['context']);
         self::assertArrayHasKey('exception', $first['context']);
+    }
+
+    public function testDrainFiresRelayedEventWithCount(): void
+    {
+        // Flush advisory-lock re-entrancy accumulated by self::$pdo in prior tests
+        // so this relay can acquire the contested 'orders' lane (see the sibling
+        // retry test for the full rationale).
+        $flushSql = static::isPostgres() ? 'SELECT pg_advisory_unlock_all()' : 'SELECT RELEASE_ALL_LOCKS()';
+        self::$pdo->query($flushSql)->fetchAll();
+
+        $this->producer->produce(OrderPlaced::create('o-1', 100));
+        $this->producer->produce(OrderPlaced::create('o-1', 200));
+
+        $events = new RecordingEvents();
+        $relay = new AmqpRelay(
+            outbox: $this->store,
+            amqp: $this->channel,
+            publish: new AmqpPublishConfig(exchange: self::EXCHANGE),
+            contentType: JsonWireFormat::CONTENT_TYPE,
+            lane: 'orders',
+            events: $events,
+        );
+
+        self::assertSame(2, $relay->drainOnce());
+        self::assertContains(BrokerEvents::RELAYED, $events->names());
+        $relayed = array_values(array_filter(
+            $events->records,
+            static fn (array $r): bool => $r['event'] === BrokerEvents::RELAYED,
+        ))[0];
+        self::assertSame(2, $relayed['context']['count']);
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Transport\Kafka;
 
 use Freyr\MessageBroker\ErrorHandler;
+use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
@@ -59,6 +60,7 @@ final class KafkaRelay
         private readonly int $idleSleepMs = 200,
         private readonly int $flushTimeoutMs = 5_000,
         private readonly LoggerInterface $logger = new NullLogger(),
+        private readonly ?BrokerEvents $events = null,
     ) {
         $this->backoff = $backoff ?? Backoff::exponential(initialDelayMs: 1_000, maxDelayMs: 300_000);
     }
@@ -119,6 +121,11 @@ final class KafkaRelay
         }
 
         $this->outbox->deleteBatch(array_map(static fn (OutboxRecord $record): string => $record->id, $prefix));
+
+        $this->events?->record(BrokerEvents::RELAYED, [
+            'lane' => $this->lane,
+            'count' => count($prefix),
+        ]);
 
         return count($prefix);
     }

@@ -9,6 +9,7 @@ use Freyr\MessageBroker\Consumer\MessageDispatcher;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\ErrorHandler;
+use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Retry\RetryAction;
 use Freyr\MessageBroker\Serializer\Deserializer;
 use Freyr\MessageBroker\Serializer\MalformedMessage;
@@ -69,6 +70,7 @@ final class AmqpConsumer
         private readonly string $name = 'default', // dedup scope
         private readonly ?ErrorHandler $errorHandler = null,
         private readonly LoggerInterface $logger = new NullLogger(),
+        private readonly ?BrokerEvents $events = null,
     ) {}
 
     /**
@@ -150,6 +152,11 @@ final class AmqpConsumer
 
             if (!$this->deduplication->acquire($incoming, $this->name)) {
                 $this->pdo->commit();
+                $this->events?->record(BrokerEvents::DEDUPLICATED, [
+                    'consumer' => $this->name,
+                    'message_id' => $incoming->messageId,
+                    'message_name' => $incoming->messageName,
+                ]);
                 $this->acknowledge($delivery);
 
                 return;
@@ -158,6 +165,11 @@ final class AmqpConsumer
             $this->dispatcher->dispatch($incoming);
 
             $this->pdo->commit();
+            $this->events?->record(BrokerEvents::DISPATCHED, [
+                'consumer' => $this->name,
+                'message_id' => $incoming->messageId,
+                'message_name' => $incoming->messageName,
+            ]);
             $this->acknowledge($delivery);
         } catch (Throwable $error) {
             $this->pdo->rollBack();
@@ -313,6 +325,12 @@ final class AmqpConsumer
             error: $error,
             attempts: $attempt,
         ));
+
+        $this->events?->record(BrokerEvents::DEAD_LETTERED, [
+            'source' => $this->queue->queue,
+            'message_id' => $messageId,
+            'message_name' => $messageName,
+        ]);
     }
 
     private function acknowledge(AMQPMessage $delivery): void

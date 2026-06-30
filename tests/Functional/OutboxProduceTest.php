@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional;
 
+use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
+use Freyr\MessageBroker\Tests\Fixtures\RecordingEvents;
 use Freyr\MessageBroker\Tests\Fixtures\Unserializable;
 use InvalidArgumentException;
 use JsonException;
@@ -82,5 +84,22 @@ final class OutboxProduceTest extends FunctionalTestCase
         }
 
         self::assertSame(0, (int) self::$pdo->query('SELECT COUNT(*) FROM outbox_messages')->fetchColumn());
+    }
+
+    public function testProduceFiresProducedEvent(): void
+    {
+        $events = new RecordingEvents();
+        $producer = new OutboxProducer(
+            store: new OutboxStore(self::$pdo, static::platform()),
+            wireFormat: new JsonWireFormat(),
+            lane: 'orders',
+            events: $events,
+        );
+        $message = OrderPlaced::create('o-7', 100);
+
+        $producer->produce($message);
+
+        self::assertContains(BrokerEvents::PRODUCED, $events->names());
+        self::assertSame($message->id, $events->records[0]['context']['message_id']);
     }
 }
