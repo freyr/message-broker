@@ -24,6 +24,14 @@ interface Platform
     public function tryAcquireLaneSql(): string;
 
     /**
+     * Release the lane lock acquired via tryAcquireLaneSql so a restarting or
+     * standby relay can take the lane over immediately. Bound with :lane.
+     * Implementations MUST derive the lock key identically to tryAcquireLaneSql()
+     * (same hash, same casts) — a mismatched key makes the release a silent no-op.
+     */
+    public function releaseLaneSql(): string;
+
+    /**
      * Contiguous prefix of one owned lane, ordered by id (UUIDv7 = time).
      * No SKIP LOCKED — skipping a locked head row would violate ordering;
      * exclusivity is lane-level, via the advisory lock.

@@ -59,6 +59,15 @@ final readonly class OutboxStore
         return $result === 1 || $result === '1' || $result === true || $result === 't';
     }
 
+    /** Release the lane lock so a restarting/standby relay can take over. */
+    public function releaseLane(string $lane): void
+    {
+        $statement = $this->pdo->prepare($this->platform->releaseLaneSql());
+        $statement->execute([
+            'lane' => $lane,
+        ]);
+    }
+
     /**
      * Contiguous prefix of one OWNED lane, ordered by id (UUIDv7 = time).
      * Caller checks head eligibility (available_at) on the first row only —

@@ -42,6 +42,13 @@ final readonly class PostgreSqlPlatform implements Platform
         return 'SELECT pg_try_advisory_lock(hashtextextended(:lane::text, 0::bigint))';
     }
 
+    public function releaseLaneSql(): string
+    {
+        // Must byte-match the key used by tryAcquireLaneSql exactly, casts
+        // included (catalog function is `hashtextextended`, no underscore).
+        return 'SELECT pg_advisory_unlock(hashtextextended(:lane::text, 0::bigint))';
+    }
+
     public function selectLanePrefixSql(): string
     {
         return <<<'SQL'

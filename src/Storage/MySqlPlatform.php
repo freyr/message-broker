@@ -25,6 +25,14 @@ final readonly class MySqlPlatform implements Platform
         return "SELECT GET_LOCK(CONCAT('outbox:', :lane), 0)";
     }
 
+    public function releaseLaneSql(): string
+    {
+        // Result intentionally ignored by the caller — a best-effort fast handoff
+        // (the lock self-releases on disconnect anyway). RELEASE_LOCK returns
+        // 1 (released), 0 (not held by this thread), or NULL (no such lock).
+        return "SELECT RELEASE_LOCK(CONCAT('outbox:', :lane))";
+    }
+
     public function selectLanePrefixSql(): string
     {
         // Head eligibility (available_at) is checked in code on the FIRST row

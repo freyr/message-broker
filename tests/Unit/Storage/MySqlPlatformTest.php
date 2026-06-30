@@ -20,4 +20,12 @@ final class MySqlPlatformTest extends TestCase
         $this->expectException(RuntimeException::class);
         (new MySqlPlatform())->readBody(null);
     }
+
+    public function testReleaseLaneUsesReleaseLock(): void
+    {
+        self::assertStringContainsString(
+            "RELEASE_LOCK(CONCAT('outbox:', :lane))",
+            (new MySqlPlatform())->releaseLaneSql(),
+        );
+    }
 }

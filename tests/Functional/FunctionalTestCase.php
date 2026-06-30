@@ -39,19 +39,9 @@ abstract class FunctionalTestCase extends TestCase
 
     public static function setUpBeforeClass(): void
     {
-        [$dsn, $user, $password] = self::isPostgres()
-            ? [getenv('POSTGRES_DSN'), getenv('POSTGRES_USER'), getenv('POSTGRES_PASSWORD')]
-            : [getenv('MYSQL_DSN'), getenv('MYSQL_USER'), getenv('MYSQL_PASSWORD')];
+        [$dsn, $user, $password] = self::resolveCredentials();
 
-        if (!is_string($dsn) || $dsn === '') {
-            throw new RuntimeException(self::dbEngine().' DSN not set');
-        }
-
-        if (!str_contains($dsn, '_test')) {
-            throw new RuntimeException('Refusing to run: database name must contain "_test"');
-        }
-
-        self::$pdo = new PDO($dsn, $user ?: '', $password ?: '', [
+        self::$pdo = new PDO($dsn, $user, $password, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         ]);
 
@@ -70,6 +60,40 @@ abstract class FunctionalTestCase extends TestCase
         self::$pdo->exec('DELETE FROM outbox_messages');
         self::$pdo->exec('DELETE FROM message_deduplication');
         self::$pdo->exec('DELETE FROM dead_letters');
+    }
+
+    /**
+     * Resolve and validate DB credentials for the active engine. Refuses any DSN
+     * whose database name lacks "_test" — a hard safety guard shared by every
+     * connection this base opens.
+     *
+     * @return array{string, string, string}
+     */
+    private static function resolveCredentials(): array
+    {
+        [$dsn, $user, $password] = self::isPostgres()
+            ? [getenv('POSTGRES_DSN'), getenv('POSTGRES_USER'), getenv('POSTGRES_PASSWORD')]
+            : [getenv('MYSQL_DSN'), getenv('MYSQL_USER'), getenv('MYSQL_PASSWORD')];
+
+        if (!is_string($dsn) || $dsn === '') {
+            throw new RuntimeException(self::dbEngine().' DSN not set');
+        }
+
+        if (!str_contains($dsn, '_test')) {
+            throw new RuntimeException('Refusing to run: database name must contain "_test"');
+        }
+
+        return [$dsn, $user ?: '', $password ?: ''];
+    }
+
+    /** A fresh, independent PDO connection (for cross-session lock tests). */
+    protected static function newConnection(): PDO
+    {
+        [$dsn, $user, $password] = self::resolveCredentials();
+
+        return new PDO($dsn, $user, $password, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        ]);
     }
 
     protected static function fetchInt(string $sql): int

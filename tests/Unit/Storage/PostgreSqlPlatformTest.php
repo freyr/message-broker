@@ -57,4 +57,12 @@ final class PostgreSqlPlatformTest extends TestCase
             (new PostgreSqlPlatform())->tryAcquireLaneSql(),
         );
     }
+
+    public function testReleaseLaneUsesMatchingInt8Unlock(): void
+    {
+        self::assertStringContainsString(
+            'pg_advisory_unlock(hashtextextended(:lane::text, 0::bigint))',
+            (new PostgreSqlPlatform())->releaseLaneSql(),
+        );
+    }
 }
