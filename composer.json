@@ -39,6 +39,11 @@
         "ext-rdkafka": "Required for the Kafka transport (relay + consumer)",
         "ext-redis": "Required for RedisCachePool (shared cross-process schema-id/schema cache)"
     },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "1.0-dev"
+        }
+    },
     "autoload": {
         "psr-4": {
             "Freyr\\MessageBroker\\": "src/"

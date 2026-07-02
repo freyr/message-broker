@@ -1,4 +1,4 @@
-.PHONY: help build logs shell test test-pgsql test-all
+.PHONY: help build logs shell install test test-pgsql test-all
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -14,6 +14,9 @@ logs: ## Show container logs
 
 shell: ## Open shell in PHP container
 	docker compose run --rm php sh
+
+install: ## Install Composer dependencies in the container
+	docker compose run --rm php composer install
 
 test: ## Run tests against MySQL
 	docker compose run --rm php vendor/bin/phpunit
