@@ -19,7 +19,10 @@ final class HttpSchemaRegistrar implements SchemaRegistrar
 
     public function register(string $subject, string $schemaJson, ?CompatibilityLevel $compatibility = null): int
     {
-        // Govern the subject BEFORE its first version, so the first schema is checked too.
+        // Govern the subject BEFORE its first version: the first schema has no
+        // predecessor to be checked against, but pinning the policy up front
+        // closes the window where a later version could slip in under the
+        // registry default.
         if ($compatibility !== null) {
             $this->setCompatibility($subject, $compatibility);
         }

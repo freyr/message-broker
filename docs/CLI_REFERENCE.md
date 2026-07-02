@@ -64,7 +64,7 @@ step; the runtime never registers.
 | Option | Description |
 | --- | --- |
 | `--subject` | Register only this subject (message name); default registers every subject mapped in `$schemas`. |
-| `--compatibility` | Pin the subject's compatibility level before registering (e.g. `FULL`, `BACKWARD`). Governs the subject before its first version, so the first schema is checked too. |
+| `--compatibility` | Pin the subject's compatibility level before registering (e.g. `FULL`, `BACKWARD`). Governs the subject before its first version — the first schema itself has no predecessor to be checked against, but the policy is in place before any later version can arrive under the registry default. |
 | `--dry-run` | List the subjects that would be registered without writing anything. |
 
 ## `message-broker:schema:compatibility`
