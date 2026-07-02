@@ -7,6 +7,8 @@ each with its listed constructor dependencies and add it to your
 application's `Symfony\Component\Console\Application`:
 
 ```php
+use Freyr\MessageBroker\Console\SetupSchemaCommand;
+
 $application->add(new SetupSchemaCommand($pdo, $platform));
 ```
 

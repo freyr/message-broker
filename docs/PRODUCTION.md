@@ -86,8 +86,8 @@ Derive operational metrics from the `outbox_messages`, `message_deduplication`,
 and `dead_letters` tables plus these events:
 
 - **Throughput** — the `RELAYED`/`DISPATCHED` event rate.
-- **Consumer lag** — outbox row age (the oldest `created_at`/`available_at`
-  per lane) and, on Kafka, standard consumer-group lag.
+- **Relay backlog** — outbox row age (oldest row in `outbox_messages`).
+- **Consumer lag** — broker queue depth (AMQP) / consumer-group lag (Kafka).
 - **DLQ depth** — `SELECT COUNT(*) FROM dead_letters WHERE replayed_at IS NULL`,
   optionally grouped by `source`/`message_name`.
 

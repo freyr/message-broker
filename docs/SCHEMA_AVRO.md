@@ -133,6 +133,6 @@ outage, so callers (and CI) can branch on which one happened:
   **permanent**; retrying will not help. A CI registration gate should fail
   the build on this error.
 - **`RegistryUnavailable`** — a network failure, a 5xx response, or an
-  unparseable response. This is **transient**; on the consumer side it
-  propagates so the delivery is redelivered rather than dead-lettered, and
-  on the relay it backs off the lane head rather than failing permanently.
+  unparseable response. This is **transient**; at produce time the exception
+  throws inside your transaction — nothing commits; on the consumer side it
+  propagates so the delivery is redelivered rather than dead-lettered.

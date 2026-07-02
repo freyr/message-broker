@@ -8,7 +8,7 @@ True **exactly-once** processing is rare and genuinely hard to build in PHP — 
 
 It is **multi-transport by design** so you adopt it within your existing infrastructure instead of standing up a new broker. Each transport is met on its own terms:
 
-- **AMQP (RabbitMQ)** — competing-consumer queues, routed by message type. Best-effort per-key ordering (consistent-hash + single active consumer) is a **postponed** lane mode — not yet built; AMQP does **not** offer strict FIFO.
+- **AMQP (RabbitMQ)** — competing-consumer queues, routed by message name. Best-effort per-key ordering (consistent-hash + single active consumer) is a **postponed** lane mode — not yet built; AMQP does **not** offer strict FIFO.
 - **Kafka** — the partitioned log via `ext-rdkafka` or Debezium CDC (planned). This is the transport for **strict** per-key FIFO.
 
 Strict per-key FIFO is **a Kafka capability**, not the point of the library — one of the things its exactly-once core makes possible on the partitioned log. AMQP's per-key ordering, when built, will be best-effort only; strict ordering that survives failures is routed to Kafka.

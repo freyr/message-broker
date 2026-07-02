@@ -17,6 +17,6 @@ The former Symfony Messenger bundle remains available as `v0.x` tags.
 - Support for MySQL and PostgreSQL database backends
 - JSON and Avro wire formats with Confluent schema registry compatibility and PSR-6 schema caching
 - Schema registration and compatibility governance tooling
-- PSR-3 logging and BrokerEvents for operational observability
+- PSR-3 logging, BrokerEvents instrumentation events, and an ErrorHandler hook for operational observability
 - Dead-letter queue and deduplication CLI with dry-run and force-execute guardrails
 - Storage interfaces (OutboxStore, DeadLetterStore, DeduplicationStore) with PDO default implementations
