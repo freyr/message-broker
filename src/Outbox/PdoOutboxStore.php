@@ -7,6 +7,7 @@ namespace Freyr\MessageBroker\Outbox;
 use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Time\EpochMillis;
 use PDO;
+use Throwable;
 
 /**
  * PDO-backed outbox table access — the default OutboxStore implementation.
@@ -86,6 +87,51 @@ final readonly class PdoOutboxStore implements OutboxStore
         $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
 
         return array_map($this->hydrate(...), $rows);
+    }
+
+    public function drainClaimed(string $lane, int $limit, callable $publish): int
+    {
+        $isolation = $this->platform->claimIsolationSql();
+        if ($isolation !== null) {
+            $this->pdo->exec($isolation); // next transaction only
+        }
+        $this->pdo->beginTransaction();
+
+        try {
+            $statement = $this->pdo->prepare($this->platform->selectClaimBatchSql());
+            $statement->bindValue('lane', $lane);
+            $statement->bindValue('now', EpochMillis::toDateTime(EpochMillis::now())->format('Y-m-d H:i:s.v'));
+            $statement->bindValue('limit', $limit, PDO::PARAM_INT);
+            $statement->execute();
+
+            /** @var list<array<string, mixed>> $rows */
+            $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+
+            if ($rows === []) {
+                $this->pdo->commit();
+
+                return 0;
+            }
+
+            $outcome = $publish(array_map($this->hydrate(...), $rows));
+
+            if ($outcome->publishedIds !== []) {
+                $this->deleteBatch($outcome->publishedIds); // joins the open claim transaction
+            }
+            foreach ($outcome->retryAtMs as $id => $availableAtMs) {
+                $this->scheduleRetry($id, $availableAtMs);
+            }
+
+            $this->pdo->commit();
+
+            return count($outcome->publishedIds);
+        } catch (Throwable $error) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $error;
+        }
     }
 
     /** Successful publish — the row's job is done. Rows leave ONLY this way. */
@@ -178,8 +224,10 @@ final readonly class PdoOutboxStore implements OutboxStore
             throw new \RuntimeException("Outbox column '{$column}' does not hold a JSON object");
         }
 
-        /** @var array<string, mixed> $decoded */
-        return $decoded;
+        /** @var array<string, mixed> $typed */
+        $typed = $decoded;
+
+        return $typed;
     }
 
     private static function epochMilliseconds(string $storedDateTime): int

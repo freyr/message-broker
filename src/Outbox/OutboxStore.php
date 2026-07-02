@@ -40,6 +40,23 @@ interface OutboxStore
      */
     public function lanePrefix(string $lane, int $limit): array;
 
+    /**
+     * Competing drain (opt-in; the AMQP parallel mode): claim up to $limit
+     * eligible rows of one lane (available_at <= now, id order — a FIFO bias,
+     * not a contract) inside a transaction owned by this store, hand them to
+     * $publish, apply its outcome (delete published rows; bump attempts and
+     * available_at on retried rows), and commit. Concurrent claimers skip
+     * each other's locked rows — they never block. If $publish throws, the
+     * transaction rolls back and the rows are instantly reclaimable; a dead
+     * connection has the same effect (crash recovery for free). An empty
+     * claim returns 0 without invoking $publish.
+     *
+     * @param callable(non-empty-list<OutboxRecord>): ClaimOutcome $publish
+     *
+     * @return int rows published and deleted
+     */
+    public function drainClaimed(string $lane, int $limit, callable $publish): int;
+
     /** Successful publish — the row's job is done. Rows leave ONLY this way. */
     public function delete(string $id): void;
 
