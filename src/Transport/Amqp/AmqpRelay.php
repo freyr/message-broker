@@ -9,12 +9,9 @@ use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
-use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\IdleSleep;
 use PhpAmqpLib\Channel\AMQPChannel;
-use PhpAmqpLib\Message\AMQPMessage;
-use PhpAmqpLib\Wire\AMQPTable;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Throwable;
@@ -47,27 +44,28 @@ final class AmqpRelay
 {
     private bool $laneAcquired = false;
 
-    private bool $confirmsEnabled = false;
-
     private bool $shouldStop = false;
 
     private readonly Backoff $backoff;
 
+    private readonly AmqpMessagePublisher $publisher;
+
     public function __construct(
         private readonly OutboxStore $outbox,
-        private readonly AMQPChannel $amqp,
-        private readonly AmqpPublishConfig $publish,
-        private readonly string $contentType,
+        AMQPChannel $amqp,
+        AmqpPublishConfig $publish,
+        string $contentType,
         private readonly string $lane = 'default',
         private readonly int $batchSize = 100,
         ?Backoff $backoff = null,
         private readonly ?ErrorHandler $errorHandler = null,
         private readonly int $idleSleepMs = 200,
-        private readonly int $confirmTimeoutSec = 5,
+        int $confirmTimeoutSec = 5,
         private readonly LoggerInterface $logger = new NullLogger(),
         private readonly ?BrokerEvents $events = null,
     ) {
         $this->backoff = $backoff ?? Backoff::exponential(initialDelayMs: 1_000, maxDelayMs: 300_000);
+        $this->publisher = new AmqpMessagePublisher($amqp, $publish, $contentType, $confirmTimeoutSec);
     }
 
     /** Long-running entrypoint; stops on SIGTERM/SIGINT when pcntl is available. */
@@ -118,7 +116,7 @@ final class AmqpRelay
         }
 
         try {
-            $this->publishBatch($prefix);
+            $this->publisher->publishBatch($prefix);
         } catch (Throwable $error) {
             $this->backOffHead($prefix[0], $error);
 
@@ -133,38 +131,6 @@ final class AmqpRelay
         ]);
 
         return count($prefix);
-    }
-
-    /** @param non-empty-list<OutboxRecord> $batch */
-    private function publishBatch(array $batch): void
-    {
-        if ($this->publish->publisherConfirms && !$this->confirmsEnabled) {
-            $this->amqp->confirm_select();
-            $this->confirmsEnabled = true;
-        }
-
-        foreach ($batch as $record) {
-            // Explode the metadata column into individual x-message-* headers
-            // (E7); produce-time headers ride alongside. array_merge order puts
-            // the envelope headers last, so they win on any key collision. The
-            // relay never parses the body.
-            $headers = array_merge($record->headers, MetadataHeader::explode($record->metadata));
-
-            $message = new AMQPMessage($record->body, [
-                'content_type' => $this->contentType,
-                'message_id' => $record->id,
-                'delivery_mode' => AMQPMessage::DELIVERY_MODE_PERSISTENT,
-                'application_headers' => new AMQPTable($headers),
-            ]);
-            // Route by message name (the message type). Per-key routing is a
-            // postponed lane mode (see AmqpPublishConfig); no knob here today.
-            $this->amqp->basic_publish($message, $this->publish->exchange, $record->messageName());
-        }
-
-        if ($this->publish->publisherConfirms) {
-            // One confirm wait for the whole batch.
-            $this->amqp->wait_for_pending_acks($this->confirmTimeoutSec);
-        }
     }
 
     private function backOffHead(OutboxRecord $head, Throwable $error): void
