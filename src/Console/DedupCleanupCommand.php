@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Console;
 
 use Freyr\MessageBroker\Time\EpochMillis;
-use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
+use Freyr\MessageBroker\Transport\DeduplicationStore;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -19,7 +19,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 final class DedupCleanupCommand extends Command
 {
     public function __construct(
-        private readonly PdoDeduplicationStore $store,
+        private readonly DeduplicationStore $store,
     ) {
         parent::__construct();
     }

@@ -25,7 +25,7 @@ use RuntimeException;
 final readonly class ReplayService
 {
     public function __construct(
-        private PdoDeadLetterStore $deadLetters,
+        private DeadLetterStore $deadLetters,
         private OutboxStore $outbox,
         private WireFormat $wireFormat,
         private ?BrokerEvents $events = null,

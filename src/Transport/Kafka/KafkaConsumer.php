@@ -8,7 +8,7 @@ use Closure;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\Consumer\MessageDispatcher;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
-use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
+use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\ErrorHandler;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Retry\RetryAction;
@@ -16,7 +16,7 @@ use Freyr\MessageBroker\Serializer\Deserializer;
 use Freyr\MessageBroker\Serializer\MalformedMessage;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Time\EpochMillis;
-use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
+use Freyr\MessageBroker\Transport\DeduplicationStore;
 use PDO;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -66,9 +66,9 @@ final class KafkaConsumer
         private readonly Deserializer $deserializer,
         private readonly MessageDispatcher $dispatcher,
         private readonly PDO $pdo,
-        private readonly PdoDeduplicationStore $deduplication,
+        private readonly DeduplicationStore $deduplication,
         private readonly KafkaRetryPolicy $retryPolicy,
-        private readonly PdoDeadLetterStore $deadLetters,
+        private readonly DeadLetterStore $deadLetters,
         private readonly string $name = 'default', // dedup scope
         private readonly ?ErrorHandler $errorHandler = null,
         private readonly ?Closure $offsetCommitter = null,

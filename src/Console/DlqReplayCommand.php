@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Console;
 
-use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
+use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -24,7 +24,7 @@ final class DlqReplayCommand extends Command
 {
     public function __construct(
         private readonly ReplayService $replay,
-        private readonly PdoDeadLetterStore $store,
+        private readonly DeadLetterStore $store,
     ) {
         parent::__construct();
     }
