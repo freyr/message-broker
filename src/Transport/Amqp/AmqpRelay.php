@@ -92,9 +92,22 @@ final class AmqpRelay
     /** Release the owned lane so a standby relay takes over at once. Idempotent. */
     public function shutdown(): void
     {
-        if ($this->laneAcquired) {
+        if (!$this->laneAcquired) {
+            return;
+        }
+        $this->laneAcquired = false;
+
+        try {
             $this->outbox->releaseLane($this->lane);
-            $this->laneAcquired = false;
+        } catch (Throwable $error) {
+            // shutdown() runs in run()'s finally — a throwing release (dead PDO
+            // connection) would mask the loop's root-cause error. The advisory
+            // lock is connection-scoped and self-releases on disconnect, so
+            // swallowing the failure loses nothing.
+            $this->logger->warning('Lane release failed during shutdown; the lock self-releases on disconnect', [
+                'exception' => $error,
+                'lane' => $this->lane,
+            ]);
         }
     }
 
