@@ -21,7 +21,7 @@ Strict per-key FIFO is **a Kafka capability**, not the point of the library — 
 composer require freyr/message-broker
 ```
 
-Requires PHP ≥ 8.4 and `ext-pdo`. Install the pieces you use:
+Requires PHP ≥ 8.4, `ext-pdo`, and MySQL 8+ or PostgreSQL 13+. Install the pieces you use:
 
 | Need | Add |
 |---|---|
