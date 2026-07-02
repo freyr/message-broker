@@ -28,4 +28,22 @@ final class MySqlPlatformTest extends TestCase
             (new MySqlPlatform())->releaseLaneSql(),
         );
     }
+
+    public function testSelectClaimBatchSqlSkipsLockedEligibleRowsInIdOrder(): void
+    {
+        $sql = (new MySqlPlatform())->selectClaimBatchSql();
+
+        self::assertStringContainsString('WHERE lane = :lane AND available_at <= :now', $sql);
+        self::assertStringContainsString('ORDER BY id', $sql);
+        self::assertStringContainsString('LIMIT :limit', $sql);
+        self::assertStringContainsString('FOR UPDATE SKIP LOCKED', $sql);
+    }
+
+    public function testClaimRunsAtReadCommittedToAvoidGapLocks(): void
+    {
+        self::assertSame(
+            'SET TRANSACTION ISOLATION LEVEL READ COMMITTED',
+            (new MySqlPlatform())->claimIsolationSql(),
+        );
+    }
 }

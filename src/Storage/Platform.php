@@ -38,6 +38,26 @@ interface Platform
      */
     public function selectLanePrefixSql(): string;
 
+    /**
+     * Competing drain (opt-in): up to :limit eligible rows of one lane
+     * (available_at <= :now), ordered by id — a FIFO bias, not a contract —
+     * with FOR UPDATE SKIP LOCKED so concurrent claimers never block each
+     * other. Bound with :lane, :now, :limit. Contrast selectLanePrefixSql():
+     * eligibility moves into SQL here because rows overtake freely; the
+     * ordered drain keeps its head-check-in-code semantics (D17).
+     */
+    public function selectClaimBatchSql(): string;
+
+    /**
+     * Statement to execute immediately before starting a claim transaction,
+     * or null when none is needed. MySQL: the claim must run at READ
+     * COMMITTED — under the default REPEATABLE READ, FOR UPDATE takes
+     * next-key/gap locks that block producers inserting into the scanned
+     * lane range for the duration of a publish round-trip. The statement
+     * applies to the NEXT transaction only; never set per-session.
+     */
+    public function claimIsolationSql(): ?string;
+
     /** Insert-or-ignore for the deduplication table. */
     public function insertDeduplicationSql(): string;
 

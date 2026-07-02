@@ -59,6 +59,22 @@ final readonly class PostgreSqlPlatform implements Platform
             SQL;
     }
 
+    public function selectClaimBatchSql(): string
+    {
+        return <<<'SQL'
+            SELECT * FROM outbox_messages
+            WHERE lane = :lane AND available_at <= :now
+            ORDER BY id
+            LIMIT :limit
+            FOR UPDATE SKIP LOCKED
+            SQL;
+    }
+
+    public function claimIsolationSql(): ?string
+    {
+        return null; // READ COMMITTED is the default; PG has no gap locks
+    }
+
     public function insertDeduplicationSql(): string
     {
         // rowCount() = 0 on conflict — same duplicate signal as INSERT IGNORE.

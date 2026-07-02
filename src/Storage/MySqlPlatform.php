@@ -45,6 +45,26 @@ final readonly class MySqlPlatform implements Platform
             SQL;
     }
 
+    public function selectClaimBatchSql(): string
+    {
+        return <<<'SQL'
+            SELECT * FROM outbox_messages
+            WHERE lane = :lane AND available_at <= :now
+            ORDER BY id
+            LIMIT :limit
+            FOR UPDATE SKIP LOCKED
+            SQL;
+    }
+
+    /** @phpstan-ignore-next-line return.unusedType (interface declares ?string; MySQL never returns null) */
+    public function claimIsolationSql(): ?string
+    {
+        // FOR UPDATE under REPEATABLE READ takes gap locks that would block
+        // producer INSERTs into the scanned lane range; READ COMMITTED takes
+        // row locks only. Applies to the next transaction, then reverts.
+        return 'SET TRANSACTION ISOLATION LEVEL READ COMMITTED';
+    }
+
     public function insertDeduplicationSql(): string
     {
         return <<<'SQL'

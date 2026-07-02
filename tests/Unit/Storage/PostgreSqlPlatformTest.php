@@ -65,4 +65,19 @@ final class PostgreSqlPlatformTest extends TestCase
             (new PostgreSqlPlatform())->releaseLaneSql(),
         );
     }
+
+    public function testSelectClaimBatchSqlSkipsLockedEligibleRowsInIdOrder(): void
+    {
+        $sql = (new PostgreSqlPlatform())->selectClaimBatchSql();
+
+        self::assertStringContainsString('WHERE lane = :lane AND available_at <= :now', $sql);
+        self::assertStringContainsString('ORDER BY id', $sql);
+        self::assertStringContainsString('LIMIT :limit', $sql);
+        self::assertStringContainsString('FOR UPDATE SKIP LOCKED', $sql);
+    }
+
+    public function testClaimNeedsNoIsolationOverride(): void
+    {
+        self::assertNull((new PostgreSqlPlatform())->claimIsolationSql());
+    }
 }
