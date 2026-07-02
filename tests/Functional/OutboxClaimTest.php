@@ -121,6 +121,9 @@ final class OutboxClaimTest extends FunctionalTestCase
         self::assertCount(1, $rivalRows);
 
         $seen = [];
+        // A SKIP LOCKED regression would block on the rival's lock; fail fast
+        // with a lock-wait error instead of hanging the suite.
+        self::$pdo->exec(self::isPostgres() ? "SET lock_timeout = '2s'" : 'SET SESSION innodb_lock_wait_timeout = 2');
         $published = $this->store->drainClaimed(self::LANE, 10, function (array $claimed) use (&$seen): ClaimOutcome {
             $seen = self::ids($claimed);
 

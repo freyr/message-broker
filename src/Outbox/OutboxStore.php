@@ -49,7 +49,10 @@ interface OutboxStore
      * each other's locked rows — they never block. If $publish throws, the
      * transaction rolls back and the rows are instantly reclaimable; a dead
      * connection has the same effect (crash recovery for free). An empty
-     * claim returns 0 without invoking $publish.
+     * claim returns 0 without invoking $publish. The outcome's ids MUST be
+     * drawn from the claimed batch — ids outside it would touch rows this
+     * claim does not own — and no id may appear in both publishedIds and
+     * retryAtMs.
      *
      * @param callable(non-empty-list<OutboxRecord>): ClaimOutcome $publish
      *

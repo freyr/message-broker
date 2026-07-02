@@ -127,7 +127,12 @@ final readonly class PdoOutboxStore implements OutboxStore
             return count($outcome->publishedIds);
         } catch (Throwable $error) {
             if ($this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
+                try {
+                    $this->pdo->rollBack();
+                } catch (Throwable) {
+                    // Dead connection: its claim locks died with it. Propagate
+                    // the original failure, not the rollback's.
+                }
             }
 
             throw $error;

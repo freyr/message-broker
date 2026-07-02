@@ -56,8 +56,7 @@ final readonly class MySqlPlatform implements Platform
             SQL;
     }
 
-    /** @phpstan-ignore-next-line return.unusedType (interface declares ?string; MySQL never returns null) */
-    public function claimIsolationSql(): ?string
+    public function claimIsolationSql(): string
     {
         // FOR UPDATE under REPEATABLE READ takes gap locks that would block
         // producer INSERTs into the scanned lane range; READ COMMITTED takes
