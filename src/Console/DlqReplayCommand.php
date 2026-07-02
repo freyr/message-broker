@@ -25,6 +25,7 @@ final class DlqReplayCommand extends Command
     public function __construct(
         private readonly ReplayService $replay,
         private readonly DeadLetterStore $store,
+        private readonly int $batchSize = 500,
     ) {
         parent::__construct();
     }
@@ -74,20 +75,27 @@ final class DlqReplayCommand extends Command
         $name = $input->getOption('name');
         $source = $input->getOption('source');
         $since = $input->getOption('since');
-        $candidates = array_values(array_filter(
-            $this->store->list(
-                messageName: is_string($name) ? $name : null,
-                source: is_string($source) ? $source : null,
-                sinceMs: is_string($since) ? EpochMillis::now() - Duration::toMilliseconds($since) : null,
-                limit: PHP_INT_MAX,
-            ),
-            static fn ($deadLetter): bool => $deadLetter->replayedAt === null,
-        ));
+        $messageName = is_string($name) ? $name : null;
+        $sourceFilter = is_string($source) ? $source : null;
+        $sinceMs = is_string($since) ? EpochMillis::now() - Duration::toMilliseconds($since) : null;
 
-        $eligible = count($candidates);
+        $eligible = $this->store->count(
+            messageName: $messageName,
+            source: $sourceFilter,
+            sinceMs: $sinceMs,
+            replayed: false,
+        );
+
         if ($input->getOption('dry-run') === true) {
             $output->writeln("<info>[dry-run] would replay {$eligible} dead letters into lane '{$lane}'.</info>");
-            foreach (array_slice($candidates, 0, 5) as $deadLetter) {
+            $sample = $this->store->list(
+                messageName: $messageName,
+                source: $sourceFilter,
+                sinceMs: $sinceMs,
+                limit: 5,
+                replayed: false,
+            );
+            foreach ($sample as $deadLetter) {
                 $output->writeln("  {$deadLetter->id}  {$deadLetter->messageName}");
             }
 
@@ -98,10 +106,27 @@ final class DlqReplayCommand extends Command
             return Command::FAILURE;
         }
 
-        foreach ($candidates as $deadLetter) {
-            $this->replay->replay($deadLetter->id, $lane);
+        // Bounded batches keep memory flat on large DLQs. Each replay marks the
+        // row, dropping it out of the replayed-IS-NULL filter, so a fresh page
+        // at offset 0 always holds the next unprocessed rows.
+        $replayed = 0;
+        while (true) {
+            $batch = $this->store->list(
+                messageName: $messageName,
+                source: $sourceFilter,
+                sinceMs: $sinceMs,
+                limit: $this->batchSize,
+                replayed: false,
+            );
+            if ($batch === []) {
+                break;
+            }
+            foreach ($batch as $deadLetter) {
+                $this->replay->replay($deadLetter->id, $lane);
+                ++$replayed;
+            }
         }
-        $output->writeln("<info>Replayed {$eligible} dead letters into lane '{$lane}'.</info>");
+        $output->writeln("<info>Replayed {$replayed} dead letters into lane '{$lane}'.</info>");
 
         return Command::SUCCESS;
     }

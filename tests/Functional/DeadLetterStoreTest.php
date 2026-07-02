@@ -126,6 +126,29 @@ final class DeadLetterStoreTest extends FunctionalTestCase
         self::assertSame(1, $store->count());
     }
 
+    public function testListAndCountFilterByReplayState(): void
+    {
+        $replayed = $this->deadLetter(messageId: 'm-1');
+        $this->store->store($replayed);
+        $this->store->store($this->deadLetter(messageId: 'm-2'));
+        $this->store->store($this->deadLetter(messageId: 'm-3'));
+        $this->store->markReplayed($replayed->id);
+
+        self::assertSame(3, $this->store->count(), 'no filter sees both states');
+        self::assertSame(2, $this->store->count(replayed: false));
+        self::assertSame(1, $this->store->count(replayed: true));
+
+        $pending = $this->store->list(replayed: false);
+        self::assertCount(2, $pending);
+        foreach ($pending as $deadLetter) {
+            self::assertNull($deadLetter->replayedAt);
+        }
+
+        $done = $this->store->list(replayed: true);
+        self::assertCount(1, $done);
+        self::assertSame($replayed->id, $done[0]->id);
+    }
+
     private function deadLetter(string $messageId, string $messageName = 'order.placed'): DeadLetter
     {
         return DeadLetter::fromFailure(

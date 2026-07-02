@@ -297,9 +297,44 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         self::assertSame(1, substr_count($list->getDisplay(), 'order.placed'));
     }
 
-    private function seedDeadLetter(string $id, string $name): void
+    public function testReplayAllDrainsInBatchesAndSkipsAlreadyReplayed(): void
     {
-        $this->deadLetters->store(DeadLetter::fromFailure(
+        $this->seedDeadLetter('m-1', 'order.placed');
+        $this->seedDeadLetter('m-2', 'order.placed');
+        $alreadyReplayed = $this->seedDeadLetter('m-3', 'order.placed');
+        $this->deadLetters->markReplayed($alreadyReplayed->id);
+
+        // batchSize 1 forces the drain through multiple pages.
+        $replay = new CommandTester(new DlqReplayCommand(
+            new ReplayService($this->deadLetters, new PdoOutboxStore(
+                self::$pdo,
+                $this->platform
+            ), new JsonWireFormat()),
+            $this->deadLetters,
+            batchSize: 1,
+        ));
+        $replay->execute([
+            '--all' => true,
+            '--force' => true,
+            '--lane' => 'orders',
+        ], [
+            'interactive' => false,
+        ]);
+
+        $replay->assertCommandIsSuccessful();
+        self::assertStringContainsString('Replayed 2', $replay->getDisplay());
+        self::assertSame(2, self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE lane = 'orders'"));
+        self::assertSame(
+            0,
+            self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE id = 'm-3'"),
+            'an already-replayed dead letter must not be replayed again',
+        );
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM dead_letters WHERE replayed_at IS NULL'));
+    }
+
+    private function seedDeadLetter(string $id, string $name): DeadLetter
+    {
+        $deadLetter = DeadLetter::fromFailure(
             source: 'orders_q',
             messageId: $id,
             messageName: $name,
@@ -316,6 +351,9 @@ final class ConsoleCommandsTest extends FunctionalTestCase
             headers: [],
             error: new RuntimeException('boom'),
             attempts: 5,
-        ));
+        );
+        $this->deadLetters->store($deadLetter);
+
+        return $deadLetter;
     }
 }

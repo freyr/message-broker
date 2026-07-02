@@ -19,7 +19,8 @@ interface DeadLetterStore
 
     /**
      * Newest first (failed_at DESC), filtered by any combination of message
-     * name, source queue/topic, and a lower failed_at bound.
+     * name, source queue/topic, a lower failed_at bound, and replay state
+     * (replayed: false = not yet replayed, true = replayed, null = both).
      *
      * @return list<DeadLetter>
      */
@@ -29,10 +30,16 @@ interface DeadLetterStore
         ?int $sinceMs = null,
         int $limit = 100,
         int $offset = 0,
+        ?bool $replayed = null,
     ): array;
 
     /** Same filters as list() — the paging/dry-run companion. */
-    public function count(?string $messageName = null, ?string $source = null, ?int $sinceMs = null): int;
+    public function count(
+        ?string $messageName = null,
+        ?string $source = null,
+        ?int $sinceMs = null,
+        ?bool $replayed = null,
+    ): int;
 
     /** Replay keeps the row for audit — marks replayed_at instead of deleting. */
     public function markReplayed(string $id): void;

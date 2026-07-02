@@ -111,7 +111,10 @@ Re-enqueues one or many dead letters back into the outbox; redelivery rides
 the normal relay path. See [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md) for the
 worked dry-run-then-force workflow.
 
-**Constructor:** `new DlqReplayCommand(ReplayService $replay, DeadLetterStore $store)`
+**Constructor:** `new DlqReplayCommand(ReplayService $replay, DeadLetterStore $store, int $batchSize = 500)`
+
+A batch replay (`--all`) drains the DLQ `$batchSize` rows at a time, so memory
+stays flat regardless of how many dead letters match.
 
 | Argument/Option | Description |
 | --- | --- |

@@ -70,6 +70,7 @@ final readonly class PdoDeadLetterStore implements DeadLetterStore
         ?int $sinceMs = null,
         int $limit = 100,
         int $offset = 0,
+        ?bool $replayed = null,
     ): array {
         $conditions = [];
         $parameters = [];
@@ -84,6 +85,9 @@ final readonly class PdoDeadLetterStore implements DeadLetterStore
         if ($sinceMs !== null) {
             $conditions[] = 'failed_at >= :since';
             $parameters['since'] = EpochMillis::toDateTime($sinceMs)->format(self::DATETIME_FORMAT);
+        }
+        if ($replayed !== null) {
+            $conditions[] = $replayed ? 'replayed_at IS NOT NULL' : 'replayed_at IS NULL';
         }
 
         $where = $conditions === [] ? '' : 'WHERE '.implode(' AND ', $conditions);
@@ -103,8 +107,12 @@ final readonly class PdoDeadLetterStore implements DeadLetterStore
         return array_map($this->hydrate(...), $rows);
     }
 
-    public function count(?string $messageName = null, ?string $source = null, ?int $sinceMs = null): int
-    {
+    public function count(
+        ?string $messageName = null,
+        ?string $source = null,
+        ?int $sinceMs = null,
+        ?bool $replayed = null,
+    ): int {
         $conditions = [];
         $parameters = [];
         if ($messageName !== null) {
@@ -118,6 +126,9 @@ final readonly class PdoDeadLetterStore implements DeadLetterStore
         if ($sinceMs !== null) {
             $conditions[] = 'failed_at >= :since';
             $parameters['since'] = EpochMillis::toDateTime($sinceMs)->format(self::DATETIME_FORMAT);
+        }
+        if ($replayed !== null) {
+            $conditions[] = $replayed ? 'replayed_at IS NOT NULL' : 'replayed_at IS NULL';
         }
 
         $where = $conditions === [] ? '' : 'WHERE '.implode(' AND ', $conditions);
