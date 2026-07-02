@@ -9,9 +9,9 @@ The former Symfony Messenger bundle remains available as `v0.x` tags.
 ### Added
 
 - Core transactional outbox with per-lane total ordering
-- Consumer-side deduplication with configurable dead-letter handling
+- Consumer-side deduplication (insert-or-ignore keyed by message id and consumer) turning at-least-once delivery into exactly-once processing
 - Dead-lettering with replay capability for failed messages
-- AMQP transport with ordered (AmqpRelay) and competing (CompetingAmqpRelay) relay modes, TTL/DLX retry support
+- AMQP transport with ordered relay mode (AmqpRelay), TTL/DLX retry support, and consumer-side dedup integration
 - CompetingAmqpRelay for order-insensitive workloads with parallel per-lane draining via FOR UPDATE SKIP LOCKED claims
 - Kafka transport with strict per-key FIFO ordering and offset-after-commit semantics (ext-rdkafka)
 - Support for MySQL and PostgreSQL database backends
