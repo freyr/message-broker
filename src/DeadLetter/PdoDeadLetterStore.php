@@ -8,6 +8,13 @@ use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Time\EpochMillis;
 use PDO;
 
+/**
+ * PDO-backed dead-letter table access.
+ *
+ * TODO: extract a DeadLetterStore interface (mirroring Outbox\OutboxStore) so an
+ * alternative backing — e.g. a Doctrine DBAL store — can be plugged into the consumer
+ * and replay service; this class then becomes the PDO implementation behind it.
+ */
 final readonly class PdoDeadLetterStore
 {
     private const string DATETIME_FORMAT = 'Y-m-d H:i:s.v';

@@ -9,6 +9,7 @@ use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Outbox\PdoOutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\Avro\AvroDeserializer;
 use Freyr\MessageBroker\Serializer\Avro\AvroWireFormat;
@@ -55,7 +56,7 @@ final class KafkaAvroEndToEndTest extends KafkaTestCase
     {
         parent::setUp();
         $this->dispatched = [];
-        $this->store = new OutboxStore(self::$pdo, static::platform());
+        $this->store = new PdoOutboxStore(self::$pdo, static::platform());
         $schemas = new FileSchemaStore([
             'order.placed' => self::SCHEMA_PATH,
         ]);

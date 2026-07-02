@@ -8,7 +8,7 @@ use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Observability\BrokerEvents;
-use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Outbox\PdoOutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
@@ -26,7 +26,7 @@ final class ReplayServiceTest extends FunctionalTestCase
         parent::setUp();
         $platform = static::platform();
         $this->deadLetters = new PdoDeadLetterStore(self::$pdo, $platform);
-        $this->replay = new ReplayService($this->deadLetters, new OutboxStore(
+        $this->replay = new ReplayService($this->deadLetters, new PdoOutboxStore(
             self::$pdo,
             $platform
         ), new JsonWireFormat());
@@ -126,7 +126,7 @@ final class ReplayServiceTest extends FunctionalTestCase
         $events = new RecordingEvents();
         $replay = new ReplayService(
             $this->deadLetters,
-            new OutboxStore(self::$pdo, static::platform()),
+            new PdoOutboxStore(self::$pdo, static::platform()),
             new JsonWireFormat(),
             $events,
         );

@@ -7,6 +7,7 @@ namespace Freyr\MessageBroker\Tests\Functional;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Outbox\PdoOutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
@@ -62,7 +63,7 @@ final class AmqpRelayTest extends FunctionalTestCase
         $this->channel->queue_bind(self::QUEUE, self::EXCHANGE, '#');
         $this->channel->queue_purge(self::QUEUE);
 
-        $this->store = new OutboxStore(self::$pdo, static::platform());
+        $this->store = new PdoOutboxStore(self::$pdo, static::platform());
         $this->producer = new OutboxProducer($this->store, new JsonWireFormat(), lane: 'orders');
     }
 
@@ -212,7 +213,7 @@ final class AmqpRelayTest extends FunctionalTestCase
         self::$pdo->query($flushSql)->fetchAll();
 
         // A rival on a separate connection holds the lane first.
-        $rival = new OutboxStore(self::newConnection(), static::platform());
+        $rival = new PdoOutboxStore(self::newConnection(), static::platform());
         self::assertTrue($rival->tryAcquireLane('orders'));
 
         $this->producer->produce(OrderPlaced::create('o-1', 100));
@@ -229,7 +230,7 @@ final class AmqpRelayTest extends FunctionalTestCase
         self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
 
         // shutdown() frees the lane for a standby connection immediately.
-        $standby = new OutboxStore(self::newConnection(), static::platform());
+        $standby = new PdoOutboxStore(self::newConnection(), static::platform());
         self::assertFalse($standby->tryAcquireLane('orders'), 'relay still holds it before shutdown');
         $relay->shutdown();
         self::assertTrue($standby->tryAcquireLane('orders'), 'lane is free after shutdown');

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional\Kafka;
 
 use Freyr\MessageBroker\Outbox\OutboxProducer;
-use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Outbox\PdoOutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
@@ -16,7 +16,7 @@ final class KafkaPerKeyFifoTest extends KafkaTestCase
 {
     public function testEachKeyPreservesProductionOrderAcrossPartitions(): void
     {
-        $store = new OutboxStore(self::$pdo, static::platform());
+        $store = new PdoOutboxStore(self::$pdo, static::platform());
         $producer = new OutboxProducer($store, new JsonWireFormat(), lane: 'orders');
         $topic = $this->uniqueTopic('mb_fifo');
 

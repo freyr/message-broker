@@ -14,7 +14,7 @@ use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
-use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Outbox\PdoOutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Time\EpochMillis;
@@ -119,7 +119,10 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         self::assertStringContainsString('boom', $show->getDisplay());
 
         $replay = new CommandTester(new DlqReplayCommand(
-            new ReplayService($this->deadLetters, new OutboxStore(self::$pdo, $this->platform), new JsonWireFormat()),
+            new ReplayService($this->deadLetters, new PdoOutboxStore(
+                self::$pdo,
+                $this->platform
+            ), new JsonWireFormat()),
             $this->deadLetters,
         ));
         $replay->execute([
@@ -162,7 +165,10 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $this->seedDeadLetter('m-a', 'order.placed');
 
         $replay = new CommandTester(new DlqReplayCommand(
-            new ReplayService($this->deadLetters, new OutboxStore(self::$pdo, $this->platform), new JsonWireFormat()),
+            new ReplayService($this->deadLetters, new PdoOutboxStore(
+                self::$pdo,
+                $this->platform
+            ), new JsonWireFormat()),
             $this->deadLetters,
         ));
         $status = $replay->execute([
@@ -181,7 +187,10 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $this->seedDeadLetter('m-b', 'order.placed');
 
         $replay = new CommandTester(new DlqReplayCommand(
-            new ReplayService($this->deadLetters, new OutboxStore(self::$pdo, $this->platform), new JsonWireFormat()),
+            new ReplayService($this->deadLetters, new PdoOutboxStore(
+                self::$pdo,
+                $this->platform
+            ), new JsonWireFormat()),
             $this->deadLetters,
         ));
         $replay->execute([
@@ -201,7 +210,10 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $this->seedDeadLetter('m-c', 'order.placed');
 
         $replay = new CommandTester(new DlqReplayCommand(
-            new ReplayService($this->deadLetters, new OutboxStore(self::$pdo, $this->platform), new JsonWireFormat()),
+            new ReplayService($this->deadLetters, new PdoOutboxStore(
+                self::$pdo,
+                $this->platform
+            ), new JsonWireFormat()),
             $this->deadLetters,
         ));
         $replay->execute([

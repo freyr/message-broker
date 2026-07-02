@@ -9,6 +9,7 @@ use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Outbox\PdoOutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
@@ -39,7 +40,7 @@ final class KafkaEndToEndTest extends KafkaTestCase
         parent::setUp();
         $this->dispatched = [];
         $this->failingDispatch = null;
-        $this->store = new OutboxStore(self::$pdo, static::platform());
+        $this->store = new PdoOutboxStore(self::$pdo, static::platform());
         $this->deadLetters = new PdoDeadLetterStore(self::$pdo, static::platform());
         $this->producer = new OutboxProducer($this->store, new JsonWireFormat(), lane: 'orders');
         $this->topic = $this->uniqueTopic('mb_e2e');

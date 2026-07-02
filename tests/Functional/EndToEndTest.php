@@ -11,6 +11,7 @@ use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Outbox\PdoOutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
@@ -97,7 +98,7 @@ final class EndToEndTest extends FunctionalTestCase
         $this->channel->queue_purge(self::QUEUE);
 
         $this->platform = static::platform();
-        $this->outbox = new OutboxStore(self::$pdo, $this->platform);
+        $this->outbox = new PdoOutboxStore(self::$pdo, $this->platform);
         $this->producer = new OutboxProducer($this->outbox, new JsonWireFormat(), lane: self::LANE);
         $this->deadLetters = new PdoDeadLetterStore(self::$pdo, $this->platform);
         $this->relay = new AmqpRelay(

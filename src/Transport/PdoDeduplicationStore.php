@@ -13,6 +13,10 @@ use PDO;
  * Insert-or-ignore deduplication keyed by (message_id, consumer).
  * acquire() runs INSIDE the consumer's PDO transaction so the dedup entry
  * commits/rolls back atomically with the dispatched work.
+ *
+ * TODO: extract a DeduplicationStore interface (mirroring Outbox\OutboxStore) so an
+ * alternative backing — e.g. a Doctrine DBAL store — can be plugged into the consumer;
+ * this class then becomes the PDO implementation behind it.
  */
 final readonly class PdoDeduplicationStore
 {

@@ -11,6 +11,7 @@ use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Outbox\PdoOutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\Avro\AvroDeserializer;
 use Freyr\MessageBroker\Serializer\Avro\AvroWireFormat;
@@ -121,7 +122,7 @@ final class AvroEndToEndTest extends FunctionalTestCase
         $this->channel->queue_purge(self::QUEUE);
 
         $this->platform = static::platform();
-        $this->outbox = new OutboxStore(self::$pdo, $this->platform);
+        $this->outbox = new PdoOutboxStore(self::$pdo, $this->platform);
         $this->deadLetters = new PdoDeadLetterStore(self::$pdo, $this->platform);
 
         // FileSchemaStore for both 'order.placed' and 'order.never_registered'

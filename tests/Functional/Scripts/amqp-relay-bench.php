@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use Freyr\MessageBroker\Message;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
-use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Outbox\PdoOutboxStore;
 use Freyr\MessageBroker\Serializer\Format;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Storage\MySqlPlatform;
@@ -56,7 +56,7 @@ $channel->queue_declare('mb_bench_q', false, true, false, false);
 $channel->queue_bind('mb_bench_q', 'mb_bench', '#');
 $channel->queue_purge('mb_bench_q');
 
-$store = new OutboxStore($pdo, $platform);
+$store = new PdoOutboxStore($pdo, $platform);
 $producer = new OutboxProducer($store, new JsonWireFormat(), lane: 'bench');
 
 $run = static function (bool $confirms) use ($n, $pdo, $producer, $store, $amqp): array {

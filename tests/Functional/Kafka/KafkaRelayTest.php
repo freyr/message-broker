@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Tests\Functional\Kafka;
 
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Outbox\PdoOutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
@@ -21,7 +22,7 @@ final class KafkaRelayTest extends KafkaTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->store = new OutboxStore(self::$pdo, static::platform());
+        $this->store = new PdoOutboxStore(self::$pdo, static::platform());
         $this->producer = new OutboxProducer($this->store, new JsonWireFormat(), lane: 'orders');
         $this->topic = $this->uniqueTopic('mb_relay');
     }
@@ -82,7 +83,7 @@ final class KafkaRelayTest extends KafkaTestCase
         self::$pdo->query($flushSql)->fetchAll();
 
         // A rival on a separate connection holds the lane first.
-        $rival = new OutboxStore(self::newConnection(), static::platform());
+        $rival = new PdoOutboxStore(self::newConnection(), static::platform());
         self::assertTrue($rival->tryAcquireLane('orders'));
 
         $this->producer->produce(OrderPlaced::create('o-1', 100));
@@ -99,7 +100,7 @@ final class KafkaRelayTest extends KafkaTestCase
         self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
 
         // shutdown() frees the lane for a standby connection immediately.
-        $standby = new OutboxStore(self::newConnection(), static::platform());
+        $standby = new PdoOutboxStore(self::newConnection(), static::platform());
         self::assertFalse($standby->tryAcquireLane('orders'), 'relay still holds it before shutdown');
         $relay->shutdown();
         self::assertTrue($standby->tryAcquireLane('orders'), 'lane is free after shutdown');

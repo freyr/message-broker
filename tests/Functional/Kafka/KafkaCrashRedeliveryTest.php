@@ -8,7 +8,7 @@ use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
-use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Outbox\PdoOutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
@@ -30,7 +30,7 @@ final class KafkaCrashRedeliveryTest extends KafkaTestCase
 
     public function testCrashBeforeOffsetCommitRedeliversAndDedupAbsorbs(): void
     {
-        $store = new OutboxStore(self::$pdo, static::platform());
+        $store = new PdoOutboxStore(self::$pdo, static::platform());
         $producer = new OutboxProducer($store, new JsonWireFormat(), lane: 'orders');
         $topic = $this->uniqueTopic('mb_crash');
         $group = $this->uniqueGroup('mb_crash'); // SAME group for both consumers

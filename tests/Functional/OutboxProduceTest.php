@@ -6,7 +6,7 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
-use Freyr\MessageBroker\Outbox\OutboxStore;
+use Freyr\MessageBroker\Outbox\PdoOutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingEvents;
@@ -23,7 +23,7 @@ final class OutboxProduceTest extends FunctionalTestCase
     {
         parent::setUp();
         $this->producer = new OutboxProducer(
-            store: new OutboxStore(self::$pdo, static::platform()),
+            store: new PdoOutboxStore(self::$pdo, static::platform()),
             wireFormat: new JsonWireFormat(),
             lane: 'orders',
         );
@@ -90,7 +90,7 @@ final class OutboxProduceTest extends FunctionalTestCase
     {
         $events = new RecordingEvents();
         $producer = new OutboxProducer(
-            store: new OutboxStore(self::$pdo, static::platform()),
+            store: new PdoOutboxStore(self::$pdo, static::platform()),
             wireFormat: new JsonWireFormat(),
             lane: 'orders',
             events: $events,
