@@ -15,32 +15,47 @@ Strict per-key FIFO is **a Kafka capability**, not the point of the library — 
 
 > **Status: early development.** Ground-up rewrite in progress (formerly a Symfony Messenger bundle, available as `v0.x` tags). No stable release yet; every API may change without notice.
 
-## Requirements
-
-- PHP ≥ 8.4
-- MySQL 8+ or PostgreSQL 13+
-- A supported transport client, e.g. `php-amqplib/php-amqplib` for AMQP
-
-## Development
+## Install
 
 ```bash
-docker compose up -d --wait   # MySQL, PostgreSQL, RabbitMQ
-make test                     # phpunit (functional tests against real services)
-make phpstan
-make cs-check
+composer require freyr/message-broker
 ```
 
-`make test` runs the suite against MySQL; `make test-pgsql` runs it against PostgreSQL; `make test-all` runs both. Functional tests pass on either engine (the `DB_ENGINE` env var selects it).
+Requires PHP ≥ 8.4 and `ext-pdo`. Install the pieces you use:
 
-### Kafka transport
+| Need | Add |
+|---|---|
+| AMQP transport | `composer require php-amqplib/php-amqplib` |
+| Kafka transport | `ext-rdkafka` (PECL) |
+| Avro wire format | `composer require apache/avro` |
+| Redis schema cache | `ext-redis` |
+| Graceful shutdown | `ext-pcntl` (relay/consumer SIGTERM handling) |
 
-A native `ext-rdkafka` relay and consumer (`src/Transport/Kafka/`). Register a
-relay/consumer per lane exactly like AMQP — `RelayRunCommand`/`ConsumeCommand`
-take `lane => fn()` closures. The relay produces `message_key → partition` under
-an idempotent `murmur2_random` producer (strict per-key FIFO); the consumer
-commits offsets only after the dedup/dispatch transaction (at-least-once +
-dedup = exactly-once processing). Kafka functional tests run on MySQL and need
-the `kafka` compose service (`KAFKA_BROKERS`, already wired).
+## Quickstart
+
+Define a message, produce it inside your own database transaction, run the
+schema setup, relay it over AMQP or Kafka, and consume it with deduplication
+and retry — five steps, one lane, end to end. See
+[docs/QUICKSTART.md](docs/QUICKSTART.md) for a runnable produce → relay →
+consume example.
+
+## The lane concept
+
+One outbox table holds every produced message; each row is tagged with a
+lane, a named drain of that table. Exactly one relay process serves one lane
+on one transport, which guarantees total in-order publishing per lane. For
+order-insensitive workloads, AMQP also ships an opt-in competing relay that
+trades that ordering guarantee for parallel throughput — see
+[docs/TRANSPORTS.md](docs/TRANSPORTS.md).
+
+## Documentation
+
+- [Quickstart](docs/QUICKSTART.md) — produce → relay → consume, end to end
+- [Transports](docs/TRANSPORTS.md) — AMQP and Kafka relay/consumer setup, lane modes
+- [Schema and Avro](docs/SCHEMA_AVRO.md) — wire formats, schema registration, compatibility
+- [CLI Reference](docs/CLI_REFERENCE.md) — every shipped console command
+- [DLQ Operations](docs/DLQ_OPERATIONS.md) — inspecting, replaying, and purging dead letters
+- [Production](docs/PRODUCTION.md) — observability, graceful shutdown, operational guidance
 
 ## License
 
