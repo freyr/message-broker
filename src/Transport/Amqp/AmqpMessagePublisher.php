@@ -12,15 +12,22 @@ use PhpAmqpLib\Wire\AMQPTable;
 
 /**
  * AMQP publish mechanics of AmqpRelay: add the x-message-* envelope headers
- * from the outbox row's columns, publish the batch,
- * ONE confirm wait covering the whole batch. The owning relay must hold its
- * AMQPChannel exclusively: publisher-confirm mode is channel-global state,
- * and any other publisher on the same channel corrupts the confirm
- * bookkeeping. One relay process, one dedicated channel, one publisher.
+ * from the outbox row's columns, publish the batch, ONE confirm wait covering
+ * the whole batch. A broker nack is reported per record; an ack covers the
+ * rest. The owning relay must hold its AMQPChannel exclusively:
+ * publisher-confirm mode is channel-global state, and any other publisher on
+ * the same channel corrupts the confirm bookkeeping.
+ *
+ * Messages are published without the mandatory flag: a message that no queue
+ * binding matches is dropped by the broker and confirmed. That is the design —
+ * a message nobody subscribes to is not a failure.
  */
 final class AmqpMessagePublisher
 {
     private bool $confirmsEnabled = false;
+
+    /** @var list<string> ids of the records the broker nacked in the current batch */
+    private array $nacked = [];
 
     public function __construct(
         private readonly AMQPChannel $amqp,
@@ -29,13 +36,27 @@ final class AmqpMessagePublisher
         private readonly int $confirmTimeoutSec = 5,
     ) {}
 
-    /** @param non-empty-list<OutboxRecord> $batch */
-    public function publishBatch(array $batch): void
+    /**
+     * Publish the batch and wait for its confirms. Throws when the channel or
+     * the connection fails, or when the confirm wait times out.
+     *
+     * @param non-empty-list<OutboxRecord> $batch
+     *
+     * @return list<string> ids of the records the broker nacked (empty without publisher confirms)
+     */
+    public function publishBatch(array $batch): array
     {
         if ($this->publish->publisherConfirms && !$this->confirmsEnabled) {
             $this->amqp->confirm_select();
+            $this->amqp->set_nack_handler(function (AMQPMessage $message): void {
+                $id = $message->get('message_id');
+                if (is_string($id)) {
+                    $this->nacked[] = $id;
+                }
+            });
             $this->confirmsEnabled = true;
         }
+        $this->nacked = [];
 
         foreach ($batch as $record) {
             // The envelope (id, name, created_at) becomes individual
@@ -58,8 +79,10 @@ final class AmqpMessagePublisher
         }
 
         if ($this->publish->publisherConfirms) {
-            // One confirm wait for the whole batch.
+            // One confirm wait for the whole batch; the nack handler collects rejections.
             $this->amqp->wait_for_pending_acks($this->confirmTimeoutSec);
         }
+
+        return $this->nacked;
     }
 }

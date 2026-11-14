@@ -54,13 +54,18 @@ final readonly class PdoOutboxStore implements OutboxStore
                 return 0;
             }
 
-            $outcome = $publish(array_map($this->hydrate(...), $rows));
+            $records = array_map($this->hydrate(...), $rows);
+            $outcome = $publish($records);
 
+            // The created_at range of the claim lets PostgreSQL prune the
+            // partitions of other days; both writes join the claim transaction.
+            $createdAt = array_map(static fn (OutboxRecord $record): int => $record->createdAt, $records);
+            $range = [self::timestamp(min($createdAt)), self::timestamp(max($createdAt))];
             if ($outcome->publishedIds !== []) {
-                $this->markPublished($outcome->publishedIds); // joins the open claim transaction
+                $this->markPublished($outcome->publishedIds, $range);
             }
-            foreach ($outcome->retryAtMs as $id => $availableAtMs) {
-                $this->scheduleRetry($id, $availableAtMs);
+            if ($outcome->retryAtMs !== []) {
+                $this->scheduleRetry($outcome->retryAtMs, $range);
             }
 
             $this->pdo->commit();
@@ -86,36 +91,56 @@ final readonly class PdoOutboxStore implements OutboxStore
      * matters on replay: a replayed message reuses its original id, and the
      * original row (already published) must keep its own published_at.
      *
-     * @param list<string> $ids
-     * @param positive-int $chunkSize
+     * @param non-empty-list<string> $ids
+     * @param array{string, string} $createdAtRange
      */
-    private function markPublished(array $ids, int $chunkSize = 500): void
+    private function markPublished(array $ids, array $createdAtRange): void
     {
-        $publishedAt = self::timestamp(EpochMillis::now());
-        foreach (array_chunk($ids, $chunkSize) as $chunk) {
-            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
-            $statement = $this->pdo->prepare(
-                "UPDATE outbox_messages SET published_at = ? WHERE published_at IS NULL AND id IN ({$placeholders})",
-            );
-            $statement->execute([$publishedAt, ...$chunk]);
-        }
+        $statement = $this->pdo->prepare(
+            'UPDATE outbox_messages SET published_at = :published_at'
+            .' WHERE id = ANY(CAST(:ids AS uuid[])) AND created_at BETWEEN :from AND :to AND published_at IS NULL',
+        );
+        $statement->execute([
+            'published_at' => self::timestamp(EpochMillis::now()),
+            'ids' => self::pgArray($ids),
+            'from' => $createdAtRange[0],
+            'to' => $createdAtRange[1],
+        ]);
     }
 
     /**
-     * Transient publish failure: bump available_at, increment attempts. There
-     * is no exhaustion and no relay-side DLQ; a row that keeps failing is an
-     * operational alert (and it blocks retention of its partition).
+     * Failed publish: move available_at to the retry time, increment attempts.
+     * There is no exhaustion and no relay-side DLQ: a row that keeps failing
+     * stays until retention drops its partition.
+     *
+     * @param non-empty-array<string, int> $retryAtMs row id => next available_at, epoch ms
+     * @param array{string, string} $createdAtRange
      */
-    private function scheduleRetry(string $id, int $availableAtMs): void
+    private function scheduleRetry(array $retryAtMs, array $createdAtRange): void
     {
         $statement = $this->pdo->prepare(
-            'UPDATE outbox_messages SET available_at = :available_at, attempts = attempts + 1'
-            .' WHERE published_at IS NULL AND id = :id',
+            'UPDATE outbox_messages o SET available_at = r.available_at, attempts = o.attempts + 1'
+            .' FROM unnest(CAST(:ids AS uuid[]), CAST(:available_at AS timestamp(3)[])) AS r(id, available_at)'
+            .' WHERE o.id = r.id AND o.created_at BETWEEN :from AND :to AND o.published_at IS NULL',
         );
         $statement->execute([
-            'available_at' => self::timestamp($availableAtMs),
-            'id' => $id,
+            'ids' => self::pgArray(array_map('strval', array_keys($retryAtMs))),
+            'available_at' => self::pgArray(array_map(self::timestamp(...), array_values($retryAtMs))),
+            'from' => $createdAtRange[0],
+            'to' => $createdAtRange[1],
         ]);
+    }
+
+    /**
+     * A PostgreSQL array literal. The values are UUIDs and timestamps that
+     * this class formats or reads from the database: no quotes, commas or
+     * braces inside them, so double quotes per element are enough.
+     *
+     * @param list<string> $values
+     */
+    private static function pgArray(array $values): string
+    {
+        return '{'.implode(',', array_map(static fn (string $v): string => '"'.$v.'"', $values)).'}';
     }
 
     private static function timestamp(int $epochMilliseconds): string

@@ -2,116 +2,146 @@
 
 declare(strict_types=1);
 
-use Freyr\MessageBroker\Message;
-use Freyr\MessageBroker\Outbox\OutboxProducer;
+// Relay throughput benchmark: fills the outbox, forks N relay workers (each
+// with its own PostgreSQL and AMQP connection) and drains one lane with
+// publisher confirms and persistent messages. Runs against the compose
+// services: make bench ARGS="<rows> <workers> <batch> [mode]".
+// mode: full (default) | db-only (no AMQP publish) | amqp-only (no database)
+
+require dirname(__DIR__, 3).'/vendor/autoload.php';
+
+use Freyr\MessageBroker\Outbox\ClaimOutcome;
+use Freyr\MessageBroker\Outbox\OutboxPartitionManager;
+use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\PdoOutboxStore;
 use Freyr\MessageBroker\Serializer\Format;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Storage\PostgreSqlPlatform;
+use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
-use Freyr\MessageBroker\Transport\Amqp\AmqpRelay;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 
-require dirname(__DIR__, 3).'/vendor/autoload.php';
+[$rows, $workers, $batch] = [(int) ($argv[1] ?? 50000), (int) ($argv[2] ?? 1), (int) ($argv[3] ?? 500)];
+$mode = $argv[4] ?? 'full';
 
-final class BenchEvent extends Message
-{
-    public static function create(int $i): self
-    {
-        return new self(name: 'bench.event', payload: [
-            'index' => $i,
-            'order_id' => "order-{$i}",
-            'total_cents' => $i * 100,
-            'note' => 'a reasonably sized payload string to make this realistic',
-        ]);
-    }
-}
+$pdo = static fn (): PDO => new PDO(getenv('POSTGRES_DSN'), getenv('POSTGRES_USER') ?: '', getenv('POSTGRES_PASSWORD') ?: '', [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+]);
+$amqp = static fn (): AMQPStreamConnection => new AMQPStreamConnection(getenv('AMQP_HOST') ?: 'rabbitmq', 5672, 'guest', 'guest');
 
-$n = (int) ($argv[1] ?? 1000);
-
-$pdo = new PDO(
-    getenv('POSTGRES_DSN') ?: throw new RuntimeException('POSTGRES_DSN missing'),
-    getenv('POSTGRES_USER') ?: '',
-    getenv('POSTGRES_PASSWORD') ?: '',
-    [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-    ],
-);
+$db = $pdo();
 $platform = new PostgreSqlPlatform();
 foreach ($platform->schemaSql(Format::Json) as $ddl) {
-    $pdo->exec($ddl);
+    $db->exec($ddl);
 }
-$pdo->exec("DELETE FROM outbox_messages WHERE lane = 'bench'");
-
-$amqp = new AMQPStreamConnection(
-    host: getenv('AMQP_HOST') ?: 'rabbitmq',
-    port: (int) (getenv('AMQP_PORT') ?: 5672),
-    user: getenv('AMQP_USER') ?: 'guest',
-    password: getenv('AMQP_PASSWORD') ?: 'guest',
-    vhost: getenv('AMQP_VHOST') ?: '/',
+(new OutboxPartitionManager($db))->ensurePartitions(1);
+$db->exec('TRUNCATE outbox_messages');
+$body = json_encode([
+    'orderId' => str_repeat('x', 36),
+    'amount' => 12345,
+    'currency' => 'EUR',
+    'items' => [[
+        'sku' => 'A-1',
+        'qty' => 2,
+    ], [
+        'sku' => 'B-7',
+        'qty' => 1,
+    ]],
+]);
+$stmt = $db->prepare(
+    "INSERT INTO outbox_messages (id, lane, message_name, body, headers, created_at, available_at, attempts)
+     SELECT gen_random_uuid(), 'bench', 'bench.event', convert_to(:body, 'UTF8'), '{}'::jsonb,
+            (now() AT TIME ZONE 'UTC') - interval '1 second', (now() AT TIME ZONE 'UTC') - interval '1 second', 0
+     FROM generate_series(1, :n)",
 );
-$channel = $amqp->channel();
-$channel->exchange_declare('mb_bench', 'topic', false, true, false);
-$channel->queue_declare('mb_bench_q', false, true, false, false);
-$channel->queue_bind('mb_bench_q', 'mb_bench', '#');
-$channel->queue_purge('mb_bench_q');
+$stmt->execute([
+    'body' => $body,
+    'n' => $rows,
+]);
+$db->exec('ANALYZE outbox_messages');
 
-$store = new PdoOutboxStore($pdo, $platform);
-$producer = new OutboxProducer($store, new JsonWireFormat(), lane: 'bench');
+$setup = $amqp();
+$ch = $setup->channel();
+$ch->exchange_declare('mb_bench', 'topic', false, true, false);
+$ch->queue_declare('mb_bench_q', false, true, false, false);
+$ch->queue_bind('mb_bench_q', 'mb_bench', '#');
+$ch->queue_purge('mb_bench_q');
+// A forked child that exits closes inherited sockets: open nothing across the fork.
+$ch->close();
+$setup->close();
+$stmt = null;
+$db = null;
 
-$run = static function (bool $confirms) use ($n, $pdo, $producer, $store, $amqp): array {
-    $start = hrtime(true);
-    for ($i = 0; $i < $n; ++$i) {
-        $producer->produce(BenchEvent::create($i));
+$start = hrtime(true);
+$children = [];
+for ($w = 0; $w < $workers; ++$w) {
+    $pid = pcntl_fork();
+    if ($pid === 0) {
+        $wpdo = $pdo();
+        $store = new PdoOutboxStore($wpdo, $platform);
+        $conn = $mode === 'db-only' ? null : $amqp();
+        $publisher = $conn === null ? null : new AmqpMessagePublisher($conn->channel(), new AmqpPublishConfig('mb_bench'), JsonWireFormat::CONTENT_TYPE);
+        $publishNs = 0;
+        $total = 0;
+        $rounds = 0;
+        if ($mode === 'amqp-only') {
+            $record = new OutboxRecord('01900000-0000-7000-8000-000000000001', 'bench', 'bench.event', $body, [], 1_749_722_400_123);
+            $share = intdiv($rows, $workers);
+            for ($done = 0; $done < $share; $done += $batch) {
+                $t = hrtime(true);
+                $publisher->publishBatch(array_fill(0, min($batch, $share - $done), $record));
+                $publishNs += hrtime(true) - $t;
+                $total += min($batch, $share - $done);
+                ++$rounds;
+            }
+        } else {
+            while (true) {
+                $n = $store->drainClaimed('bench', $batch, function (array $claimed) use ($publisher, &$publishNs): ClaimOutcome {
+                    $t = hrtime(true);
+                    $publisher?->publishBatch($claimed);
+                    $publishNs += hrtime(true) - $t;
+
+                    return ClaimOutcome::published(array_map(static fn (OutboxRecord $r): string => $r->id, $claimed));
+                });
+                $total += $n;
+                ++$rounds;
+                if ($n === 0 && (int) $wpdo->query('SELECT COUNT(*) FROM outbox_messages WHERE published_at IS NULL')->fetchColumn() === 0) {
+                    break;
+                }
+            }
+        }
+        file_put_contents(sys_get_temp_dir()."/mb-bench-{$w}.json", json_encode([
+            'rows' => $total,
+            'rounds' => $rounds,
+            'publish_ms' => $publishNs / 1e6,
+        ]));
+        exit(0);
     }
-    $produceMs = (hrtime(true) - $start) / 1e6;
-
-    $channel = $amqp->channel(); // fresh channel per run so confirm mode is isolated
-    $relay = new AmqpRelay(
-        outbox: $store,
-        amqp: $channel,
-        publish: new AmqpPublishConfig(exchange: 'mb_bench', publisherConfirms: $confirms),
-        contentType: JsonWireFormat::CONTENT_TYPE,
-        lane: 'bench',
-        batchSize: $n,
-    );
-
-    $start = hrtime(true);
-    $published = $relay->drainOnce();
-    $drainMs = (hrtime(true) - $start) / 1e6;
-
-    $remaining = (int) $pdo->query("SELECT COUNT(*) FROM outbox_messages WHERE lane = 'bench' AND published_at IS NULL")
-        ->fetchColumn();
-    $channel->close();
-
-    return [$produceMs, $drainMs, $published, $remaining];
-};
-
-printf("benchmark: %d messages, single process, single exchange, payload ~150 bytes\n\n", $n);
-
-foreach ([
-    true => 'per-message confirms ',
-    false => 'no confirms (fire+forget)',
-] as $confirms => $label) {
-    [$produceMs, $drainMs, $published, $remaining] = $run((bool) $confirms);
-    printf(
-        "%s  produce: %6.0f ms (%6.0f msg/s)   drain: %6.0f ms (%6.0f msg/s)   published=%d remaining=%d\n",
-        $label,
-        $produceMs,
-        $n / $produceMs * 1000,
-        $drainMs,
-        $published / $drainMs * 1000,
-        $published,
-        $remaining,
-    );
+    $children[] = $pid;
 }
+foreach ($children as $pid) {
+    pcntl_waitpid($pid, $status);
+}
+$wallMs = (hrtime(true) - $start) / 1e6;
 
-// verify broker actually has the messages (second run is fire-and-forget)
-sleep(1);
-[, $messageCount] = $channel->queue_declare('mb_bench_q', true);
-printf("\nqueue depth on broker after both runs: %d (expected %d)\n", $messageCount, 2 * $n);
+$stats = array_map(static fn (int $w): array => json_decode(file_get_contents(sys_get_temp_dir()."/mb-bench-{$w}.json"), true), range(0, $workers - 1));
+$published = array_sum(array_column($stats, 'rows'));
+$publishMs = array_sum(array_column($stats, 'publish_ms')) / $workers;
+$db = $pdo();
+$ch = $amqp()->channel();
+$remaining = (int) $db->query('SELECT COUNT(*) FROM outbox_messages WHERE published_at IS NULL')->fetchColumn();
+usleep(300_000);
+[, $queued] = $ch->queue_declare('mb_bench_q', true);
 
-$channel->queue_delete('mb_bench_q');
-$channel->exchange_delete('mb_bench');
-$channel->close();
-$amqp->close();
+printf(
+    "%-9s workers=%2d batch=%4d  %7.0f msg/s  wall=%6.0f ms  publish share=%3.0f%%  published=%d remaining=%d queued=%d\n",
+    $mode,
+    $workers,
+    $batch,
+    $published / $wallMs * 1000,
+    $wallMs,
+    $wallMs > 0 ? $publishMs / $wallMs * 100 : 0,
+    $published,
+    $remaining,
+    $queued,
+);

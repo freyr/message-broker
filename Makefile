@@ -1,4 +1,4 @@
-.PHONY: help build logs shell install test phpstan cs-check cs-fix schema-compat
+.PHONY: help build logs shell install test phpstan cs-check cs-fix schema-compat bench
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -32,3 +32,6 @@ cs-fix: ## Fix code style with ECS
 
 schema-compat: ## Run the offline Avro compatibility gate (CI-only; JVM/maven, no server)
 	docker compose --profile schema-compat run --rm schema-compat
+
+bench: ## Relay throughput benchmark; ARGS="<rows> <workers> <batch> [full|db-only|amqp-only]"
+	docker compose run --rm php php tests/Functional/Scripts/amqp-relay-bench.php $(ARGS)
