@@ -20,19 +20,46 @@ Duration options (`--since`, `--older-than`) share one format:
 
 ## `message-broker:setup:schema`
 
-Creates the `outbox_messages`, `message_deduplication`, and `dead_letters`
-tables (or prints the DDL without executing it).
+Creates the `outbox_messages` table (partitioned by `created_at`, with the
+default partition and the first daily partitions), `message_deduplication`,
+and `dead_letters` (or prints the DDL without executing it).
 
 **Constructor:** `new SetupSchemaCommand(PDO $pdo, Platform $platform)`
 
 | Option | Description |
 | --- | --- |
 | `--format` | `json` or `avro` (default `json`). Selects the outbox `body` column type and the rest of the DDL. Must match the `WireFormat` your producer uses. |
-| `--dump-sql` | Print the DDL instead of executing it. |
+| `--premake-days` | Create daily outbox partitions from today to today plus this many days (default `3`). |
+| `--dump-sql` | Print the DDL instead of executing it, including the partition DDL. |
+
+## `message-broker:outbox:maintain`
+
+Outbox retention. Creates the upcoming daily partitions and drops the expired
+partitions that hold only published rows. Run it daily (cron), before the day
+starts.
+
+**Constructor:** `new OutboxMaintainCommand(OutboxPartitionManager $partitions)`,
+for example `new OutboxMaintainCommand(new OutboxPartitionManager($pdo))`.
+
+| Option | Description |
+| --- | --- |
+| `--retention-days` | Keep published rows at least this many days (default `7`). The cutoff is today midnight UTC minus this value. |
+| `--premake-days` | Create daily partitions from today to today plus this many days (default `3`). |
+| `--dry-run` | Report what would change; change nothing. |
+
+The command drops each daily partition that lies wholly before the cutoff and
+holds no unpublished row. It keeps and reports an expired partition that still
+holds unpublished rows. It deletes expired published rows from the default
+partition and reports the rows that remain there.
+
+Exit codes: `0` success; `1` an expired partition still holds unpublished rows
+(a stuck relay); `2` invalid options (`--retention-days` and `--premake-days`
+must be integers of 1 or more).
 
 ## `message-broker:relay:run <lane>`
 
-Runs the registered relay for one outbox lane. Blocks until stopped.
+Runs the registered relay for one outbox lane. Blocks until stopped. Start
+the command more than once for the same lane to run parallel workers.
 
 **Constructor:** `new RelayRunCommand(array $relays)` —
 `array<string, callable(): void>` keyed by lane name.
@@ -108,7 +135,8 @@ error message, and stack trace.
 ## `message-broker:dlq:replay [<id>] [--all]`
 
 Re-enqueues one or many dead letters back into the outbox; redelivery rides
-the normal relay path. See [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md) for the
+the normal relay path. The command inserts a new outbox row with the original
+message id and a new `created_at`. See [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md) for the
 worked dry-run-then-force workflow.
 
 **Constructor:** `new DlqReplayCommand(ReplayService $replay, DeadLetterStore $store, int $batchSize = 500)`

@@ -19,6 +19,7 @@
     "require": {
         "php": ">=8.4",
         "ext-pdo": "*",
+        "ext-mbstring": "*",
         "ext-pdo_pgsql": "*",
         "psr/log": "^3.0",
         "symfony/clock": "^8.1",

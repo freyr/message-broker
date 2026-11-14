@@ -12,8 +12,7 @@ use InvalidArgumentException;
  * config classes.
  *
  * The relay routes by message name (the message type, e.g. 'order.placed').
- * There is no per-key routing: the library gives per-lane publish order
- * (AmqpRelay) and no per-key FIFO on the consumer side.
+ * There is no per-key routing and no ordering guarantee.
  */
 final readonly class AmqpPublishConfig
 {

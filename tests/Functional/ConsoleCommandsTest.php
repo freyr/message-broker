@@ -61,6 +61,11 @@ final class ConsoleCommandsTest extends FunctionalTestCase
             "SELECT COUNT(*) FROM information_schema.tables
              WHERE {$schemaPredicate} AND table_name = 'outbox_messages'",
         ));
+        $today = 'outbox_messages_p'.gmdate('Ymd');
+        self::assertSame(1, self::fetchInt(
+            "SELECT COUNT(*) FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid
+             WHERE i.inhparent = 'outbox_messages'::regclass AND c.relname = '{$today}'",
+        ), 'setup creates the daily partition of today');
     }
 
     public function testDedupCleanupParsesDurationAndPrunes(): void
@@ -87,11 +92,11 @@ final class ConsoleCommandsTest extends FunctionalTestCase
     {
         $deadLetter = DeadLetter::fromFailure(
             source: 'orders_q',
-            messageId: 'm-1',
+            messageId: '01900000-0000-7000-8000-000000000001',
             messageName: 'order.placed',
             body: (string) json_encode([
                 'metadata' => [
-                    'message_id' => 'm-1',
+                    'message_id' => '01900000-0000-7000-8000-000000000001',
                     'message_name' => 'order.placed',
                     'created_at' => EpochMillis::now(),
                 ],
@@ -132,7 +137,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $replay->assertCommandIsSuccessful();
         self::assertSame(
             1,
-            self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE lane = 'orders' AND id = 'm-1'"),
+            self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE lane = 'orders' AND id = '01900000-0000-7000-8000-000000000001'"),
         );
 
         $purge = new CommandTester(new DlqPurgeCommand($this->deadLetters));
@@ -145,7 +150,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM dead_letters'));
     }
 
-    public function testSetupSchemaAvroFormatUsesLongblobBody(): void
+    public function testSetupSchemaAvroFormatUsesByteaBody(): void
     {
         $tester = new CommandTester(new SetupSchemaCommand(self::$pdo, $this->platform));
         $tester->execute([
@@ -162,7 +167,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
 
     public function testReplayAllFailsClosedWithoutForceOnNonTty(): void
     {
-        $this->seedDeadLetter('m-a', 'order.placed');
+        $this->seedDeadLetter('01900000-0000-7000-8000-00000000000a', 'order.placed');
 
         $replay = new CommandTester(new DlqReplayCommand(
             new ReplayService($this->deadLetters, new PdoOutboxStore(
@@ -184,7 +189,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
 
     public function testReplayAllDryRunPreviewsWithoutReplaying(): void
     {
-        $this->seedDeadLetter('m-b', 'order.placed');
+        $this->seedDeadLetter('01900000-0000-7000-8000-00000000000b', 'order.placed');
 
         $replay = new CommandTester(new DlqReplayCommand(
             new ReplayService($this->deadLetters, new PdoOutboxStore(
@@ -207,7 +212,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
 
     public function testReplayAllWithForceReplays(): void
     {
-        $this->seedDeadLetter('m-c', 'order.placed');
+        $this->seedDeadLetter('01900000-0000-7000-8000-00000000000c', 'order.placed');
 
         $replay = new CommandTester(new DlqReplayCommand(
             new ReplayService($this->deadLetters, new PdoOutboxStore(
@@ -230,8 +235,8 @@ final class ConsoleCommandsTest extends FunctionalTestCase
 
     public function testPurgeFailsClosedWithoutForceButDryRunPreviews(): void
     {
-        $this->seedDeadLetter('m-p1', 'order.placed');
-        $this->seedDeadLetter('m-p2', 'order.cancelled');
+        $this->seedDeadLetter('01900000-0000-7000-8000-0000000000e1', 'order.placed');
+        $this->seedDeadLetter('01900000-0000-7000-8000-0000000000e2', 'order.cancelled');
 
         $purge = fn (): CommandTester => new CommandTester(new DlqPurgeCommand($this->deadLetters));
 
@@ -284,8 +289,8 @@ final class ConsoleCommandsTest extends FunctionalTestCase
 
     public function testDlqListRespectsOffset(): void
     {
-        $this->seedDeadLetter('m-1', 'order.placed');
-        $this->seedDeadLetter('m-2', 'order.placed');
+        $this->seedDeadLetter('01900000-0000-7000-8000-000000000001', 'order.placed');
+        $this->seedDeadLetter('01900000-0000-7000-8000-000000000002', 'order.placed');
 
         $list = new CommandTester(new DlqListCommand($this->deadLetters));
         $list->execute([
@@ -299,9 +304,9 @@ final class ConsoleCommandsTest extends FunctionalTestCase
 
     public function testReplayAllDrainsInBatchesAndSkipsAlreadyReplayed(): void
     {
-        $this->seedDeadLetter('m-1', 'order.placed');
-        $this->seedDeadLetter('m-2', 'order.placed');
-        $alreadyReplayed = $this->seedDeadLetter('m-3', 'order.placed');
+        $this->seedDeadLetter('01900000-0000-7000-8000-000000000001', 'order.placed');
+        $this->seedDeadLetter('01900000-0000-7000-8000-000000000002', 'order.placed');
+        $alreadyReplayed = $this->seedDeadLetter('01900000-0000-7000-8000-000000000003', 'order.placed');
         $this->deadLetters->markReplayed($alreadyReplayed->id);
 
         // batchSize 1 forces the drain through multiple pages.
@@ -326,7 +331,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         self::assertSame(2, self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE lane = 'orders'"));
         self::assertSame(
             0,
-            self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE id = 'm-3'"),
+            self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE id = '01900000-0000-7000-8000-000000000003'"),
             'an already-replayed dead letter must not be replayed again',
         );
         self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM dead_letters WHERE replayed_at IS NULL'));

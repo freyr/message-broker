@@ -102,9 +102,13 @@ final class AmqpConsumerTest extends FunctionalTestCase
                 'content_type' => 'application/json',
                 'message_id' => $messageId,
                 'delivery_mode' => AMQPMessage::DELIVERY_MODE_PERSISTENT,
-                // Explode the envelope into individual x-message-* headers,
-                // exactly as the relay does — that is the wire contract.
-                'application_headers' => new AMQPTable(MetadataHeader::explode($metadata)),
+                // The envelope as individual x-message-* headers, exactly as
+                // the relay sends it — that is the wire contract.
+                'application_headers' => new AMQPTable(MetadataHeader::envelope(
+                    (string) $metadata['message_id'],
+                    (string) $metadata['message_name'],
+                    (int) $metadata['created_at'],
+                )),
             ]),
             '',
             self::QUEUE,

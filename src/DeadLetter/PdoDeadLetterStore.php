@@ -7,6 +7,7 @@ namespace Freyr\MessageBroker\DeadLetter;
 use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Time\EpochMillis;
 use PDO;
+use Symfony\Component\Uid\Uuid;
 
 /**
  * PDO-backed dead-letter table access — the default DeadLetterStore implementation.
@@ -49,6 +50,12 @@ final readonly class PdoDeadLetterStore implements DeadLetterStore
 
     public function find(string $id): ?DeadLetter
     {
+        // The id column is UUID: a malformed id (e.g. a typo at the CLI) is
+        // "not found", not a database cast error.
+        if (!Uuid::isValid($id)) {
+            return null;
+        }
+
         $statement = $this->pdo->prepare('SELECT * FROM dead_letters WHERE id = :id');
         $statement->execute([
             'id' => $id,

@@ -9,13 +9,13 @@ use PDO;
 use PDOStatement;
 
 /**
- * PostgreSQL dialect (the only supported database):
+ * PostgreSQL dialect (the only supported database, 13+):
+ *   - outbox_messages          → range-partitioned by created_at (one partition
+ *                                per UTC day, plus a DEFAULT partition); managed
+ *                                by OutboxPartitionManager
+ *   - ids                      → native UUID
  *   - deduplication insert     → INSERT ... ON CONFLICT DO NOTHING
- *   - lane ownership           → pg_try_advisory_lock(bigint) — PG advisory locks
- *                                take integer keys, not strings, so the lane is
- *                                hashed to int8 via hashtextextended() (PG10+),
- *                                avoiding the int4 collisions of hashtext()
- *   - metadata / headers       → JSONB
+ *   - headers                  → JSONB
  *   - timestamps               → TIMESTAMP(3), UTC by convention
  *   - body column              → BYTEA (opaque wire bytes, both JSON and Avro)
  */
@@ -25,46 +25,22 @@ final readonly class PostgreSqlPlatform implements Platform
     {
         return <<<'SQL'
             INSERT INTO outbox_messages
-                (id, lane, message_key, message_name, metadata, body, headers, created_at, available_at, attempts)
+                (id, lane, message_name, body, headers, created_at, available_at, attempts)
             VALUES
-                (:id, :lane, :message_key, :message_name, :metadata, :body, :headers, :created_at, :available_at, 0)
-            SQL;
-    }
-
-    public function tryAcquireLaneSql(): string
-    {
-        // Session-scoped, self-releasing on disconnect. Returns true on
-        // success, false if owned elsewhere.
-        // hashtextextended(:lane::text, 0::bigint) gives an int8 keyspace
-        // (PG10+), so lane names do not collide on the narrow int4
-        // hashtext() range. Note: the PG function name has no underscore
-        // (hashtextextended), unlike the colloquial hashtext_extended.
-        return 'SELECT pg_try_advisory_lock(hashtextextended(:lane::text, 0::bigint))';
-    }
-
-    public function releaseLaneSql(): string
-    {
-        // Must byte-match the key used by tryAcquireLaneSql exactly, casts
-        // included (catalog function is `hashtextextended`, no underscore).
-        return 'SELECT pg_advisory_unlock(hashtextextended(:lane::text, 0::bigint))';
-    }
-
-    public function selectLanePrefixSql(): string
-    {
-        return <<<'SQL'
-            SELECT * FROM outbox_messages
-            WHERE lane = :lane
-            ORDER BY id
-            LIMIT :limit
+                (:id, :lane, :message_name, :body, :headers, :created_at, :available_at, 0)
             SQL;
     }
 
     public function selectClaimBatchSql(): string
     {
+        // Oldest-due first is a fairness bias, not an ordering contract. The
+        // partial index idx_outbox_pending serves this query; published rows
+        // are outside it.
         return <<<'SQL'
-            SELECT * FROM outbox_messages
-            WHERE lane = :lane AND available_at <= :now
-            ORDER BY id
+            SELECT id, lane, message_name, body, headers, created_at, available_at, attempts
+            FROM outbox_messages
+            WHERE lane = :lane AND published_at IS NULL AND available_at <= :now
+            ORDER BY available_at
             LIMIT :limit
             FOR UPDATE SKIP LOCKED
             SQL;
@@ -107,25 +83,36 @@ final readonly class PostgreSqlPlatform implements Platform
     {
         // The body is opaque wire bytes (the relay byte-pumps it). It is BYTEA
         // for BOTH formats — JSON text round-trips through BYTEA unchanged, and
-        // we avoid per-format binding rules. metadata/headers stay JSONB (they
-        // ARE decoded/queried). $format therefore does not change column types.
+        // we avoid per-format binding rules. $format therefore does not change
+        // column types.
+        //
+        // outbox_messages is partitioned by created_at: the partition key is
+        // known at insert (published_at is not), and the primary key of a
+        // partitioned table must include it. The daily partitions come from
+        // OutboxPartitionManager; the DEFAULT partition only catches rows
+        // when no daily partition exists yet, so a missed maintenance run
+        // never fails a producer's transaction.
         return [
             <<<'SQL'
                 CREATE TABLE IF NOT EXISTS outbox_messages (
-                    id CHAR(36) NOT NULL PRIMARY KEY,
+                    id UUID NOT NULL,
                     lane VARCHAR(64) NOT NULL,
-                    message_key VARCHAR(255) NOT NULL,
                     message_name VARCHAR(255) NOT NULL,
-                    metadata JSONB NOT NULL,
                     body BYTEA NOT NULL,
                     headers JSONB NOT NULL,
                     created_at TIMESTAMP(3) NOT NULL,
                     available_at TIMESTAMP(3) NOT NULL,
-                    attempts SMALLINT NOT NULL DEFAULT 0
-                )
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    published_at TIMESTAMP(3) NULL,
+                    PRIMARY KEY (id, created_at)
+                ) PARTITION BY RANGE (created_at)
                 SQL,
             <<<'SQL'
-                CREATE INDEX IF NOT EXISTS idx_outbox_drain ON outbox_messages (lane, id)
+                CREATE TABLE IF NOT EXISTS outbox_messages_default PARTITION OF outbox_messages DEFAULT
+                SQL,
+            <<<'SQL'
+                CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox_messages (lane, available_at)
+                    WHERE published_at IS NULL
                 SQL,
             <<<'SQL'
                 CREATE TABLE IF NOT EXISTS message_deduplication (
@@ -138,7 +125,7 @@ final readonly class PostgreSqlPlatform implements Platform
                 SQL,
             <<<'SQL'
                 CREATE TABLE IF NOT EXISTS dead_letters (
-                    id CHAR(36) NOT NULL PRIMARY KEY,
+                    id UUID NOT NULL PRIMARY KEY,
                     source VARCHAR(255) NOT NULL,
                     message_id VARCHAR(255) NOT NULL,
                     message_name VARCHAR(255) NOT NULL,
@@ -147,7 +134,7 @@ final readonly class PostgreSqlPlatform implements Platform
                     error_class VARCHAR(255) NOT NULL,
                     error_message TEXT NOT NULL,
                     error_trace TEXT NOT NULL,
-                    attempts SMALLINT NOT NULL DEFAULT 0,
+                    attempts INTEGER NOT NULL DEFAULT 0,
                     failed_at TIMESTAMP(3) NOT NULL,
                     replayed_at TIMESTAMP(3) NULL
                 )

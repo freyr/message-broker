@@ -13,7 +13,7 @@ use Throwable;
  * shared by all transports (design decision D8).
  *
  * CONSUMER-SIDE ONLY (D17): only consumption failures dead-letter. The
- * outbox/relay path never does — it preserves ordering and retries forever.
+ * outbox/relay path never does — it retries forever.
  */
 final readonly class DeadLetter
 {

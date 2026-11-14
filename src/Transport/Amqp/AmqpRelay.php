@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Transport\Amqp;
 
 use Freyr\MessageBroker\ErrorHandler;
 use Freyr\MessageBroker\Observability\BrokerEvents;
+use Freyr\MessageBroker\Outbox\ClaimOutcome;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
@@ -17,33 +18,25 @@ use Psr\Log\NullLogger;
 use Throwable;
 
 /**
- * No Serializer dependency — the relay pumps bytes and explodes the metadata column into individual x-message-* headers; it never parses the body.
+ * AMQP relay. Any number of identical worker processes drain one lane
+ * concurrently: each claims a batch of unpublished, due rows via FOR UPDATE
+ * SKIP LOCKED inside a store-owned transaction, publishes while holding the
+ * claim, and marks the rows published on success (published rows stay for
+ * partition retention). Workers never block each other; a crashed worker's
+ * rows are instantly reclaimable (its locks die with its connection) and
+ * consumer dedup absorbs the republish.
  *
- * Dedicated AMQP relay: drains ONE outbox lane to ONE exchange, always
- * preserving total order within the lane (D17).
+ * NO ordering promise: rows overtake freely — across workers and past
+ * backing-off rows. Consumers must be order-insensitive.
  *
- * Batched drain: the whole eligible prefix is published in id order, then
- * ONE confirm wait covers the batch, then rows are deleted in chunks
- * (~30x over per-message confirm+delete, see the throughput research note).
- * On any failure nothing is deleted — the head is backed off and the whole
- * batch republishes in order on a later pass; consumer deduplication
- * absorbs the duplicates (at-least-once).
+ * Failure is batch-granular: AMQP publish failures are channel-level, so on
+ * any failure every claimed row backs off by its OWN attempts count and
+ * nothing is marked published. There is no relay-side DLQ.
  *
- * No DLQ on this path: a committed outbox row is publishable by definition
- * (validated at produce time), so failures are transient — retry with
- * backoff indefinitely; a long-blocked lane is an operational alert
- * surfaced through the error handler, never data loss.
- *
- * The relay must OWN its AMQPChannel exclusively: publisher-confirm mode is
- * channel-global state, and any other publisher on the same channel corrupts
- * the confirm bookkeeping. One relay process, one dedicated channel.
- *
- * Other transports get their own relay classes — there is no shared relay interface.
+ * Each worker must OWN its AMQPChannel and its PDO connection exclusively.
  */
 final class AmqpRelay
 {
-    private bool $laneAcquired = false;
-
     private bool $shouldStop = false;
 
     private readonly Backoff $backoff;
@@ -73,15 +66,13 @@ final class AmqpRelay
     {
         $this->registerSignalHandlers();
 
-        try {
-            while (!$this->shouldStop) {
-                if ($this->drainOnce() === 0) {
-                    usleep(IdleSleep::micros($this->idleSleepMs, intdiv($this->idleSleepMs, 4)));
-                }
+        while (!$this->shouldStop) {
+            if ($this->drainOnce() === 0) {
+                usleep(IdleSleep::micros($this->idleSleepMs, intdiv($this->idleSleepMs, 4)));
             }
-        } finally {
-            $this->shutdown();
         }
+        // No shutdown hook: claims are transaction-scoped and never survive
+        // drainOnce().
     }
 
     public function stop(): void
@@ -89,80 +80,61 @@ final class AmqpRelay
         $this->shouldStop = true;
     }
 
-    /** Release the owned lane so a standby relay takes over at once. Idempotent. */
-    public function shutdown(): void
-    {
-        if (!$this->laneAcquired) {
-            return;
-        }
-        $this->laneAcquired = false;
-
-        try {
-            $this->outbox->releaseLane($this->lane);
-        } catch (Throwable $error) {
-            // shutdown() runs in run()'s finally — a throwing release (dead PDO
-            // connection) would mask the loop's root-cause error. The advisory
-            // lock is connection-scoped and self-releases on disconnect, so
-            // swallowing the failure loses nothing.
-            $this->logger->warning('Lane release failed during shutdown; the lock self-releases on disconnect', [
-                'exception' => $error,
-                'lane' => $this->lane,
-            ]);
-        }
-    }
-
-    /** One pass over the owned lane. @return int rows published and deleted */
+    /** One claim-publish-commit pass. @return int rows published and marked published */
     public function drainOnce(): int
     {
-        if (!$this->laneAcquired) {
-            $this->laneAcquired = $this->outbox->tryAcquireLane($this->lane);
-            if (!$this->laneAcquired) {
-                return 0; // owned elsewhere — retry next tick so a standby can take over
-            }
+        $published = $this->outbox->drainClaimed(
+            $this->lane,
+            $this->batchSize,
+            function (array $claimed): ClaimOutcome {
+                try {
+                    $this->publisher->publishBatch($claimed);
+                } catch (Throwable $error) {
+                    return $this->backOff($claimed, $error);
+                }
+
+                return ClaimOutcome::published(
+                    array_map(static fn (OutboxRecord $record): string => $record->id, $claimed),
+                );
+            },
+        );
+
+        if ($published > 0) {
+            $this->events?->record(BrokerEvents::RELAYED, [
+                'lane' => $this->lane,
+                'count' => $published,
+            ]);
         }
 
-        $prefix = $this->outbox->lanePrefix($this->lane, $this->batchSize);
-
-        // Head-of-line: if the first row is backing off, the whole lane waits.
-        if ($prefix === [] || $prefix[0]->availableAt > EpochMillis::now()) {
-            return 0;
-        }
-
-        try {
-            $this->publisher->publishBatch($prefix);
-        } catch (Throwable $error) {
-            $this->backOffHead($prefix[0], $error);
-
-            return 0;
-        }
-
-        $this->outbox->deleteBatch(array_map(static fn (OutboxRecord $record): string => $record->id, $prefix));
-
-        $this->events?->record(BrokerEvents::RELAYED, [
-            'lane' => $this->lane,
-            'count' => count($prefix),
-        ]);
-
-        return count($prefix);
+        return $published;
     }
 
-    private function backOffHead(OutboxRecord $head, Throwable $error): void
+    /**
+     * Batch-granular backoff: every claimed row retries at its own
+     * attempts-derived delay; nothing is marked published. Rows already on the wire
+     * republish later — consumer dedup absorbs them.
+     *
+     * @param non-empty-list<OutboxRecord> $claimed
+     */
+    private function backOff(array $claimed, Throwable $error): ClaimOutcome
     {
-        $attempt = $head->attempts + 1;
-        $delayMs = $this->backoff->delayForAttempt($attempt);
-        $this->outbox->scheduleRetry($head->id, EpochMillis::now() + $delayMs);
+        $retryAtMs = [];
+        foreach ($claimed as $record) {
+            $retryAtMs[$record->id] = EpochMillis::now() + $this->backoff->delayForAttempt($record->attempts + 1);
+        }
 
         $context = [
             'lane' => $this->lane,
-            'message_id' => $head->id,
-            'message_name' => $head->messageName(),
-            'attempt' => $attempt,
-            'retry_in_ms' => $delayMs,
+            'claimed' => count($claimed),
+            'attempt' => $claimed[0]->attempts + 1,
+            'retry_in_ms' => $this->backoff->delayForAttempt($claimed[0]->attempts + 1),
         ];
-        $this->logger->warning('Relay publish failed; lane backing off', [
+        $this->logger->warning('Relay publish failed; claimed batch backing off', [
             'exception' => $error,
         ] + $context);
         $this->errorHandler?->handle($error, $context);
+
+        return ClaimOutcome::retryAll($retryAtMs);
     }
 
     private function registerSignalHandlers(): void

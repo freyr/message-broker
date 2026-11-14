@@ -11,8 +11,8 @@ use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
 
 /**
- * AMQP publish mechanics shared by AmqpRelay (ordered) and CompetingAmqpRelay:
- * explode metadata into individual x-message-* headers, publish the batch,
+ * AMQP publish mechanics of AmqpRelay: add the x-message-* envelope headers
+ * from the outbox row's columns, publish the batch,
  * ONE confirm wait covering the whole batch. The owning relay must hold its
  * AMQPChannel exclusively: publisher-confirm mode is channel-global state,
  * and any other publisher on the same channel corrupts the confirm
@@ -38,11 +38,14 @@ final class AmqpMessagePublisher
         }
 
         foreach ($batch as $record) {
-            // Explode the metadata column into individual x-message-* headers
-            // (E7); produce-time headers ride alongside. array_merge order puts
-            // the envelope headers last, so they win on any key collision. The
-            // relay never parses the body.
-            $headers = array_merge($record->headers, MetadataHeader::explode($record->metadata));
+            // The envelope (id, name, created_at) becomes individual
+            // x-message-* headers; produce-time headers ride alongside.
+            // array_merge order puts the envelope headers last, so they win on
+            // any key collision. The relay never parses the body.
+            $headers = array_merge(
+                $record->headers,
+                MetadataHeader::envelope($record->id, $record->messageName, $record->createdAt),
+            );
 
             $message = new AMQPMessage($record->body, [
                 'content_type' => $this->contentType,
@@ -50,9 +53,8 @@ final class AmqpMessagePublisher
                 'delivery_mode' => AMQPMessage::DELIVERY_MODE_PERSISTENT,
                 'application_headers' => new AMQPTable($headers),
             ]);
-            // Route by message name (the message type). Per-key routing is a
-            // postponed lane mode (see AmqpPublishConfig); no knob here today.
-            $this->amqp->basic_publish($message, $this->publish->exchange, $record->messageName());
+            // Route by message name (the message type).
+            $this->amqp->basic_publish($message, $this->publish->exchange, $record->messageName);
         }
 
         if ($this->publish->publisherConfirms) {

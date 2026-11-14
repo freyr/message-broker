@@ -16,7 +16,6 @@ use Symfony\Component\Uid\Uuid;
  *         public static function create(Order $order): self
  *         {
  *             return new self(
- *                 key: (string) $order->id,
  *                 name: 'order.placed',
  *                 payload: [
  *                     'order_id'    => (string) $order->id,
@@ -27,6 +26,8 @@ use Symfony\Component\Uid\Uuid;
  *     }
  *
  * id and createdAt are generated here — userland cannot forget or forge them.
+ * The envelope (id, name, createdAt) travels as x-message-* transport headers;
+ * only the payload is encoded into the message body.
  */
 class Message
 {
@@ -35,7 +36,6 @@ class Message
 
     /** @param array<string, mixed> $payload */
     protected function __construct(
-        public readonly string $key,
         public readonly string $name,
         private readonly array $payload,
     ) {
@@ -44,20 +44,13 @@ class Message
     }
 
     /**
-     * The canonical two-section wire document. Final: the envelope shape is
-     * library-controlled, userland controls only the payload content.
+     * The payload document the wire format encodes into the body. Final: the
+     * envelope shape is library-controlled, userland controls only the payload.
      *
-     * @return array{metadata: array<string, mixed>, payload: array<string, mixed>}
+     * @return array<string, mixed>
      */
-    final public function wire(): array
+    final public function payload(): array
     {
-        return [
-            'metadata' => [
-                'message_name' => $this->name,
-                'message_id' => $this->id,
-                'created_at' => $this->createdAt,
-            ],
-            'payload' => $this->payload,
-        ];
+        return $this->payload;
     }
 }

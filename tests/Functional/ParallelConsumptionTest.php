@@ -160,13 +160,12 @@ final class ParallelConsumptionTest extends FunctionalTestCase
 
     public function testWireDuplicateLandingOnASecondWorkerIsAbsorbed(): void
     {
-        // The duplicate a competing-relay crash produces: the same message
-        // published twice. Capture the outbox row before the first drain,
-        // re-insert it verbatim after, and drain again.
+        // The duplicate a relay crash produces: the message reached the broker
+        // but the claim never committed, so the row is still unpublished and
+        // the next drain publishes it again.
         $this->producer->produce(OrderPlaced::create('o-1', 100));
-        $record = $this->outbox->lanePrefix(self::LANE, 1)[0];
         $this->relay->drainOnce();
-        $this->outbox->insert($record);
+        self::$pdo->exec('UPDATE outbox_messages SET published_at = NULL');
         $this->relay->drainOnce();
 
         $events = new RecordingEvents();

@@ -15,15 +15,25 @@ final class PostgreSqlPlatformTest extends TestCase
         $ddl = implode("\n", (new PostgreSqlPlatform())->schemaSql(Format::Json));
 
         self::assertStringContainsString('CREATE TABLE IF NOT EXISTS outbox_messages', $ddl);
-        self::assertStringContainsString('metadata JSONB NOT NULL', $ddl);
+        self::assertStringContainsString('id UUID NOT NULL', $ddl);
         self::assertStringContainsString('body BYTEA NOT NULL', $ddl);
         self::assertStringContainsString('created_at TIMESTAMP(3) NOT NULL', $ddl);
-        self::assertStringContainsString(
-            'CREATE INDEX IF NOT EXISTS idx_outbox_drain ON outbox_messages (lane, id)',
-            $ddl,
-        );
+        self::assertStringContainsString('attempts INTEGER NOT NULL DEFAULT 0', $ddl);
+        self::assertStringContainsString('published_at TIMESTAMP(3) NULL', $ddl);
+        self::assertStringContainsString('PRIMARY KEY (id, created_at)', $ddl);
+        self::assertStringContainsString(') PARTITION BY RANGE (created_at)', $ddl);
+        self::assertStringContainsString('outbox_messages_default PARTITION OF outbox_messages DEFAULT', $ddl);
+        self::assertStringContainsString('WHERE published_at IS NULL', $ddl);
         self::assertStringContainsString('CREATE TABLE IF NOT EXISTS message_deduplication', $ddl);
         self::assertStringContainsString('CREATE TABLE IF NOT EXISTS dead_letters', $ddl);
+    }
+
+    public function testOutboxHasNoKeyOrMetadataColumn(): void
+    {
+        $ddl = implode("\n", (new PostgreSqlPlatform())->schemaSql(Format::Json));
+
+        self::assertStringNotContainsString('message_key', $ddl);
+        self::assertStringNotContainsString('metadata', $ddl);
     }
 
     public function testBodyIsByteaForBothFormats(): void
@@ -50,28 +60,15 @@ final class PostgreSqlPlatformTest extends TestCase
         self::assertSame('{"a":1}', (new PostgreSqlPlatform())->readBody('{"a":1}'));
     }
 
-    public function testLaneLockUsesInt8HashToAvoidCollisions(): void
-    {
-        self::assertStringContainsString(
-            'pg_try_advisory_lock(hashtextextended(:lane::text, 0::bigint))',
-            (new PostgreSqlPlatform())->tryAcquireLaneSql(),
-        );
-    }
-
-    public function testReleaseLaneUsesMatchingInt8Unlock(): void
-    {
-        self::assertStringContainsString(
-            'pg_advisory_unlock(hashtextextended(:lane::text, 0::bigint))',
-            (new PostgreSqlPlatform())->releaseLaneSql(),
-        );
-    }
-
-    public function testSelectClaimBatchSqlSkipsLockedEligibleRowsInIdOrder(): void
+    public function testSelectClaimBatchSqlSkipsLockedUnpublishedDueRows(): void
     {
         $sql = (new PostgreSqlPlatform())->selectClaimBatchSql();
 
-        self::assertStringContainsString('WHERE lane = :lane AND available_at <= :now', $sql);
-        self::assertStringContainsString('ORDER BY id', $sql);
+        self::assertStringContainsString(
+            'WHERE lane = :lane AND published_at IS NULL AND available_at <= :now',
+            $sql,
+        );
+        self::assertStringContainsString('ORDER BY available_at', $sql);
         self::assertStringContainsString('LIMIT :limit', $sql);
         self::assertStringContainsString('FOR UPDATE SKIP LOCKED', $sql);
     }

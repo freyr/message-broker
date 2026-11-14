@@ -10,38 +10,18 @@ use PHPUnit\Framework\TestCase;
 
 final class MetadataHeaderTest extends TestCase
 {
-    public function testExplodesMetadataIntoIndividualHeaders(): void
+    public function testEnvelopeBuildsIndividualHeaders(): void
     {
-        $headers = MetadataHeader::explode([
-            'message_name' => 'order.placed',
-            'message_id' => 'm-1',
-            'created_at' => 1_749_722_400_123,
-        ]);
-
         self::assertSame([
-            MetadataHeader::MESSAGE_NAME => 'order.placed',
             MetadataHeader::MESSAGE_ID => 'm-1',
+            MetadataHeader::MESSAGE_NAME => 'order.placed',
             MetadataHeader::CREATED_AT => 1_749_722_400_123,
-        ], $headers);
+        ], MetadataHeader::envelope('m-1', 'order.placed', 1_749_722_400_123));
     }
 
-    public function testExplodeMapsFutureFieldsByConvention(): void
+    public function testEnvelopeAndParseRoundTrip(): void
     {
-        // Underscores become dashes; future fields auto-map with no relay change.
-        self::assertSame([
-            'x-trace-id' => 't-9',
-        ], MetadataHeader::explode([
-            'trace_id' => 't-9',
-        ]));
-    }
-
-    public function testExplodeAndParseRoundTripTheEnvelope(): void
-    {
-        $meta = MetadataHeader::parse(MetadataHeader::explode([
-            'message_name' => 'order.placed',
-            'message_id' => 'm-1',
-            'created_at' => 1_749_722_400_123,
-        ]));
+        $meta = MetadataHeader::parse(MetadataHeader::envelope('m-1', 'order.placed', 1_749_722_400_123));
 
         self::assertSame('m-1', $meta['message_id']);
         self::assertSame('order.placed', $meta['message_name']);

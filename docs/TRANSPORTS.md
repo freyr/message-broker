@@ -1,12 +1,11 @@
 # Transports
 
 This library ships the **AMQP transport only** (RabbitMQ), met on its own
-terms. AMQP has its own concrete relay class(es), consumer class, and config
+terms. AMQP has its own concrete relay class, consumer class, and config
 vocabulary.
 
-**AMQP routes by message name and gives no per-key FIFO.** The ordered relay
-gives total publish order per lane; that is the only ordering guarantee of
-this library.
+**AMQP routes by message name and gives no ordering guarantee.** Rows publish
+in any order, so consumers must be order-insensitive.
 
 ## AMQP (RabbitMQ)
 
@@ -53,54 +52,31 @@ $retryPolicy = new AmqpRetryPolicy(
 
 Publisher-confirm mode is **channel-global state**: any publisher sharing a
 relay's channel corrupts its confirm bookkeeping. Every relay process (and
-every competing-relay worker) must own its `AMQPChannel` exclusively — one
+every relay worker) must own its `AMQPChannel` exclusively — one
 relay process, one dedicated channel.
 
-### Two relay modes
+### The relay
 
-**Ordered (default): `AmqpRelay`.** Exactly one relay owns a lane via a
-connection-scoped advisory lock (`tryAcquireLane`/`releaseLane`); it drains
-the lane's contiguous prefix in id order, publishes the whole eligible batch,
-waits for one confirm covering the batch, then deletes — total in-order
-publishing per lane. A second relay started on the same lane stands by,
-retrying `tryAcquireLane` on every idle tick, and takes over the instant the
-active relay releases (clean shutdown or crash — the lock is session-scoped
-and self-releases when the connection dies).
+There is one relay class, `AmqpRelay`. Any number of identical worker
+processes drain **one** lane in parallel. Each worker claims a batch of
+eligible rows via `FOR UPDATE SKIP LOCKED` inside a transaction owned by the
+outbox store, publishes the batch with publisher confirms while it holds the
+claim, and marks the rows published (`published_at`). The relay never deletes
+rows; retention drops them by partition (see below). Workers never block each
+other — concurrent claimers skip each other's locked rows.
 
-```php
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
-use Freyr\MessageBroker\Serializer\JsonWireFormat;
-use Freyr\MessageBroker\Storage\PostgreSqlPlatform;
-use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
-use Freyr\MessageBroker\Transport\Amqp\AmqpRelay;
+**No ordering promise.** Rows publish in any order, across workers and past
+rows that are backing off; the claim takes the oldest-due rows first as a
+fairness bias, not a contract.
+Consumers must be order-insensitive.
 
-$outbox = new PdoOutboxStore($pdo, new PostgreSqlPlatform());
-
-$relay = new AmqpRelay(
-    outbox: $outbox,
-    amqp: $channel,                                   // dedicated AMQPChannel
-    publish: new AmqpPublishConfig(exchange: 'orders'),
-    contentType: JsonWireFormat::CONTENT_TYPE,
-    lane: 'orders',
-    batchSize: 100,
-);
-$relay->run();
-```
-
-**Competing (opt-in): `CompetingAmqpRelay`.** For order-insensitive
-workloads: N identical worker processes drain **one** lane in parallel. Each
-worker claims a batch of eligible rows via `FOR UPDATE SKIP LOCKED` inside a
-transaction owned by the outbox store, publishes while holding the claim,
-and deletes on success. Workers never block each other — concurrent claimers
-skip each other's locked rows — and a crashed worker's claimed rows are
-instantly reclaimable, because its locks die with its connection.
-
-**No ordering promise.** Rows overtake freely, both across workers and past
-rows that are backing off; id order (UUIDv7) is a FIFO bias, not a contract.
-Consumers of a competing lane must be order-insensitive. A publish failure
-is batch-granular: nothing is deleted, and every claimed row backs off at its
-own attempts-derived delay — a crashed or failing worker can cause its
-in-flight batch to republish, which consumer-side deduplication absorbs.
+**Failure and crash semantics.** A publish failure is batch-granular:
+nothing is marked published, and every claimed row backs off at its own
+attempts-derived delay (exponential, 1 s ×4, maximum 300 s). The relay has
+no dead-letter path. A worker that crashes after publishing but before its
+claim commits leaves the rows unpublished; the next claim republishes them,
+and consumer-side deduplication absorbs the duplicate. A row is never removed
+while it is unpublished, so there is no data-loss path.
 
 ```php
 use Freyr\MessageBroker\Outbox\PdoOutboxStore;
@@ -108,10 +84,10 @@ use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Storage\PostgreSqlPlatform;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
-use Freyr\MessageBroker\Transport\Amqp\CompetingAmqpRelay;
+use Freyr\MessageBroker\Transport\Amqp\AmqpRelay;
 
 // Each worker owns its own PDO connection and its own dedicated AMQPChannel.
-$worker = new CompetingAmqpRelay(
+$worker = new AmqpRelay(
     outbox: new PdoOutboxStore($workerPdo, new PostgreSqlPlatform()),
     amqp: $workerChannel,
     publish: new AmqpPublishConfig(exchange: 'orders'),
@@ -123,20 +99,47 @@ $worker = new CompetingAmqpRelay(
 $worker->run();
 ```
 
+Constructor arguments: `outbox`, `amqp`, `publish`, `contentType`,
+`lane = 'default'`, `batchSize = 100`, `backoff`, `errorHandler`,
+`idleSleepMs = 200`, `confirmTimeoutSec = 5`, `logger`, `events`.
+
 Run N of these as separate processes, each with its own connection and
 channel, all pointed at the same lane name.
 
-### Lane sharding
+The relay builds the `x-message-id`, `x-message-name` and `x-created-at` AMQP
+headers from the `id`, `message_name` and `created_at` columns of the row.
 
-Since one lane has exactly one active *ordered* relay, lane sharding is how
-you scale ordered throughput: fan production across `lane-1..N` (e.g. a hash
-of the message key) and run one ordered relay per lane. This parallelizes
-across lanes while keeping total order within each one.
+### Lanes
 
-### Operational signal per mode
+A lane is a named drain of the outbox table, used to isolate workloads: a
+slow or failing workload on one lane does not delay another lane. A lane name
+has 1 to 64 characters; a message name has 1 to 255 characters. `OutboxRecord`
+rejects an empty or too long value with an `InvalidArgumentException`. Scale
+the throughput of a lane by adding workers to it.
 
-- **Ordered mode** — a backing-off lane head blocks everything behind it, so
-  watch for a blocked lane (the oldest unrelayed row growing stale).
-- **Competing mode** — a blocked head cannot block the lane (rows overtake
-  it), so a single stuck row will not show up as a stall. Watch **outbox row
-  age** instead — the oldest `available_at`/`created_at` across the lane.
+### Outbox table and retention
+
+`outbox_messages` is a PostgreSQL table partitioned by range on `created_at`
+(PostgreSQL 13+ only). It has one partition per UTC day, named
+`outbox_messages_pYYYYMMDD`, and a `outbox_messages_default` partition that
+catches rows when no daily partition exists. Columns: `id` UUID, `lane`
+VARCHAR(64), `message_name` VARCHAR(255), `body` BYTEA (the final wire bytes,
+payload only), `headers` JSONB (the produce-time headers), `created_at`
+TIMESTAMP(3), `available_at` TIMESTAMP(3), `attempts` INTEGER and
+`published_at` TIMESTAMP(3) NULL. The primary key is `(id, created_at)`. A
+partial index on `(lane, available_at)` where `published_at IS NULL` serves
+the claim query.
+
+The relay only sets `published_at`. Rows leave the table when
+`message-broker:outbox:maintain` drops an expired daily partition that holds
+only published rows, or deletes expired published rows from the DEFAULT
+partition. See
+[CLI_REFERENCE.md](CLI_REFERENCE.md) and [PRODUCTION.md](PRODUCTION.md).
+
+### Operational signal
+
+Watch the age of the oldest unpublished row (`published_at IS NULL`) per
+lane. A single stuck row does not stall a lane, because other rows overtake
+it, so row age is the signal for a slowly draining lane. Also watch the exit
+code of `message-broker:outbox:maintain` and the rows that remain in the
+default partition.

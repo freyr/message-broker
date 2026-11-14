@@ -4,16 +4,12 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Serializer;
 
-use RuntimeException;
-
 /**
  * The `x-message-*` envelope-header convention shared by the relay (write) and
- * both deserializers + consumer triage (read), E7. The envelope is KEPT as the
- * outbox `metadata` JSON column; at relay production it is EXPLODED into one
- * native transport header per key — `x-message-id`, `x-message-name`,
- * `x-created-at`, plus any future field as `x-<key>` (underscores → dashes).
- * This is the slice-2 individual-header model, retained and made symmetric for
- * JSON — there is no single JSON-blob header.
+ * both deserializers + consumer triage (read). The envelope is the outbox
+ * row's own columns (id, message_name, created_at); at relay production it
+ * becomes one native transport header per field — `x-message-id`,
+ * `x-message-name`, `x-created-at`. There is no single JSON-blob header.
  */
 final class MetadataHeader
 {
@@ -22,27 +18,19 @@ final class MetadataHeader
     public const string CREATED_AT = 'x-created-at';
 
     /**
-     * Explode the outbox `metadata` bag into individual transport headers (E7):
-     * one `x-<key>` key-value pair per field. Scalar values only — future
-     * fields auto-map with no relay change. The relay merges these OVER the
-     * produce-time headers, so the envelope is authoritative on key collisions.
+     * Build the envelope headers of one message. The relay merges these OVER
+     * the produce-time headers, so the envelope is authoritative on key
+     * collisions.
      *
-     * @param array<string, mixed> $metadata
-     *
-     * @return array<string, int|string>
+     * @return array{x-message-id: string, x-message-name: string, x-created-at: int}
      */
-    public static function explode(array $metadata): array
+    public static function envelope(string $messageId, string $messageName, int $createdAt): array
     {
-        $headers = [];
-        foreach ($metadata as $key => $value) {
-            if (!is_string($value) && !is_int($value)) {
-                throw new RuntimeException("Metadata field '{$key}' must be string|int to ride a transport header");
-            }
-
-            $headers['x-'.str_replace('_', '-', $key)] = $value;
-        }
-
-        return $headers;
+        return [
+            self::MESSAGE_ID => $messageId,
+            self::MESSAGE_NAME => $messageName,
+            self::CREATED_AT => $createdAt,
+        ];
     }
 
     /**
