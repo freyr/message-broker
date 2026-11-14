@@ -121,6 +121,9 @@ final readonly class PostgreSqlPlatform implements Platform
                 )
                 SQL,
             <<<'SQL'
+                CREATE INDEX IF NOT EXISTS idx_dedup_created_at ON message_deduplication (created_at)
+                SQL,
+            <<<'SQL'
                 CREATE TABLE IF NOT EXISTS dead_letters (
                     id UUID NOT NULL PRIMARY KEY,
                     source VARCHAR(255) NOT NULL,
