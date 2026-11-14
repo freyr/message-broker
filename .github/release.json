@@ -1,0 +1,11 @@
+{
+  "packages": [
+    {
+      "name": "message-broker",
+      "path": ".",
+      "tag": "v{version}",
+      "ignore": ["tests/**", "*.md", "docs/**", ".idea/**"],
+      "initial": "1.0.0"
+    }
+  ]
+}
