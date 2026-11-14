@@ -1,0 +1,71 @@
+services:
+  php:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+      - ${COMPOSER_HOME}:/.composer:consistent
+    environment:
+      POSTGRES_DSN: "pgsql:host=postgres;port=5432;dbname=message_broker_test"
+      POSTGRES_USER: broker
+      POSTGRES_PASSWORD: broker
+      AMQP_HOST: rabbitmq
+      AMQP_PORT: "5672"
+      AMQP_USER: guest
+      AMQP_PASSWORD: guest
+      AMQP_VHOST: "/"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: message_broker_test
+      POSTGRES_USER: broker
+      POSTGRES_PASSWORD: broker
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U broker -d message_broker_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  rabbitmq:
+    image: rabbitmq:4.3.1-management-alpine
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  # Offline Avro compatibility gate (CI). One-shot maven runner — NOT part of the
+  # default stack (profile-gated). Runs the Confluent schema-registry-maven-plugin
+  # `test-local-compatibility` goal against the committed .avsc set with no server.
+  schema-compat:
+    image: maven:3.9-eclipse-temurin-21
+    profiles: ["schema-compat"]
+    working_dir: /app
+    entrypoint: ["bash", "ci/schema-compat/run.sh"]
+    volumes:
+      - .:/app
+      - maven_cache:/root/.m2
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  maven_cache:

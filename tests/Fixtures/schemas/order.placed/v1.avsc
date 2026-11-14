@@ -1,0 +1,9 @@
+{
+  "type": "record",
+  "name": "OrderPlaced",
+  "namespace": "freyr.messagebroker.tests",
+  "fields": [
+    {"name": "order_id", "type": "string"},
+    {"name": "total_cents", "type": "long"}
+  ]
+}
