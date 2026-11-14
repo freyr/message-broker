@@ -11,19 +11,17 @@ final readonly class PartitionPurgeReport
 {
     /**
      * @param list<string> $dropped daily partitions dropped (or, on a dry run, that would be)
-     * @param array<string, int> $kept expired daily partitions kept: name => unpublished row count
+     * @param array<string, int> $unpublished dropped partitions that held unpublished rows: name => row count
      */
     public function __construct(
         public DateTimeImmutable $cutoff,
         public array $dropped,
-        public array $kept,
-        public int $defaultRowsDeleted,
-        public int $defaultRowsRemaining,
+        public array $unpublished,
     ) {}
 
-    /** True when an expired partition still holds unpublished rows — a stuck relay. */
-    public function hasStuckRows(): bool
+    /** Unpublished rows that passed the age limit and were dropped (or would be). */
+    public function unpublishedRowsDropped(): int
     {
-        return $this->kept !== [];
+        return array_sum($this->unpublished);
     }
 }

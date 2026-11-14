@@ -9,10 +9,10 @@ use PDO;
 use PDOStatement;
 
 /**
- * PostgreSQL dialect (the only supported database, 13+):
+ * PostgreSQL dialect (the only supported database, 14+):
  *   - outbox_messages          → range-partitioned by created_at (one partition
- *                                per UTC day, plus a DEFAULT partition); managed
- *                                by OutboxPartitionManager
+ *                                per UTC day, no DEFAULT partition); managed
+ *                                by OutboxPartitionManager or pg_partman
  *   - ids                      → native UUID
  *   - deduplication insert     → INSERT ... ON CONFLICT DO NOTHING
  *   - headers                  → JSONB
@@ -89,9 +89,9 @@ final readonly class PostgreSqlPlatform implements Platform
         // outbox_messages is partitioned by created_at: the partition key is
         // known at insert (published_at is not), and the primary key of a
         // partitioned table must include it. The daily partitions come from
-        // OutboxPartitionManager; the DEFAULT partition only catches rows
-        // when no daily partition exists yet, so a missed maintenance run
-        // never fails a producer's transaction.
+        // OutboxPartitionManager (or pg_partman). There is no DEFAULT
+        // partition, so retention can DETACH ... CONCURRENTLY; an insert for
+        // a day with no partition fails, so partitions are created ahead.
         return [
             <<<'SQL'
                 CREATE TABLE IF NOT EXISTS outbox_messages (
@@ -106,9 +106,6 @@ final readonly class PostgreSqlPlatform implements Platform
                     published_at TIMESTAMP(3) NULL,
                     PRIMARY KEY (id, created_at)
                 ) PARTITION BY RANGE (created_at)
-                SQL,
-            <<<'SQL'
-                CREATE TABLE IF NOT EXISTS outbox_messages_default PARTITION OF outbox_messages DEFAULT
                 SQL,
             <<<'SQL'
                 CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox_messages (lane, available_at)

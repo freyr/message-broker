@@ -23,10 +23,11 @@ This is safe because:
   that crashes after committing its dedup/dispatch transaction but before
   acking (AMQP) redelivers the message on restart. Both land on consumer-side
   deduplication, which absorbs the duplicate.
-- **There is no data-loss path.** A row is never removed from the outbox while
-  it is unpublished. The produce/relay path never dead-letters — a stuck
-  lane retries with backoff indefinitely, which is an operational alert, not
-  silent loss.
+- **The retention period is the only data-loss path.** The produce/relay
+  path never dead-letters — a stuck lane retries with backoff until the row
+  passes the retention period (default 7 days). Then retention drops the row
+  with its partition and reports it. Alert on relay backlog well before that
+  limit.
 
 Tune restart backoff (how fast the supervisor retries a crashed process),
 not reconnect logic — there is none to tune.
@@ -94,8 +95,9 @@ and `dead_letters` tables plus these events:
 - **Throughput** — the `RELAYED`/`DISPATCHED` event rate.
 - **Relay backlog** — the age of the oldest unpublished row
   (`published_at IS NULL`) per lane.
-- **Retention health** — the exit code of `message-broker:outbox:maintain`
-  and the number of rows in `outbox_messages_default`.
+- **Retention health** — the exit code of `message-broker:outbox:maintain`,
+  its warnings about dropped unpublished rows, and the partition of tomorrow
+  (it must exist).
 - **Consumer lag** — broker queue depth (AMQP).
 - **DLQ depth** — `SELECT COUNT(*) FROM dead_letters WHERE replayed_at IS NULL`,
   optionally grouped by `source`/`message_name`.
@@ -124,12 +126,13 @@ rows overtake it. Watch the age of the oldest unpublished row
 
 ## Outbox retention
 
-The relay never deletes rows. It sets `published_at`, and the published rows
-stay as an audit trail until retention drops them. `outbox_messages` is
-partitioned by `created_at`, with one partition per UTC day.
+The relay never deletes rows. It sets `published_at`, and the rows stay until
+retention drops their partition. `outbox_messages` is partitioned by
+`created_at`, with one partition per UTC day (`outbox_messages_pYYYYMMDD`) and
+no default partition. An insert for a day with no partition fails, and the
+producer's transaction fails with it, so create partitions ahead of time.
 
-Run `message-broker:outbox:maintain` once a day (cron), **before the day
-starts**:
+Run `message-broker:outbox:maintain` once a day (cron):
 
 ```bash
 php bin/console message-broker:outbox:maintain --retention-days=7 --premake-days=3
@@ -137,20 +140,47 @@ php bin/console message-broker:outbox:maintain --retention-days=7 --premake-days
 
 The command:
 
-- creates the daily partitions from today to today plus `--premake-days`;
+- creates the missing daily partitions from today to today plus
+  `--premake-days` (`CREATE TABLE`, then `ATTACH PARTITION`);
 - drops each daily partition that lies wholly before the cutoff (today
-  midnight UTC minus `--retention-days`) and holds no unpublished row;
-- keeps, and reports, an expired partition that still holds unpublished rows;
-- deletes expired published rows from the default partition.
+  midnight UTC minus `--retention-days`): `DETACH PARTITION ... CONCURRENTLY`,
+  then `DROP TABLE` on the detached table;
+- finishes a detach that an earlier run did not complete
+  (`DETACH PARTITION ... FINALIZE`), and drops an expired table that an earlier
+  run detached.
 
-It exits with code 1 when an expired partition still holds unpublished rows,
-which means a relay is stuck. It exits with code 2 on invalid options. Use
-`--dry-run` to preview the changes.
+The retention period (`--retention-days`, default 7) is also the age limit of
+an unpublished row. An expired partition is dropped even when it still holds
+unpublished rows; the command reports them as a warning. A relay that stays
+broken for longer than the retention period loses those messages, so alert on
+the age of the oldest unpublished row well before that limit.
 
-A row that lands in `outbox_messages_default` (a safety net for the case that
-maintenance did not run) blocks the later creation of the partition for its
-day. Run the command before the day starts and keep `--premake-days` above 0.
+**Locks.** No step takes an `ACCESS EXCLUSIVE` lock on `outbox_messages`.
+`ATTACH PARTITION` and `DETACH PARTITION ... CONCURRENTLY` take only
+`SHARE UPDATE EXCLUSIVE`, which does not block inserts, claims or updates. The
+detach waits until the transactions that use `outbox_messages` end, so a long
+business transaction delays the command but blocks nobody. The command must
+run outside a transaction. A plain `DROP TABLE` or `DETACH PARTITION` of a
+partition takes `ACCESS EXCLUSIVE` on the parent and queues every producer
+behind it; do not run them on this table by hand.
+
+It exits with code 0, also when it dropped unpublished rows, and with code 2
+on invalid options. Use `--dry-run` to preview the changes.
+
+### With pg_partman
+
+pg_partman can create the partitions. Its default name for a daily partition,
+`outbox_messages_pYYYYMMDD`, is the name this library uses, so
+`outbox:maintain` skips the partitions that pg_partman made and drops them when
+they expire. Configure pg_partman like this:
+
+- **No default partition:** `create_parent(..., p_default_table := false)`.
+  With a default partition, `DETACH PARTITION ... CONCURRENTLY` fails.
+- **No retention:** keep `retention` NULL in `part_config`. pg_partman retention
+  runs a plain `DETACH PARTITION`, which takes `ACCESS EXCLUSIVE` on the parent.
+  Let `outbox:maintain` drop the partitions.
+- **UTC:** run the database in UTC, so pg_partman's day boundaries agree with
+  the UTC days of this library.
 
 Monitor three signals: the age of the oldest unpublished row per lane, the
-exit code of the maintain command, and the rows that remain in the default
-partition.
+warnings of the maintain command, and the partition of tomorrow.

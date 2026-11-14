@@ -13,13 +13,13 @@ use Symfony\Component\Console\Output\OutputInterface;
 
 /**
  * Outbox retention, meant for a daily schedule: create the daily partitions
- * ahead of time, then drop expired partitions that hold only published rows.
- * Exits non-zero when an expired partition still holds unpublished rows, so a
- * stuck relay surfaces in the scheduler.
+ * ahead of time, then drop the expired ones (DETACH ... CONCURRENTLY, then
+ * DROP). The retention period is also the age limit of an unpublished row:
+ * expired unpublished rows are dropped and reported as a warning.
  */
 #[AsCommand(
     name: 'message-broker:outbox:maintain',
-    description: 'Create upcoming outbox partitions and drop expired, fully published ones',
+    description: 'Create upcoming outbox partitions and drop expired ones',
 )]
 final class OutboxMaintainCommand extends Command
 {
@@ -32,17 +32,17 @@ final class OutboxMaintainCommand extends Command
     protected function configure(): void
     {
         $this
-            ->addOption('retention-days', null, InputOption::VALUE_REQUIRED, 'Keep published rows at least this many days', '7')
+            ->addOption('retention-days', null, InputOption::VALUE_REQUIRED, 'Keep rows (published or not) at least this many days', '7')
             ->addOption('premake-days', null, InputOption::VALUE_REQUIRED, 'Create daily partitions this many days ahead', '3')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Report what would change without changing anything');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $retentionDays = self::positiveInt($input->getOption('retention-days'));
-        $premakeDays = self::positiveInt($input->getOption('premake-days'));
+        $retentionDays = self::intOption($input->getOption('retention-days'));
+        $premakeDays = self::intOption($input->getOption('premake-days'), allowZero: true);
         if ($retentionDays === null || $premakeDays === null) {
-            $output->writeln('<error>--retention-days and --premake-days must be integers of 1 or more.</error>');
+            $output->writeln('<error>--retention-days must be an integer of 1 or more, --premake-days of 0 or more.</error>');
 
             return Command::INVALID;
         }
@@ -61,27 +61,17 @@ final class OutboxMaintainCommand extends Command
         foreach ($report->dropped as $name) {
             $output->writeln("<info>{$prefix}Dropped {$name}.</info>");
         }
-        foreach ($report->kept as $name => $pending) {
-            $output->writeln("<error>{$prefix}Kept {$name}: {$pending} unpublished row(s) — check the relay.</error>");
-        }
-        if ($report->defaultRowsDeleted > 0) {
-            $output->writeln("<info>{$prefix}Deleted {$report->defaultRowsDeleted} expired published row(s) from the default partition.</info>");
-        }
-        if ($report->defaultRowsRemaining > 0) {
-            $output->writeln(sprintf(
-                '<comment>%s%d row(s) remain in %s — run this command before the day starts (raise --premake-days).</comment>',
-                $prefix,
-                $report->defaultRowsRemaining,
-                OutboxPartitionManager::DEFAULT_PARTITION,
-            ));
+        foreach ($report->unpublished as $name => $count) {
+            $output->writeln("<comment>{$prefix}{$name} held {$count} unpublished row(s) older than the retention period; they are dropped.</comment>");
         }
 
-        return $report->hasStuckRows() ? Command::FAILURE : Command::SUCCESS;
+        return Command::SUCCESS;
     }
 
-    private static function positiveInt(mixed $value): ?int
+    private static function intOption(mixed $value, bool $allowZero = false): ?int
     {
-        if (!is_string($value) || preg_match('/^[1-9]\d*$/', $value) !== 1) {
+        $pattern = $allowZero ? '/^(0|[1-9]\d*)$/' : '/^[1-9]\d*$/';
+        if (!is_string($value) || preg_match($pattern, $value) !== 1) {
             return null;
         }
 

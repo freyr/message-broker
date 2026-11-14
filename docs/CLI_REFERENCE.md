@@ -21,8 +21,9 @@ Duration options (`--since`, `--older-than`) share one format:
 ## `message-broker:setup:schema`
 
 Creates the `outbox_messages` table (partitioned by `created_at`, with the
-default partition and the first daily partitions), `message_deduplication`,
-and `dead_letters` (or prints the DDL without executing it).
+first daily partitions and no default partition), `message_deduplication`,
+and `dead_letters` (or prints the DDL without executing it). A second run
+skips the partitions that are already attached.
 
 **Constructor:** `new SetupSchemaCommand(PDO $pdo, Platform $platform)`
 
@@ -30,31 +31,37 @@ and `dead_letters` (or prints the DDL without executing it).
 | --- | --- |
 | `--format` | `json` or `avro` (default `json`). Selects the outbox `body` column type and the rest of the DDL. Must match the `WireFormat` your producer uses. |
 | `--premake-days` | Create daily outbox partitions from today to today plus this many days (default `3`). |
-| `--dump-sql` | Print the DDL instead of executing it, including the partition DDL. |
+| `--dump-sql` | Print the DDL instead of executing it, including the partition DDL. The partition DDL is for a new database only. |
 
 ## `message-broker:outbox:maintain`
 
 Outbox retention. Creates the upcoming daily partitions and drops the expired
-partitions that hold only published rows. Run it daily (cron), before the day
-starts.
+ones. Run it daily (cron). It must run outside a transaction.
 
 **Constructor:** `new OutboxMaintainCommand(OutboxPartitionManager $partitions)`,
 for example `new OutboxMaintainCommand(new OutboxPartitionManager($pdo))`.
 
 | Option | Description |
 | --- | --- |
-| `--retention-days` | Keep published rows at least this many days (default `7`). The cutoff is today midnight UTC minus this value. |
-| `--premake-days` | Create daily partitions from today to today plus this many days (default `3`). |
+| `--retention-days` | Keep rows, published or not, at least this many days (default `7`). The cutoff is today midnight UTC minus this value. |
+| `--premake-days` | Create daily partitions from today to today plus this many days (default `3`, `0` creates only today). |
 | `--dry-run` | Report what would change; change nothing. |
 
-The command drops each daily partition that lies wholly before the cutoff and
-holds no unpublished row. It keeps and reports an expired partition that still
-holds unpublished rows. It deletes expired published rows from the default
-partition and reports the rows that remain there.
+The command creates each missing partition as a plain table and attaches it
+(`ATTACH PARTITION`). It drops each daily partition that lies wholly before the
+cutoff: `DETACH PARTITION ... CONCURRENTLY`, then `DROP TABLE`. Neither step
+takes an `ACCESS EXCLUSIVE` lock on `outbox_messages`, so producers and relays
+never wait for it. The command also finishes a detach that an earlier run did
+not complete, and drops an expired table that an earlier run detached.
 
-Exit codes: `0` success; `1` an expired partition still holds unpublished rows
-(a stuck relay); `2` invalid options (`--retention-days` and `--premake-days`
-must be integers of 1 or more).
+The retention period (`--retention-days`, default 7) is also the age limit of
+an unpublished row. An expired partition is dropped even when it still holds
+unpublished rows; the command reports them as a warning. A relay that stays
+broken for longer than the retention period loses those messages, so alert on
+the age of the oldest unpublished row well before that limit.
+
+Exit codes: `0` success (also when it dropped unpublished rows); `2` invalid
+options (`--retention-days` must be 1 or more, `--premake-days` 0 or more).
 
 ## `message-broker:relay:run <lane>`
 

@@ -53,20 +53,22 @@ final class SetupSchemaCommand extends Command
         }
 
         $partitions = new OutboxPartitionManager($this->pdo);
-        $ddl = [...$this->platform->schemaSql($format), ...$partitions->partitionDdl((int) $premakeOption)];
+        $premakeDays = (int) $premakeOption;
 
-        foreach ($ddl as $statement) {
-            if ($input->getOption('dump-sql') === true) {
+        if ($input->getOption('dump-sql') === true) {
+            // For a new database: the partition DDL is not idempotent (ATTACH).
+            foreach ([...$this->platform->schemaSql($format), ...$partitions->partitionDdl($premakeDays)] as $statement) {
                 $output->writeln($statement.';');
-                continue;
             }
 
-            $this->pdo->exec($statement);
+            return Command::SUCCESS;
         }
 
-        if ($input->getOption('dump-sql') !== true) {
-            $output->writeln("<info>Schema is up to date ({$format->value}).</info>");
+        foreach ($this->platform->schemaSql($format) as $statement) {
+            $this->pdo->exec($statement);
         }
+        $partitions->ensurePartitions($premakeDays); // skips partitions that are already attached
+        $output->writeln("<info>Schema is up to date ({$format->value}).</info>");
 
         return Command::SUCCESS;
     }

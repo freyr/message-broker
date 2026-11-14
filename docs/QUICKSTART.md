@@ -70,7 +70,7 @@ publish in any order, so consumers must be order-insensitive.
 ## Run the schema setup
 
 Before producing anything, create `outbox_messages` (a table partitioned by
-`created_at`, one partition per UTC day, plus a default partition),
+`created_at`, one partition per UTC day, no default partition),
 `message_deduplication`, and `dead_letters`. The command also creates the
 first daily partitions:
 
@@ -112,9 +112,10 @@ own database connection and its own channel. See
 
 ## Schedule the outbox maintenance
 
-Published rows stay in `outbox_messages` until their daily partition expires.
-Run `message-broker:outbox:maintain` once a day, before the day starts, to
-create the upcoming partitions and drop the expired ones:
+Rows stay in `outbox_messages` until their daily partition expires. There is
+no default partition, so an insert for a day with no partition fails. Run
+`message-broker:outbox:maintain` once a day to create the upcoming partitions
+and drop the expired ones:
 
 ```php
 use Freyr\MessageBroker\Console\OutboxMaintainCommand;
@@ -127,7 +128,10 @@ $application->add(new OutboxMaintainCommand(new OutboxPartitionManager($pdo)));
 php bin/console message-broker:outbox:maintain --retention-days=7 --premake-days=3
 ```
 
-See [CLI_REFERENCE.md](CLI_REFERENCE.md) for the options and the exit codes.
+The retention period is also the age limit of an unpublished row: an expired
+partition is dropped with its unpublished rows. See
+[CLI_REFERENCE.md](CLI_REFERENCE.md) for the options and the exit codes, and
+[PRODUCTION.md](PRODUCTION.md) for pg_partman.
 
 ## Run a consumer
 

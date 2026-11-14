@@ -6,8 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Core transactional outbox on a partitioned PostgreSQL table (PostgreSQL 13+), with lanes as named drains and no ordering guarantee
-- Partition retention: the relay marks rows published (`published_at` audit) and never deletes; `message-broker:outbox:maintain` creates daily partitions and drops expired, fully published ones
+- Core transactional outbox on a partitioned PostgreSQL table (PostgreSQL 14+), with lanes as named drains and no ordering guarantee
+- Partition retention: the relay marks rows published (`published_at` audit) and never deletes; `message-broker:outbox:maintain` creates daily partitions ahead (no default partition) and drops expired ones with `DETACH PARTITION ... CONCURRENTLY`; the retention period is also the age limit of an unpublished row
 - Consumer-side deduplication (insert-or-ignore keyed by message id and consumer) turning at-least-once delivery into exactly-once processing
 - Dead-lettering with replay capability for failed messages
 - AMQP transport with a single AmqpRelay (any number of workers drain one lane in parallel via FOR UPDATE SKIP LOCKED claims), TTL/DLX retry support, and consumer-side dedup integration

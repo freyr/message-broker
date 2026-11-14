@@ -22,7 +22,7 @@ final class PostgreSqlPlatformTest extends TestCase
         self::assertStringContainsString('published_at TIMESTAMP(3) NULL', $ddl);
         self::assertStringContainsString('PRIMARY KEY (id, created_at)', $ddl);
         self::assertStringContainsString(') PARTITION BY RANGE (created_at)', $ddl);
-        self::assertStringContainsString('outbox_messages_default PARTITION OF outbox_messages DEFAULT', $ddl);
+        self::assertStringNotContainsString('PARTITION OF', $ddl, 'no DEFAULT partition: retention detaches concurrently');
         self::assertStringContainsString('WHERE published_at IS NULL', $ddl);
         self::assertStringContainsString('CREATE TABLE IF NOT EXISTS message_deduplication', $ddl);
         self::assertStringContainsString('CREATE TABLE IF NOT EXISTS dead_letters', $ddl);

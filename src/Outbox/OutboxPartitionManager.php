@@ -6,31 +6,34 @@ namespace Freyr\MessageBroker\Outbox;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use LogicException;
 use PDO;
-use PDOException;
 use RuntimeException;
 use Symfony\Component\Clock\Clock;
 
 /**
- * Retention for the partitioned outbox_messages table. Published rows are
- * never deleted by the relay; they leave the table here:
+ * Partitions and retention of the outbox_messages table. The relay never
+ * deletes rows; they leave the table here, one daily partition at a time.
  *
  *  - ensurePartitions() creates one range partition per UTC day
  *    (outbox_messages_pYYYYMMDD, [day, day + 1)) from today to today + N days.
+ *    It creates a plain table and ATTACHes it, which takes only a SHARE UPDATE
+ *    EXCLUSIVE lock on outbox_messages, so producers and relays never wait.
+ *    The name matches the pg_partman default for daily partitions, so
+ *    pg_partman can create the partitions instead.
  *  - purge() drops each daily partition that lies wholly before the retention
- *    cutoff AND holds no unpublished row. A partition with unpublished rows is
- *    kept and reported — those rows still wait for the relay, and dropping them
- *    would lose messages. In the DEFAULT partition (rows that arrived while no
- *    daily partition existed) it deletes published rows older than the cutoff.
+ *    cutoff: DETACH PARTITION ... CONCURRENTLY (no ACCESS EXCLUSIVE lock on
+ *    outbox_messages), then DROP TABLE on the detached table. The retention
+ *    period is also the age limit of an unpublished row: an expired partition
+ *    is dropped even when it still holds unpublished rows, and the report
+ *    counts them.
  *
- * Run it on a schedule (e.g. daily cron): message-broker:outbox:maintain.
- * Daily partitions must exist BEFORE rows of that day arrive; a row that lands
- * in DEFAULT blocks the later creation of its day's partition.
+ * There is no DEFAULT partition (DETACH ... CONCURRENTLY does not allow one):
+ * an insert for a day with no partition fails. Create partitions ahead of time.
  */
 final readonly class OutboxPartitionManager
 {
     public const string TABLE = 'outbox_messages';
-    public const string DEFAULT_PARTITION = 'outbox_messages_default';
     private const string DAILY_PREFIX = 'outbox_messages_p';
 
     public function __construct(
@@ -38,26 +41,19 @@ final readonly class OutboxPartitionManager
     ) {}
 
     /**
-     * DDL for the daily partitions from $today to $today + $daysAhead (inclusive).
+     * DDL that creates and attaches the daily partitions from $today to
+     * $today + $daysAhead (inclusive). For a schema with no partition yet.
      *
      * @return list<string>
      */
     public function partitionDdl(int $daysAhead, ?DateTimeImmutable $today = null): array
     {
-        self::assertPositive('daysAhead', $daysAhead, allowZero: true);
+        self::assertNotNegative('daysAhead', $daysAhead);
         $day = self::utcMidnight($today);
 
         $ddl = [];
         for ($offset = 0; $offset <= $daysAhead; ++$offset) {
-            $from = $day->modify("+{$offset} day");
-            $to = $from->modify('+1 day');
-            $ddl[] = sprintf(
-                "CREATE TABLE IF NOT EXISTS \"%s\" PARTITION OF %s FOR VALUES FROM ('%s') TO ('%s')",
-                self::partitionName($from),
-                self::TABLE,
-                $from->format('Y-m-d H:i:s'),
-                $to->format('Y-m-d H:i:s'),
-            );
+            array_push($ddl, ...self::createAndAttach($day->modify("+{$offset} day")));
         }
 
         return $ddl;
@@ -65,24 +61,28 @@ final readonly class OutboxPartitionManager
 
     /**
      * Create the missing daily partitions from today to today + $daysAhead.
+     * A partition that is already attached (made by this class or by
+     * pg_partman) is skipped.
      *
      * @return list<string> the daily partition names that now exist for that range
      */
     public function ensurePartitions(int $daysAhead = 3, ?DateTimeImmutable $today = null): array
     {
-        $names = [];
+        self::assertNotNegative('daysAhead', $daysAhead);
         $day = self::utcMidnight($today);
-        foreach ($this->partitionDdl($daysAhead, $day) as $offset => $ddl) {
-            $name = self::partitionName($day->modify("+{$offset} day"));
-            try {
-                $this->pdo->exec($ddl);
-            } catch (PDOException $error) {
-                throw new RuntimeException(
-                    "Cannot create outbox partition {$name}: ".$error->getMessage()
-                    .' — if rows of that day already sit in '.self::DEFAULT_PARTITION
-                    .', move them out of it first; run maintenance with enough --premake-days to avoid this.',
-                    previous: $error,
-                );
+        $attached = array_keys(array_filter(
+            $this->dailyTables(),
+            static fn (array $table): bool => $table['attached'],
+        ));
+
+        $names = [];
+        for ($offset = 0; $offset <= $daysAhead; ++$offset) {
+            $from = $day->modify("+{$offset} day");
+            $name = self::partitionName($from);
+            if (!in_array($name, $attached, true)) {
+                foreach (self::createAndAttach($from) as $ddl) {
+                    $this->pdo->exec($ddl);
+                }
             }
             $names[] = $name;
         }
@@ -91,87 +91,120 @@ final readonly class OutboxPartitionManager
     }
 
     /**
-     * Drop expired daily partitions that hold only published rows, and delete
-     * expired published rows from the DEFAULT partition.
+     * Drop every daily partition that lies wholly before the cutoff (today
+     * 00:00 UTC minus $retentionDays), unpublished rows included. Also
+     * finishes a detach that an earlier run did not complete, and drops an
+     * expired daily table that an earlier run detached but did not drop.
+     *
+     * Must run outside a transaction: DETACH ... CONCURRENTLY cannot run in
+     * a transaction block.
      */
     public function purge(int $retentionDays, bool $dryRun = false, ?DateTimeImmutable $today = null): PartitionPurgeReport
     {
-        self::assertPositive('retentionDays', $retentionDays);
+        if ($retentionDays < 1) {
+            throw new \InvalidArgumentException("retentionDays must be 1 or more, got {$retentionDays}");
+        }
+        if ($this->pdo->inTransaction()) {
+            throw new LogicException('Outbox purge cannot run inside a transaction (DETACH PARTITION CONCURRENTLY).');
+        }
         $cutoff = self::utcMidnight($today)->modify("-{$retentionDays} day");
 
         $dropped = [];
-        $kept = [];
-        foreach ($this->dailyPartitions() as $name => $day) {
-            if ($day->modify('+1 day') > $cutoff) {
+        $unpublished = [];
+        foreach ($this->dailyTables() as $name => $table) {
+            if ($table['day']->modify('+1 day') > $cutoff) {
                 continue; // not wholly expired yet
             }
 
             $pending = $this->count("SELECT COUNT(*) FROM \"{$name}\" WHERE published_at IS NULL");
             if ($pending > 0) {
-                $kept[$name] = $pending;
-                continue;
+                $unpublished[$name] = $pending;
             }
 
             if (!$dryRun) {
+                if ($table['detachPending']) {
+                    $this->pdo->exec(sprintf('ALTER TABLE %s DETACH PARTITION "%s" FINALIZE', self::TABLE, $name));
+                } elseif ($table['attached']) {
+                    $this->pdo->exec(sprintf('ALTER TABLE %s DETACH PARTITION "%s" CONCURRENTLY', self::TABLE, $name));
+                }
                 $this->pdo->exec("DROP TABLE \"{$name}\"");
             }
             $dropped[] = $name;
         }
 
-        $expiredInDefault = 'FROM '.self::DEFAULT_PARTITION.' WHERE published_at IS NOT NULL AND created_at < :cutoff';
-        $cutoffParam = [
-            'cutoff' => $cutoff->format('Y-m-d H:i:s'),
-        ];
-        if ($dryRun) {
-            $defaultDeleted = $this->count("SELECT COUNT(*) {$expiredInDefault}", $cutoffParam);
-            $defaultRemaining = $this->count('SELECT COUNT(*) FROM '.self::DEFAULT_PARTITION) - $defaultDeleted;
-        } else {
-            $statement = $this->pdo->prepare("DELETE {$expiredInDefault}");
-            $statement->execute($cutoffParam);
-            $defaultDeleted = $statement->rowCount();
-            $defaultRemaining = $this->count('SELECT COUNT(*) FROM '.self::DEFAULT_PARTITION);
-        }
+        return new PartitionPurgeReport($cutoff, $dropped, $unpublished);
+    }
 
-        return new PartitionPurgeReport($cutoff, $dropped, $kept, $defaultDeleted, $defaultRemaining);
+    /** @return list<string> */
+    private static function createAndAttach(DateTimeImmutable $from): array
+    {
+        $name = self::partitionName($from);
+
+        return [
+            sprintf(
+                'CREATE TABLE IF NOT EXISTS "%s" (LIKE %s INCLUDING DEFAULTS INCLUDING CONSTRAINTS)',
+                $name,
+                self::TABLE,
+            ),
+            sprintf(
+                "ALTER TABLE %s ATTACH PARTITION \"%s\" FOR VALUES FROM ('%s') TO ('%s')",
+                self::TABLE,
+                $name,
+                $from->format('Y-m-d H:i:s'),
+                $from->modify('+1 day')->format('Y-m-d H:i:s'),
+            ),
+        ];
     }
 
     /**
-     * The daily partitions attached to outbox_messages, oldest first. Names
-     * come from the catalog and must match the daily naming pattern, so they
-     * are safe to interpolate into DDL.
+     * The daily tables in the schema of outbox_messages, oldest first: its
+     * attached partitions, a partition with an unfinished detach, and a
+     * detached table that was not dropped. Names come from the catalog and
+     * must match the daily naming pattern, so they are safe to interpolate
+     * into DDL.
      *
-     * @return array<string, DateTimeImmutable> partition name => its UTC day
+     * @return array<string, array{day: DateTimeImmutable, attached: bool, detachPending: bool}>
      */
-    private function dailyPartitions(): array
+    private function dailyTables(): array
     {
         $statement = $this->pdo->query(
-            'SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid'
-            ." WHERE i.inhparent = '".self::TABLE."'::regclass ORDER BY c.relname",
+            "SELECT c.relname, i.inhrelid IS NOT NULL AS attached, COALESCE(i.inhdetachpending, false) AS detach_pending
+               FROM pg_class c
+               LEFT JOIN pg_inherits i ON i.inhrelid = c.oid
+              WHERE c.relkind = 'r'
+                AND c.relnamespace = (SELECT relnamespace FROM pg_class WHERE oid = '".self::TABLE."'::regclass)
+                AND c.relname ~ '^".self::DAILY_PREFIX."[0-9]{8}$'
+                AND (i.inhparent IS NULL OR i.inhparent = '".self::TABLE."'::regclass)
+              ORDER BY c.relname",
         );
         if ($statement === false) {
             throw new RuntimeException('Cannot list the outbox partitions');
         }
 
-        $partitions = [];
-        foreach ($statement->fetchAll(PDO::FETCH_COLUMN) as $name) {
-            if (!is_string($name) || preg_match('/^'.self::DAILY_PREFIX.'(\d{8})$/', $name, $match) !== 1) {
-                continue; // DEFAULT and any foreign partition are not daily partitions
+        $tables = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (!is_array($row) || !is_string($row['relname'] ?? null)) {
+                continue;
             }
-            $day = DateTimeImmutable::createFromFormat('!Ymd', $match[1], new DateTimeZone('UTC'));
-            if ($day !== false) {
-                $partitions[$name] = $day;
+            $name = $row['relname'];
+            $day = DateTimeImmutable::createFromFormat('!Ymd', substr($name, strlen(self::DAILY_PREFIX)), new DateTimeZone('UTC'));
+            if ($day === false) {
+                continue;
             }
+            $tables[$name] = [
+                'day' => $day,
+                'attached' => $row['attached'] === true,
+                'detachPending' => $row['detach_pending'] === true,
+            ];
         }
 
-        return $partitions;
+        return $tables;
     }
 
-    /** @param array<string, string> $params */
-    private function count(string $sql, array $params = []): int
+    private function count(string $sql): int
     {
-        $statement = $this->pdo->prepare($sql);
-        $statement->execute($params);
-        $value = $statement->fetchColumn();
+        $statement = $this->pdo->query($sql);
+        $value = $statement === false ? false : $statement->fetchColumn();
 
         return is_numeric($value) ? (int) $value : 0;
     }
@@ -188,10 +221,10 @@ final readonly class OutboxPartitionManager
             ->setTime(0, 0);
     }
 
-    private static function assertPositive(string $name, int $value, bool $allowZero = false): void
+    private static function assertNotNegative(string $name, int $value): void
     {
-        if ($value < 0 || (!$allowZero && $value === 0)) {
-            throw new \InvalidArgumentException("{$name} must be ".($allowZero ? '0 or more' : '1 or more').", got {$value}");
+        if ($value < 0) {
+            throw new \InvalidArgumentException("{$name} must be 0 or more, got {$value}");
         }
     }
 }

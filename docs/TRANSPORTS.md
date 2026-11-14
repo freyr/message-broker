@@ -75,8 +75,9 @@ nothing is marked published, and every claimed row backs off at its own
 attempts-derived delay (exponential, 1 s ×4, maximum 300 s). The relay has
 no dead-letter path. A worker that crashes after publishing but before its
 claim commits leaves the rows unpublished; the next claim republishes them,
-and consumer-side deduplication absorbs the duplicate. A row is never removed
-while it is unpublished, so there is no data-loss path.
+and consumer-side deduplication absorbs the duplicate. An unpublished row
+stays until it passes the retention period (default 7 days); then retention
+drops it with its partition.
 
 ```php
 use Freyr\MessageBroker\Outbox\PdoOutboxStore;
@@ -120,9 +121,9 @@ the throughput of a lane by adding workers to it.
 ### Outbox table and retention
 
 `outbox_messages` is a PostgreSQL table partitioned by range on `created_at`
-(PostgreSQL 13+ only). It has one partition per UTC day, named
-`outbox_messages_pYYYYMMDD`, and a `outbox_messages_default` partition that
-catches rows when no daily partition exists. Columns: `id` UUID, `lane`
+(PostgreSQL 14+ only). It has one partition per UTC day, named
+`outbox_messages_pYYYYMMDD`, and no default partition: an insert for a day
+with no partition fails. Columns: `id` UUID, `lane`
 VARCHAR(64), `message_name` VARCHAR(255), `body` BYTEA (the final wire bytes,
 payload only), `headers` JSONB (the produce-time headers), `created_at`
 TIMESTAMP(3), `available_at` TIMESTAMP(3), `attempts` INTEGER and
@@ -131,9 +132,8 @@ partial index on `(lane, available_at)` where `published_at IS NULL` serves
 the claim query.
 
 The relay only sets `published_at`. Rows leave the table when
-`message-broker:outbox:maintain` drops an expired daily partition that holds
-only published rows, or deletes expired published rows from the DEFAULT
-partition. See
+`message-broker:outbox:maintain` drops an expired daily partition, with any
+unpublished rows that are still in it. See
 [CLI_REFERENCE.md](CLI_REFERENCE.md) and [PRODUCTION.md](PRODUCTION.md).
 
 ### Operational signal
@@ -141,5 +141,5 @@ partition. See
 Watch the age of the oldest unpublished row (`published_at IS NULL`) per
 lane. A single stuck row does not stall a lane, because other rows overtake
 it, so row age is the signal for a slowly draining lane. Also watch the exit
-code of `message-broker:outbox:maintain` and the rows that remain in the
-default partition.
+code of `message-broker:outbox:maintain` and its warnings about dropped
+unpublished rows.
