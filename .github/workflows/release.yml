@@ -1,0 +1,25 @@
+# The release App pushes the tags; Packagist reads versions from them.
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      releases: ${{ steps.release.outputs.releases }}
+    steps:
+      - id: release
+        uses: freyr/.github/actions/release@631e66e10bce4839aec46f7e71ed36f6c8017b16 # v1.0.1
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

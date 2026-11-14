@@ -1,0 +1,27 @@
+# Required checks: pr-title, version (this file) and ci-gate (tests.yml).
+name: PR
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: freyr/.github/actions/pr-title@631e66e10bce4839aec46f7e71ed36f6c8017b16 # v1.0.1
+
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: freyr/.github/actions/version@631e66e10bce4839aec46f7e71ed36f6c8017b16 # v1.0.1
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
