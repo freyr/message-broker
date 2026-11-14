@@ -25,6 +25,7 @@ final class PostgreSqlPlatformTest extends TestCase
         self::assertStringNotContainsString('PARTITION OF', $ddl, 'no DEFAULT partition: retention detaches concurrently');
         self::assertStringContainsString('WHERE published_at IS NULL', $ddl);
         self::assertStringContainsString('CREATE TABLE IF NOT EXISTS message_deduplication', $ddl);
+        self::assertStringContainsString('idx_dedup_created_at ON message_deduplication (created_at)', $ddl);
         self::assertStringContainsString('CREATE TABLE IF NOT EXISTS dead_letters', $ddl);
     }
 

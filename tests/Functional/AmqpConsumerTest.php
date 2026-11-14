@@ -10,6 +10,7 @@ use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
+use Freyr\MessageBroker\Tests\Fixtures\RecordingLogger;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
@@ -19,6 +20,7 @@ use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
+use Psr\Log\LogLevel;
 use RuntimeException;
 
 final class AmqpConsumerTest extends FunctionalTestCase
@@ -68,9 +70,10 @@ final class AmqpConsumerTest extends FunctionalTestCase
         $this->channel->close();
     }
 
-    private function consumer(int $maxAttempts = 5): AmqpConsumer
+    private function consumer(int $maxAttempts = 5, ?\PDO $pdo = null, ?RecordingLogger $logger = null): AmqpConsumer
     {
         $platform = static::platform();
+        $pdo ??= self::$pdo;
         $dispatch = function (IncomingMessage $incoming): void {
             if ($this->failingDispatch !== null) {
                 ($this->failingDispatch)($incoming);
@@ -83,14 +86,15 @@ final class AmqpConsumerTest extends FunctionalTestCase
             queue: new AmqpQueueConfig(self::QUEUE, prefetch: 8),
             deserializer: new JsonDeserializer(),
             dispatcher: new CallableDispatcher($dispatch),
-            pdo: self::$pdo,
-            deduplication: new PdoDeduplicationStore(self::$pdo, $platform),
+            pdo: $pdo,
+            deduplication: new PdoDeduplicationStore($pdo, $platform),
             retryPolicy: new AmqpRetryPolicy(
                 maxAttempts: $maxAttempts,
                 backoff: Backoff::exponential(initialDelayMs: 100, maxDelayMs: 100),
             ),
-            deadLetters: new PdoDeadLetterStore(self::$pdo, $platform),
+            deadLetters: new PdoDeadLetterStore($pdo, $platform),
             name: 'orders_consumer',
+            logger: $logger ?? new RecordingLogger(),
         );
     }
 
@@ -131,6 +135,38 @@ final class AmqpConsumerTest extends FunctionalTestCase
                 'created_at' => EpochMillis::now(),
             ],
         ];
+    }
+
+    public function testADatabaseFailureStopsTheConsumerAndTheDeliveryIsRedelivered(): void
+    {
+        $pdo = self::newConnection();
+        $statement = $pdo->query('SELECT pg_backend_pid()');
+        self::assertNotFalse($statement);
+        $pid = (int) $statement->fetchColumn();
+        self::$pdo->exec("SELECT pg_terminate_backend({$pid})"); // the consumer's database goes away
+        [$payload, $metadata] = $this->message();
+        $this->publish($payload, $metadata);
+
+        $logger = new RecordingLogger();
+        try {
+            $this->consumer(pdo: $pdo, logger: $logger)->run(messageLimit: 1, idleTimeoutSec: 2);
+            self::fail('a database failure must stop the consumer');
+        } catch (\PDOException) {
+        }
+
+        $errors = array_filter($logger->records, static fn (array $r): bool => $r['level'] === LogLevel::ERROR);
+        self::assertCount(1, $errors, 'the database failure is reported before the process stops');
+        self::assertStringContainsString('database failure', (string) array_values($errors)[0]['message']);
+
+        self::assertSame([], $this->dispatched);
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM message_deduplication'));
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM dead_letters'), 'not a handler failure: no retry, no DLQ');
+
+        // The delivery was never acked: closing the channel returns it to the queue.
+        $this->channel->close();
+        $this->channel = self::$amqp->channel();
+        [, $ready] = $this->channel->queue_declare(self::QUEUE, true);
+        self::assertSame(1, $ready);
     }
 
     public function testDeliveryIsDispatchedAndDeduplicationIsRecorded(): void

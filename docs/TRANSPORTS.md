@@ -54,6 +54,25 @@ $retryPolicy = new AmqpRetryPolicy(
 `x-attempt` incremented) while `$attempt < maxAttempts`, otherwise
 `deadLetter`.
 
+The consumer puts its channel in publisher-confirm mode at the first retry. It
+acks the original delivery only after the broker confirms the republish. A
+nack or a confirm timeout stops the process, and the original delivery is
+redelivered with the same attempt.
+
+A database failure is not a handler failure. When `BEGIN` fails, or the
+rollback fails on a dead connection, the consumer reports the error and stops.
+The delivery is redelivered, and no retry attempt is used.
+
+**Set a dead-letter exchange on the work queue.** The consumer stops, and
+RabbitMQ redelivers, when a message cannot be decoded for a temporary reason
+or when the database fails. A message that always causes this, or a handler
+that ends the PHP process (for example, out of memory), comes back again and
+again. A quorum queue drops such a message after its delivery limit (20 by
+default in RabbitMQ 4) when the queue has no dead-letter exchange. A classic
+queue redelivers it without a limit. Declare the work queue with
+`x-dead-letter-exchange` (and, for a quorum queue, a `x-delivery-limit` that
+you choose), and monitor the dead-letter queue.
+
 ### Dedicated channel requirement
 
 Publisher-confirm mode is **channel-global state**: any publisher sharing a

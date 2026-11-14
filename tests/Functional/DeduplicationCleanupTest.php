@@ -51,6 +51,19 @@ final class DeduplicationCleanupTest extends FunctionalTestCase
         );
     }
 
+    public function testCleanupDeletesInChunksUntilNoOldEntryIsLeft(): void
+    {
+        $store = new PdoDeduplicationStore(self::$pdo, static::platform(), deleteChunkSize: 2);
+        foreach (['a', 'b', 'c', 'd', 'e'] as $id) {
+            $store->acquire($this->incoming("m-{$id}"), 'orders_consumer');
+        }
+        $store->acquire($this->incoming('m-fresh'), 'orders_consumer');
+        self::$pdo->exec("UPDATE message_deduplication SET created_at = '2000-01-01 00:00:00' WHERE message_id <> 'm-fresh'");
+
+        self::assertSame(5, $store->cleanup(beforeEpochMs: EpochMillis::now() - 86_400_000), 'three chunks: 2 + 2 + 1');
+        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM message_deduplication'));
+    }
+
     private function incoming(string $messageId): IncomingMessage
     {
         return new IncomingMessage(

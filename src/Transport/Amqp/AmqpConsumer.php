@@ -22,6 +22,7 @@ use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -41,9 +42,12 @@ use Throwable;
  *     dedup acquire        (duplicate → COMMIT, ack, skip dispatch)
  *     dispatcher->dispatch($incoming)
  *   COMMIT → ack
+ *   database failure (BEGIN fails, or ROLLBACK fails on a dead connection)
+ *     → the process stops; the delivery is redelivered, no attempt used
  *   dispatch exception → ROLLBACK → retryPolicy->decide(attempt) →
  *     retry  : republish to a TTL wait queue that dead-letters back to the
- *              work queue (transport-native delay), x-attempt + 1, ack
+ *              work queue (transport-native delay), x-attempt + 1, confirm,
+ *              ack
  *     dlq    : dead_letters row, ack
  *     discard: ack
  */
@@ -58,6 +62,10 @@ final class AmqpConsumer
     /** @var array<int, true> wait queues already declared, keyed by delay ms */
     private array $declaredWaitQueues = [];
 
+    private bool $confirmsEnabled = false;
+
+    private int $republishNacks = 0;
+
     public function __construct(
         private readonly AMQPChannel $channel,
         private readonly AmqpQueueConfig $queue,
@@ -71,6 +79,7 @@ final class AmqpConsumer
         private readonly ?ErrorHandler $errorHandler = null,
         private readonly LoggerInterface $logger = new NullLogger(),
         private readonly ?BrokerEvents $events = null,
+        private readonly int $confirmTimeoutSec = 5,
     ) {}
 
     /**
@@ -147,9 +156,17 @@ final class AmqpConsumer
             throw $error;
         }
 
+        // A failure to begin (the database is down) propagates: the process
+        // stops and the unacked delivery is redelivered, with no retry attempt.
         try {
             $this->pdo->beginTransaction();
+        } catch (Throwable $error) {
+            $this->reportInfrastructureFailure($incoming, $error, $attempt);
 
+            throw $error;
+        }
+
+        try {
             if (!$this->deduplication->acquire($incoming, $this->name)) {
                 $this->pdo->commit();
                 $this->events?->record(BrokerEvents::DEDUPLICATED, [
@@ -172,9 +189,32 @@ final class AmqpConsumer
             ]);
             $this->acknowledge($delivery);
         } catch (Throwable $error) {
-            $this->pdo->rollBack();
+            try {
+                $this->pdo->rollBack();
+            } catch (Throwable) {
+                // The connection is gone (or the commit already ended the
+                // transaction): not a handler failure. Stop with the real
+                // error; the unacked delivery is redelivered and dedup decides.
+                $this->reportInfrastructureFailure($incoming, $error, $attempt);
+
+                throw $error;
+            }
             $this->afterFailure($delivery, $incoming, $error, $attempt);
         }
+    }
+
+    private function reportInfrastructureFailure(IncomingMessage $incoming, Throwable $error, int $attempt): void
+    {
+        $context = [
+            'queue' => $this->queue->queue,
+            'stage' => 'transaction',
+            'message_id' => $incoming->messageId,
+            'attempt' => $attempt,
+        ];
+        $this->logger->error('Consumer database failure; the process stops and the delivery is redelivered', [
+            'exception' => $error,
+        ] + $context);
+        $this->errorHandler?->handle($error, $context);
     }
 
     private function afterFailure(
@@ -210,9 +250,23 @@ final class AmqpConsumer
      * Transport-native delay: a durable per-delay wait queue with
      * x-message-ttl that dead-letters back to the work queue through the
      * default exchange. Declared lazily, once per delay.
+     *
+     * The republish is confirmed before the original delivery is acked: an
+     * unconfirmed republish could be lost with the broker while the ack is
+     * not. A nack or a confirm timeout stops the process; the original
+     * delivery stays unacked and is redelivered with the same attempt.
      */
     private function republishToWaitQueue(AMQPMessage $delivery, int $nextAttempt, int $delayMs): void
     {
+        if (!$this->confirmsEnabled) {
+            $this->channel->confirm_select();
+            $this->channel->set_nack_handler(function (): void {
+                ++$this->republishNacks;
+            });
+            $this->confirmsEnabled = true;
+        }
+        $nacksBefore = $this->republishNacks;
+
         if (!isset($this->declaredWaitQueues[$delayMs])) {
             $this->channel->queue_declare(
                 $this->waitQueue($delayMs),
@@ -243,6 +297,10 @@ final class AmqpConsumer
             '',
             $this->waitQueue($delayMs),
         );
+        $this->channel->wait_for_pending_acks($this->confirmTimeoutSec);
+        if ($this->republishNacks > $nacksBefore) {
+            throw new RuntimeException("Broker nacked the retry republish to {$this->waitQueue($delayMs)}");
+        }
     }
 
     /** @param array<string, mixed> $properties */

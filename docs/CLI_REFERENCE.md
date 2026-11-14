@@ -178,7 +178,11 @@ Deletes dead letters.
 
 ## `message-broker:dedup:cleanup`
 
-Prunes `message_deduplication` entries older than a given age.
+Prunes `message_deduplication` entries older than a given age. It deletes in
+chunks of 10,000 rows (`PdoDeduplicationStore` constructor argument
+`deleteChunkSize`); each chunk is a short statement that the index on
+`created_at` serves, so the cleanup holds no long transaction. Keep the
+threshold longer than the time in which a duplicate can arrive.
 
 **Constructor:** `new DedupCleanupCommand(DeduplicationStore $store)`
 
