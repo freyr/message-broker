@@ -13,6 +13,12 @@ The AMQP relay routes by **message name**: it publishes to a named exchange
 using the message's `name` (e.g. `order.placed`) as the routing key. There is
 no per-key routing knob.
 
+**An unroutable message is dropped by design.** The relay publishes without
+the `mandatory` flag. When no queue binding matches the message name, the
+broker drops the message and confirms it, and the relay marks the row
+published. A message that nobody subscribes to is not a failure. Bind the
+queues before the producers send messages that must arrive.
+
 ### Config classes
 
 ```php
@@ -70,12 +76,26 @@ rows that are backing off; the claim takes the oldest-due rows first as a
 fairness bias, not a contract.
 Consumers must be order-insensitive.
 
-**Failure and crash semantics.** A publish failure is batch-granular:
-nothing is marked published, and every claimed row backs off at its own
-attempts-derived delay (exponential, 1 s ×4, maximum 300 s). The relay has
-no dead-letter path. A worker that crashes after publishing but before its
-claim commits leaves the rows unpublished; the next claim republishes them,
-and consumer-side deduplication absorbs the duplicate. An unpublished row
+**Failure and crash semantics.**
+
+- **Nack.** When the broker nacks a message, only that row backs off, at a
+  delay from its own `attempts` count (exponential, 1 s doubling, maximum
+  300 s). The confirmed rows of the batch are marked published, and the worker
+  continues.
+- **Channel, connection or confirm timeout.** The worker backs off the rows of
+  the failed publish, commits, and then lets the error propagate: the worker
+  stops (crash-only), and the supervisor restarts it with a new connection. A
+  broken worker never keeps a lane in backoff.
+- **A row that failed before is published alone.** A claimed row with
+  `attempts > 0` gets its own publish and its own confirm wait. A message
+  that the broker refuses (for example, a message larger than the broker
+  limit, which closes the channel) then fails alone. The rows of the claim
+  that the worker did not try yet stay due and unchanged, so they do not wait
+  behind the refused row.
+
+The relay has no dead-letter path. A worker that crashes after publishing but
+before its claim commits leaves the rows unpublished; the next claim
+republishes them, and consumer-side deduplication absorbs the duplicate. An unpublished row
 stays until it passes the retention period (default 7 days); then retention
 drops it with its partition.
 
@@ -94,14 +114,14 @@ $worker = new AmqpRelay(
     publish: new AmqpPublishConfig(exchange: 'orders'),
     contentType: JsonWireFormat::CONTENT_TYPE,
     lane: 'orders',
-    batchSize: 100,
+    batchSize: 500,
     backoff: Backoff::exponential(initialDelayMs: 1_000, maxDelayMs: 300_000),
 );
 $worker->run();
 ```
 
 Constructor arguments: `outbox`, `amqp`, `publish`, `contentType`,
-`lane = 'default'`, `batchSize = 100`, `backoff`, `errorHandler`,
+`lane = 'default'`, `batchSize = 500`, `backoff`, `errorHandler`,
 `idleSleepMs = 200`, `confirmTimeoutSec = 5`, `logger`, `events`.
 
 Run N of these as separate processes, each with its own connection and
@@ -116,7 +136,8 @@ A lane is a named drain of the outbox table, used to isolate workloads: a
 slow or failing workload on one lane does not delay another lane. A lane name
 has 1 to 64 characters; a message name has 1 to 255 characters. `OutboxRecord`
 rejects an empty or too long value with an `InvalidArgumentException`. Scale
-the throughput of a lane by adding workers to it.
+the throughput of a lane by adding workers to it, up to the limit of its
+RabbitMQ queue (see [PRODUCTION.md](PRODUCTION.md), *Scaling*).
 
 ### Outbox table and retention
 

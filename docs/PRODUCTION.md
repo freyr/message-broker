@@ -113,9 +113,27 @@ processes against one lane. Each claims a batch of eligible rows via
 `FOR UPDATE SKIP LOCKED` inside a transaction owned by the outbox store,
 publishes the batch with publisher confirms, and marks the rows published.
 Workers never block each other, and a crashed worker's claimed rows are
-instantly reclaimable. A publish failure backs off the whole claimed batch,
-each row at its own attempts-derived delay (exponential, 1 s ×4, maximum
-300 s).
+instantly reclaimable. A broker failure backs off the rows of the failed
+publish and stops the worker; a nack backs off only the nacked rows (see
+[TRANSPORTS.md](TRANSPORTS.md)).
+
+**Batch size and worker count.** The default batch is 500 rows: one claim, one
+confirm wait and one update for each batch. A local benchmark (one machine,
+one queue, persistent messages, publisher confirms) gave these numbers:
+
+| Workers | Batch 100 | Batch 500 |
+|---|---|---|
+| 1 | 17,000 msg/s | 29,000 msg/s |
+| 2 | 33,000 msg/s | 49,000 msg/s |
+| 4 | 52,000 msg/s | 72,000 msg/s |
+| 8 | 51,000 msg/s | 25,000 msg/s |
+
+PostgreSQL is not the limit: the claim and the update alone reach about
+127,000 msg/s with 4 workers. The limit is the RabbitMQ queue. At 8 workers,
+the workers spend most of the time on confirm waits, and the throughput falls.
+Start with 2 to 4 workers per lane. For more throughput, use more lanes and
+queues, not more workers on one queue. Measure your own setup with
+`make bench ARGS="<rows> <workers> <batch>"`.
 
 **Lanes isolate workloads.** A lane is a named drain of the outbox table. Use
 separate lanes so that a slow or failing workload does not delay another one.
