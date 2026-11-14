@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional;
 
+use Freyr\MessageBroker\Outbox\OutboxPartitionManager;
 use Freyr\MessageBroker\Serializer\Format;
 use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Storage\PostgreSqlPlatform;
@@ -39,6 +40,11 @@ abstract class FunctionalTestCase extends TestCase
         self::$pdo->exec('DROP TABLE IF EXISTS dead_letters');
         self::$pdo->exec('DROP TABLE IF EXISTS message_deduplication');
         self::$pdo->exec('DROP TABLE IF EXISTS outbox_messages');
+        $leftovers = self::$pdo->query("SELECT relname FROM pg_class WHERE relkind = 'r' AND relname ~ '^outbox_messages_p[0-9]{8}$'");
+        self::assertNotFalse($leftovers);
+        foreach ($leftovers->fetchAll(PDO::FETCH_COLUMN) as $name) {
+            self::$pdo->exec(sprintf('DROP TABLE "%s"', (string) $name)); // detached daily tables survive the parent
+        }
         foreach (static::platform()->schemaSql(static::outboxFormat()) as $ddl) {
             self::$pdo->exec($ddl);
         }
@@ -46,6 +52,8 @@ abstract class FunctionalTestCase extends TestCase
 
     protected function setUp(): void
     {
+        // No DEFAULT partition: rows of today (and of tomorrow, past midnight) need theirs.
+        (new OutboxPartitionManager(self::$pdo))->ensurePartitions(1);
         self::$pdo->exec('DELETE FROM outbox_messages');
         self::$pdo->exec('DELETE FROM message_deduplication');
         self::$pdo->exec('DELETE FROM dead_letters');

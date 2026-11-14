@@ -7,6 +7,7 @@ namespace Freyr\MessageBroker\Tests\Functional;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
+use Freyr\MessageBroker\Message;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\PdoOutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
@@ -39,7 +40,7 @@ final class ReplayServiceTest extends FunctionalTestCase
             source: 'orders_q',
             messageId: $message->id,
             messageName: $message->name,
-            body: (string) json_encode($message->wire()),
+            body: (string) json_encode(self::dlqDocument($message)),
             headers: [
                 'correlation_id' => 'c-1',
             ],
@@ -55,12 +56,11 @@ final class ReplayServiceTest extends FunctionalTestCase
         self::assertSame($message->id, $row['id'], 'original message id is preserved');
         self::assertSame('orders', $row['lane']);
 
-        $metadata = json_decode((string) $row['metadata'], true);
-        self::assertSame('order.placed', $metadata['message_name']);
-        self::assertSame($message->id, $metadata['message_id']);
+        self::assertSame('order.placed', $row['message_name']);
+        self::assertNull($row['published_at'], 'the replayed row waits for the relay');
 
         self::assertSame(
-            $message->wire()['payload'],
+            $message->payload(),
             json_decode(static::platform()->readBody($row['body']), true),
             'payload is re-encoded into the outbox body',
         );
@@ -82,7 +82,7 @@ final class ReplayServiceTest extends FunctionalTestCase
             source: 'orders_q',
             messageId: $message->id,
             messageName: $message->name,
-            body: (string) json_encode($message->wire()),
+            body: (string) json_encode(self::dlqDocument($message)),
             headers: [
                 'x-attempt' => 2,
                 MetadataHeader::MESSAGE_ID => 'stale-id',
@@ -135,7 +135,7 @@ final class ReplayServiceTest extends FunctionalTestCase
             source: 'orders_q',
             messageId: $message->id,
             messageName: $message->name,
-            body: (string) json_encode($message->wire()),
+            body: (string) json_encode(self::dlqDocument($message)),
             headers: [],
             error: new RuntimeException('boom'),
             attempts: 5,
@@ -145,5 +145,22 @@ final class ReplayServiceTest extends FunctionalTestCase
         $replay->replay($deadLetter->id, lane: 'orders');
 
         self::assertContains(BrokerEvents::REPLAYED, $events->names());
+    }
+
+    /**
+     * The replayable document a consumer stores in the DLQ.
+     *
+     * @return array{metadata: array<string, mixed>, payload: array<string, mixed>}
+     */
+    private static function dlqDocument(Message $message): array
+    {
+        return [
+            'metadata' => [
+                'message_name' => $message->name,
+                'message_id' => $message->id,
+                'created_at' => $message->createdAt,
+            ],
+            'payload' => $message->payload(),
+        ];
     }
 }

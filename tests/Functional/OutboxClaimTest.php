@@ -14,9 +14,9 @@ use Freyr\MessageBroker\Time\EpochMillis;
 use PDO;
 
 /**
- * Store-level contract of the competing drain (spec D-C3): claims are
- * transactional, disjoint across connections, non-blocking, and crash-safe
- * (a dead claimer's rows are instantly reclaimable).
+ * Store-level contract of the drain: claims are transactional, disjoint
+ * across connections, non-blocking, and crash-safe (a dead claimer's rows are
+ * instantly reclaimable). Published rows stay, with published_at set.
  */
 final class OutboxClaimTest extends FunctionalTestCase
 {
@@ -51,7 +51,7 @@ final class OutboxClaimTest extends FunctionalTestCase
         return $statement->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    public function testPublishedOutcomeDeletesClaimedRows(): void
+    public function testPublishedOutcomeMarksRowsPublishedAndKeepsThem(): void
     {
         $this->producer->produce(OrderPlaced::create('o-1', 100));
         $this->producer->produce(OrderPlaced::create('o-2', 200));
@@ -63,7 +63,49 @@ final class OutboxClaimTest extends FunctionalTestCase
         );
 
         self::assertSame(2, $published);
-        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
+        self::assertSame(2, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'), 'rows stay for retention');
+        self::assertSame(2, self::fetchInt('SELECT COUNT(*) FROM outbox_messages WHERE published_at IS NOT NULL'));
+
+        // A published row is never claimed again.
+        $again = $this->store->drainClaimed(
+            self::LANE,
+            10,
+            static fn (array $claimed): ClaimOutcome => ClaimOutcome::published(self::ids($claimed)),
+        );
+        self::assertSame(0, $again);
+    }
+
+    public function testPublishingAReplayedIdLeavesTheOriginalRowUntouched(): void
+    {
+        // A replay reuses the original message id; the original row (already
+        // published) must keep its own published_at.
+        $message = OrderPlaced::create('o-1', 100);
+        $this->producer->produce($message);
+        $this->store->drainClaimed(
+            self::LANE,
+            10,
+            static fn (array $claimed): ClaimOutcome => ClaimOutcome::published(self::ids($claimed)),
+        );
+        self::$pdo->exec("UPDATE outbox_messages SET published_at = '2000-01-01 00:00:00'");
+
+        $this->store->insert(new OutboxRecord(
+            id: $message->id,
+            lane: self::LANE,
+            messageName: 'order.placed',
+            body: '{}',
+            headers: [],
+            createdAt: $message->createdAt - 1_000, // distinct primary key, already due
+        ));
+        $published = $this->store->drainClaimed(
+            self::LANE,
+            10,
+            static fn (array $claimed): ClaimOutcome => ClaimOutcome::published(self::ids($claimed)),
+        );
+
+        self::assertSame(1, $published);
+        self::assertSame(1, self::fetchInt(
+            "SELECT COUNT(*) FROM outbox_messages WHERE published_at = '2000-01-01 00:00:00'",
+        ));
     }
 
     public function testRetryOutcomeBacksOffClaimedRowsIndividually(): void
@@ -175,6 +217,10 @@ final class OutboxClaimTest extends FunctionalTestCase
         );
 
         self::assertSame(1, $published);
-        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'), 'the new row awaits the next pass');
+        self::assertSame(
+            1,
+            self::fetchInt('SELECT COUNT(*) FROM outbox_messages WHERE published_at IS NULL'),
+            'the new row awaits the next pass',
+        );
     }
 }

@@ -12,9 +12,9 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * Long-running relay process, one per lane. There is no common relay
- * interface (transports are deliberately distinct), so the application
- * registers runners as callables:
+ * Long-running relay worker for one lane; run as many workers per lane as
+ * the throughput needs. There is no common relay interface (transports are
+ * deliberately distinct), so the application registers runners as callables:
  *
  *     new RelayRunCommand([
  *         'orders' => fn () => $ordersAmqpRelay->run(),

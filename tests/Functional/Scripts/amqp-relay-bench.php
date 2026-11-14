@@ -16,9 +16,9 @@ require dirname(__DIR__, 3).'/vendor/autoload.php';
 
 final class BenchEvent extends Message
 {
-    public static function create(string $key, int $i): self
+    public static function create(int $i): self
     {
-        return new self(key: $key, name: 'bench.event', payload: [
+        return new self(name: 'bench.event', payload: [
             'index' => $i,
             'order_id' => "order-{$i}",
             'total_cents' => $i * 100,
@@ -62,7 +62,7 @@ $producer = new OutboxProducer($store, new JsonWireFormat(), lane: 'bench');
 $run = static function (bool $confirms) use ($n, $pdo, $producer, $store, $amqp): array {
     $start = hrtime(true);
     for ($i = 0; $i < $n; ++$i) {
-        $producer->produce(BenchEvent::create("key-{$i}", $i));
+        $producer->produce(BenchEvent::create($i));
     }
     $produceMs = (hrtime(true) - $start) / 1e6;
 
@@ -80,7 +80,7 @@ $run = static function (bool $confirms) use ($n, $pdo, $producer, $store, $amqp)
     $published = $relay->drainOnce();
     $drainMs = (hrtime(true) - $start) / 1e6;
 
-    $remaining = (int) $pdo->query("SELECT COUNT(*) FROM outbox_messages WHERE lane = 'bench'")
+    $remaining = (int) $pdo->query("SELECT COUNT(*) FROM outbox_messages WHERE lane = 'bench' AND published_at IS NULL")
         ->fetchColumn();
     $channel->close();
 

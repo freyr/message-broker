@@ -162,7 +162,7 @@ final class EndToEndTest extends FunctionalTestCase
         self::assertSame(12_500, $this->dispatched[0]->payload['total_cents']);
         self::assertSame($message->id, $this->dispatched[0]->messageId);
         self::assertSame($message->createdAt, $this->dispatched[0]->createdAt);
-        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'), 'outbox drained');
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages WHERE published_at IS NULL'), 'outbox drained');
         self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM dead_letters'));
     }
 

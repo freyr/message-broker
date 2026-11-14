@@ -26,67 +26,12 @@ final readonly class PdoOutboxStore implements OutboxStore
         $statement = $this->pdo->prepare($this->platform->insertOutboxSql());
         $statement->bindValue('id', $record->id);
         $statement->bindValue('lane', $record->lane);
-        $statement->bindValue('message_key', $record->key);
-        // mirrors metadata.message_name so SQL can filter rows by message type
-        $statement->bindValue('message_name', $record->messageName());
-        $statement->bindValue('metadata', json_encode($record->metadata, JSON_THROW_ON_ERROR));
+        $statement->bindValue('message_name', $record->messageName);
         $this->platform->bindBody($statement, 'body', $record->body); // final wire bytes (JSON text or Avro)
         $statement->bindValue('headers', json_encode($record->headers, JSON_THROW_ON_ERROR));
-        $statement->bindValue('created_at', EpochMillis::toDateTime($record->createdAt)->format('Y-m-d H:i:s.v'));
-        $statement->bindValue(
-            'available_at',
-            EpochMillis::toDateTime($record->availableAt ?? $record->createdAt)->format('Y-m-d H:i:s.v'),
-        );
+        $statement->bindValue('created_at', self::timestamp($record->createdAt));
+        $statement->bindValue('available_at', self::timestamp($record->availableAt ?? $record->createdAt));
         $statement->execute();
-    }
-
-    /**
-     * Exclusive, session-scoped ownership of one lane via advisory lock.
-     * Self-releases if this connection dies — crash recovery for free.
-     * One relay per lane = total in-order publishing per lane.
-     */
-    public function tryAcquireLane(string $lane): bool
-    {
-        $statement = $this->pdo->prepare($this->platform->tryAcquireLaneSql());
-        $statement->execute([
-            'lane' => $lane,
-        ]);
-
-        $result = $statement->fetchColumn();
-
-        // pg_try_advisory_lock → true (pdo_pgsql maps it to a PHP bool) or 't'
-        // when the driver returns the raw text form.
-        // @phpstan-ignore identical.alwaysFalse (pdo_pgsql returns PHP bool despite PDOStatement::fetchColumn() signature)
-        return $result === true || $result === 't';
-    }
-
-    /** Release the lane lock so a restarting/standby relay can take over. */
-    public function releaseLane(string $lane): void
-    {
-        $statement = $this->pdo->prepare($this->platform->releaseLaneSql());
-        $statement->execute([
-            'lane' => $lane,
-        ]);
-    }
-
-    /**
-     * Contiguous prefix of one OWNED lane, ordered by id (UUIDv7 = time).
-     * Caller checks head eligibility (available_at) on the first row only —
-     * a backing-off head blocks the whole lane; nothing overtakes (D17).
-     *
-     * @return list<OutboxRecord>
-     */
-    public function lanePrefix(string $lane, int $limit): array
-    {
-        $statement = $this->pdo->prepare($this->platform->selectLanePrefixSql());
-        $statement->bindValue('lane', $lane);
-        $statement->bindValue('limit', $limit, PDO::PARAM_INT);
-        $statement->execute();
-
-        /** @var list<array<string, mixed>> $rows */
-        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
-
-        return array_map($this->hydrate(...), $rows);
     }
 
     public function drainClaimed(string $lane, int $limit, callable $publish): int
@@ -96,7 +41,7 @@ final readonly class PdoOutboxStore implements OutboxStore
         try {
             $statement = $this->pdo->prepare($this->platform->selectClaimBatchSql());
             $statement->bindValue('lane', $lane);
-            $statement->bindValue('now', EpochMillis::toDateTime(EpochMillis::now())->format('Y-m-d H:i:s.v'));
+            $statement->bindValue('now', self::timestamp(EpochMillis::now()));
             $statement->bindValue('limit', $limit, PDO::PARAM_INT);
             $statement->execute();
 
@@ -112,7 +57,7 @@ final readonly class PdoOutboxStore implements OutboxStore
             $outcome = $publish(array_map($this->hydrate(...), $rows));
 
             if ($outcome->publishedIds !== []) {
-                $this->deleteBatch($outcome->publishedIds); // joins the open claim transaction
+                $this->markPublished($outcome->publishedIds); // joins the open claim transaction
             }
             foreach ($outcome->retryAtMs as $id => $availableAtMs) {
                 $this->scheduleRetry($id, $availableAtMs);
@@ -135,44 +80,47 @@ final readonly class PdoOutboxStore implements OutboxStore
         }
     }
 
-    /** Successful publish — the row's job is done. Rows leave ONLY this way. */
-    public function delete(string $id): void
-    {
-        $statement = $this->pdo->prepare('DELETE FROM outbox_messages WHERE id = :id');
-        $statement->execute([
-            'id' => $id,
-        ]);
-    }
-
     /**
-     * Batched variant for the relay's batched drain.
+     * Published rows stay for retention; published_at is the audit trail and
+     * keeps them out of every later claim. The `published_at IS NULL` guard
+     * matters on replay: a replayed message reuses its original id, and the
+     * original row (already published) must keep its own published_at.
      *
      * @param list<string> $ids
      * @param positive-int $chunkSize
      */
-    public function deleteBatch(array $ids, int $chunkSize = 500): void
+    private function markPublished(array $ids, int $chunkSize = 500): void
     {
+        $publishedAt = self::timestamp(EpochMillis::now());
         foreach (array_chunk($ids, $chunkSize) as $chunk) {
             $placeholders = implode(',', array_fill(0, count($chunk), '?'));
-            $statement = $this->pdo->prepare("DELETE FROM outbox_messages WHERE id IN ({$placeholders})");
-            $statement->execute($chunk);
+            $statement = $this->pdo->prepare(
+                "UPDATE outbox_messages SET published_at = ? WHERE published_at IS NULL AND id IN ({$placeholders})",
+            );
+            $statement->execute([$publishedAt, ...$chunk]);
         }
     }
 
     /**
-     * Transient publish failure: bump the head's available_at, increment
-     * attempts. The lane waits out the backoff — there is no exhaustion,
-     * no relay-side DLQ; a long-blocked lane is an operational alert.
+     * Transient publish failure: bump available_at, increment attempts. There
+     * is no exhaustion and no relay-side DLQ; a row that keeps failing is an
+     * operational alert (and it blocks retention of its partition).
      */
-    public function scheduleRetry(string $id, int $availableAtMs): void
+    private function scheduleRetry(string $id, int $availableAtMs): void
     {
         $statement = $this->pdo->prepare(
-            'UPDATE outbox_messages SET available_at = :available_at, attempts = attempts + 1 WHERE id = :id',
+            'UPDATE outbox_messages SET available_at = :available_at, attempts = attempts + 1'
+            .' WHERE published_at IS NULL AND id = :id',
         );
         $statement->execute([
-            'available_at' => EpochMillis::toDateTime($availableAtMs)->format('Y-m-d H:i:s.v'),
+            'available_at' => self::timestamp($availableAtMs),
             'id' => $id,
         ]);
+    }
+
+    private static function timestamp(int $epochMilliseconds): string
+    {
+        return EpochMillis::toDateTime($epochMilliseconds)->format('Y-m-d H:i:s.v');
     }
 
     /** @param array<string, mixed> $row */
@@ -181,8 +129,7 @@ final readonly class PdoOutboxStore implements OutboxStore
         return new OutboxRecord(
             id: self::stringColumn($row, 'id'),
             lane: self::stringColumn($row, 'lane'),
-            key: self::stringColumn($row, 'message_key'),
-            metadata: self::jsonColumn($row, 'metadata'),
+            messageName: self::stringColumn($row, 'message_name'),
             body: $this->platform->readBody($row['body'] ?? null),
             headers: self::jsonColumn($row, 'headers'),
             createdAt: self::epochMilliseconds(self::stringColumn($row, 'created_at')),

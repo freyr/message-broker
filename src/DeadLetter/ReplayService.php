@@ -15,7 +15,7 @@ use RuntimeException;
 /**
  * Replay = re-enqueue a dead letter into the outbox under an explicitly chosen
  * lane, so redelivery rides the normal relay path (publisher confirms,
- * ordering). The DLQ stores the reconstructed canonical document (metadata +
+ * retries). The DLQ stores the reconstructed canonical document (metadata +
  * payload); replay re-encodes the payload through the produce-path WireFormat
  * (E2) so the outbox row matches the global format exactly.
  *
@@ -40,17 +40,13 @@ final readonly class ReplayService
 
         $now = EpochMillis::now();
 
+        // The original id keeps consumer dedup state consistent. The original
+        // outbox row may still exist (published, waiting for retention); the
+        // new created_at gives the replayed row its own primary key.
         $this->outbox->insert(new OutboxRecord(
-            id: $deadLetter->messageId,   // original id: consumer dedup state stays consistent
+            id: $deadLetter->messageId,
             lane: $lane,
-            // The wire document carries no producer key; the message id is a
-            // stable, unique fallback for transport-level keying on replay.
-            key: $deadLetter->messageId,
-            metadata: [
-                'message_name' => $messageName,
-                'message_id' => $deadLetter->messageId,
-                'created_at' => $now,
-            ],
+            messageName: $messageName,
             body: $this->wireFormat->encode($messageName, $payload),
             headers: $this->cleanHeadersForReplay($deadLetter->headers),
             createdAt: $now,

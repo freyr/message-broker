@@ -1,11 +1,11 @@
 # Production
 
 Operational guidance for running relays and consumers in production: the
-deployment model, graceful shutdown, observability, and scaling.
+deployment model, graceful shutdown, observability, scaling, and outbox retention.
 
 ## Deployment model — crash-only under a supervisor
 
-Run one relay per lane and one (or more) consumer processes under a process
+Run one or more relay workers per lane and one or more consumer processes under a process
 supervisor (systemd, a Kubernetes `Deployment`, Supervisor, etc.) configured
 with restart-always. On any broker or database failure, the process
 **crashes by design** — there is no in-process reconnect logic; the
@@ -13,25 +13,21 @@ supervisor is what restarts it.
 
 This is safe because:
 
-- **The lane advisory lock self-releases on connection close.**
-  `tryAcquireLane`/`releaseLane` are backed by session-scoped locks
-  (`pg_try_advisory_lock`): a crashed
-  relay's lock disappears the instant its connection dies, so a restarting
-  or standby relay can take the lane over immediately. This holds only on a
-  **direct** database connection (or a session-mode pool) — see
-  [Connection pooling](#connection-pooling-pgbouncer). Behind a
-  transaction-mode pooler the lock neither self-releases on crash nor stays
-  visible to the relay's next statement.
-- **`publish-then-delete` and `ack-after-commit` redeliver-and-dedup on
-  crash.** A relay that crashes after publishing but before deleting the
-  outbox row republishes its batch on restart. A consumer that crashes after
-  committing its dedup/dispatch transaction but before acking (AMQP)
-  redelivers the message on restart. Both land
-  on consumer-side deduplication, which absorbs the duplicate.
-- **There is no data-loss path.** Nothing is deleted from the outbox until a
-  publish is confirmed. The produce/relay path never dead-letters — a stuck
-  lane retries with backoff indefinitely, which is an operational alert, not
-  silent loss.
+- **Claims are transaction-scoped and release on connection close.** A
+  relay worker claims rows with `FOR UPDATE SKIP LOCKED` inside one
+  transaction. If the worker crashes, the connection closes, the transaction
+  rolls back, and another worker claims the rows at once.
+- **`publish-then-mark` and `ack-after-commit` redeliver-and-dedup on
+  crash.** A relay that crashes after publishing but before its claim commits
+  leaves the rows unpublished; the next claim republishes them. A consumer
+  that crashes after committing its dedup/dispatch transaction but before
+  acking (AMQP) redelivers the message on restart. Both land on consumer-side
+  deduplication, which absorbs the duplicate.
+- **The retention period is the only data-loss path.** The produce/relay
+  path never dead-letters — a stuck lane retries with backoff until the row
+  passes the retention period (default 7 days). Then retention drops the row
+  with its partition and reports it. Alert on relay backlog well before that
+  limit.
 
 Tune restart backoff (how fast the supervisor retries a crashed process),
 not reconnect logic — there is none to tune.
@@ -47,43 +43,10 @@ between successive `run()` calls.
 
 ## Connection pooling (pgbouncer)
 
-**The ordered relay's database connection must not pass through a
-transaction-mode (or statement-mode) connection pooler.** Give it a direct
-connection or a session-mode pool.
-
-The one-relay-per-lane guarantee (see [Scaling & ordering](#scaling--ordering))
-rests on a **session-scoped** advisory lock — `pg_try_advisory_lock`. A session lock lives on the *server backend*
-and is meant to be held for the relay's whole lifetime, across thousands of
-statements. A transaction-mode pooler (pgbouncer `pool_mode = transaction`)
-multiplexes the other way: it lends a client a backend only for the duration
-of one transaction — and every autocommit statement is its own transaction —
-then returns that backend to the pool. Behind such a pooler:
-
-- The `pg_try_advisory_lock` lands on whatever backend served that one
-  statement and is stranded there; the relay's next statement may run on a
-  different backend that does not hold it. **Two relays can then both acquire
-  the same lane**, and total per-lane ordering is silently lost (consumer
-  dedup still absorbs the duplicates, but order is not recoverable).
-- `releaseLane` (`pg_advisory_unlock`) runs on some other backend and is a
-  silent no-op; the real lock lingers until the stranded backend is recycled.
-- The crash-recovery story above ("self-releases on connection close") does
-  **not** hold — a client disconnect does not close the pooled backend, so a
-  crashed relay's lane can stay locked and standby takeover is delayed
-  indefinitely.
-
-Which connection needs what:
-
-| Connection | Pool mode | Why |
-|---|---|---|
-| **Ordered relay** (`AmqpRelay`) | direct or **session** only | holds a session advisory lock across its whole lifetime |
-| **Producer** — your app's `insert()` on the request/HTTP path | **any**, including transaction | a plain INSERT joining your transaction; holds no session state |
-| **Consumer** (`AmqpConsumer`), **competing relay** (`CompetingAmqpRelay`) | any in principle; direct/session by convention | only transaction-scoped locks (per-message transaction, `FOR UPDATE SKIP LOCKED`), so transaction mode is technically safe — but they are long-running workers, normally given direct connections anyway |
-
-This is the conventional split: keep a transaction-mode pooler in front of
-the stateless request workers (where the producer lives), and give the
-long-running relay/consumer processes direct connections. Confirm the
-relay's connection resolves to `pool_mode = session` or bypasses pgbouncer
-entirely before relying on per-lane ordering.
+All components are safe behind a transaction-mode pooler. No component holds
+a session-scoped lock: the relay claim and the consumer deduplication each run
+inside one transaction, and the producer joins your own transaction. Any pool
+mode works, including `pool_mode = transaction`.
 
 ## Graceful shutdown needs ext-pcntl
 
@@ -130,53 +93,94 @@ Derive operational metrics from the `outbox_messages`, `message_deduplication`,
 and `dead_letters` tables plus these events:
 
 - **Throughput** — the `RELAYED`/`DISPATCHED` event rate.
-- **Relay backlog** — outbox row age (oldest row in `outbox_messages`).
+- **Relay backlog** — the age of the oldest unpublished row
+  (`published_at IS NULL`) per lane.
+- **Retention health** — the exit code of `message-broker:outbox:maintain`,
+  its warnings about dropped unpublished rows, and the partition of tomorrow
+  (it must exist).
 - **Consumer lag** — broker queue depth (AMQP).
 - **DLQ depth** — `SELECT COUNT(*) FROM dead_letters WHERE replayed_at IS NULL`,
   optionally grouped by `source`/`message_name`.
 
-## Scaling & ordering
+## Scaling
 
-**One relay per lane, enforced by the lock.** For the ordered relay
-(`AmqpRelay`), the lane advisory lock guarantees exactly one
-active owner; a second relay process started on the same lane stands by,
-retrying `tryAcquireLane` on every idle tick, and takes over the instant the
-active relay releases (clean shutdown or crash).
-
-**Competing (opt-in): `CompetingAmqpRelay`.** For order-insensitive AMQP
-workloads, run N identical worker processes against one lane; each claims a
-batch of eligible rows via `FOR UPDATE SKIP LOCKED` inside a transaction
-owned by the outbox store, publishes while holding the claim, and deletes
-on success. Workers never block each other, and a crashed worker's claimed
-rows are instantly reclaimable — its locks die with its connection. There is
-**no ordering promise**: rows overtake freely, across workers and past
-backing-off rows; id order is a FIFO bias, not a contract. A publish failure
-backs off the whole claimed batch, each row at its own attempts-derived
-delay.
-
-**Lane sharding scales ordered throughput.** Since one lane has one active
-ordered relay, scale by fanning production across `lane-1..N` (e.g. a hash
-of the message key) and running one ordered relay per lane. This preserves
-per-lane ordering while parallelizing across lanes.
-
-**Watch different signals per mode.** Ordered mode: a backing-off lane head
-blocks everything behind it, so watch for a blocked lane (the oldest
-unrelayed row growing stale). Competing mode: a blocked head cannot block
-the lane — rows overtake it — so watch **outbox row age** instead (the
-oldest `available_at`/`created_at` across the lane), since a slowly-draining
-lane will not show up as a single stuck head.
-
-**There is no per-key FIFO.** AMQP routes by message name; the only ordering
-guarantee is the per-lane publish order of the ordered relay. See
+**There is no ordering.** Rows publish in any order, and consumers must be
+order-insensitive. AMQP routes by message name. See
 [TRANSPORTS.md](TRANSPORTS.md).
 
-**Lock-key changes need stop-all-relays deploys.** The advisory-lock key
-derivation (`Platform::tryAcquireLaneSql`/`releaseLaneSql`) is part of the
-relay's coordination contract. If a deploy changes how the lock key is
-derived for a lane, two relay versions running simultaneously — old and new
-— can both believe they own the same lane, because they compute different
-lock keys and neither sees the other's lock. Ordering breaks for the overlap
-window (consumer dedup still absorbs the resulting duplicates, but total
-order is not held during it). Deploys that change lock-key derivation must
-stop all relays for the affected lanes, then start the new version — no
-rolling swap.
+**Scale by adding workers to a lane.** Run N identical `AmqpRelay` worker
+processes against one lane. Each claims a batch of eligible rows via
+`FOR UPDATE SKIP LOCKED` inside a transaction owned by the outbox store,
+publishes the batch with publisher confirms, and marks the rows published.
+Workers never block each other, and a crashed worker's claimed rows are
+instantly reclaimable. A publish failure backs off the whole claimed batch,
+each row at its own attempts-derived delay (exponential, 1 s ×4, maximum
+300 s).
+
+**Lanes isolate workloads.** A lane is a named drain of the outbox table. Use
+separate lanes so that a slow or failing workload does not delay another one.
+
+**Watch row age.** A single stuck row does not stall a lane, because other
+rows overtake it. Watch the age of the oldest unpublished row
+(`published_at IS NULL`) per lane.
+
+## Outbox retention
+
+The relay never deletes rows. It sets `published_at`, and the rows stay until
+retention drops their partition. `outbox_messages` is partitioned by
+`created_at`, with one partition per UTC day (`outbox_messages_pYYYYMMDD`) and
+no default partition. An insert for a day with no partition fails, and the
+producer's transaction fails with it, so create partitions ahead of time.
+
+Run `message-broker:outbox:maintain` once a day (cron):
+
+```bash
+php bin/console message-broker:outbox:maintain --retention-days=7 --premake-days=3
+```
+
+The command:
+
+- creates the missing daily partitions from today to today plus
+  `--premake-days` (`CREATE TABLE`, then `ATTACH PARTITION`);
+- drops each daily partition that lies wholly before the cutoff (today
+  midnight UTC minus `--retention-days`): `DETACH PARTITION ... CONCURRENTLY`,
+  then `DROP TABLE` on the detached table;
+- finishes a detach that an earlier run did not complete
+  (`DETACH PARTITION ... FINALIZE`), and drops an expired table that an earlier
+  run detached.
+
+The retention period (`--retention-days`, default 7) is also the age limit of
+an unpublished row. An expired partition is dropped even when it still holds
+unpublished rows; the command reports them as a warning. A relay that stays
+broken for longer than the retention period loses those messages, so alert on
+the age of the oldest unpublished row well before that limit.
+
+**Locks.** No step takes an `ACCESS EXCLUSIVE` lock on `outbox_messages`.
+`ATTACH PARTITION` and `DETACH PARTITION ... CONCURRENTLY` take only
+`SHARE UPDATE EXCLUSIVE`, which does not block inserts, claims or updates. The
+detach waits until the transactions that use `outbox_messages` end, so a long
+business transaction delays the command but blocks nobody. The command must
+run outside a transaction. A plain `DROP TABLE` or `DETACH PARTITION` of a
+partition takes `ACCESS EXCLUSIVE` on the parent and queues every producer
+behind it; do not run them on this table by hand.
+
+It exits with code 0, also when it dropped unpublished rows, and with code 2
+on invalid options. Use `--dry-run` to preview the changes.
+
+### With pg_partman
+
+pg_partman can create the partitions. Its default name for a daily partition,
+`outbox_messages_pYYYYMMDD`, is the name this library uses, so
+`outbox:maintain` skips the partitions that pg_partman made and drops them when
+they expire. Configure pg_partman like this:
+
+- **No default partition:** `create_parent(..., p_default_table := false)`.
+  With a default partition, `DETACH PARTITION ... CONCURRENTLY` fails.
+- **No retention:** keep `retention` NULL in `part_config`. pg_partman retention
+  runs a plain `DETACH PARTITION`, which takes `ACCESS EXCLUSIVE` on the parent.
+  Let `outbox:maintain` drop the partitions.
+- **UTC:** run the database in UTC, so pg_partman's day boundaries agree with
+  the UTC days of this library.
+
+Monitor three signals: the age of the oldest unpublished row per lane, the
+warnings of the maintain command, and the partition of tomorrow.

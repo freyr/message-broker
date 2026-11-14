@@ -21,9 +21,11 @@ php bin/console message-broker:dlq:show 0190f7e2-1234-7000-8000-abc123456789
 ## Replaying
 
 `dlq:replay` re-enqueues a dead letter back into the outbox under a chosen
-lane, so redelivery rides the normal relay path (publisher confirms,
-ordering). The dead letter row is kept for audit and marked `replayed_at`
-rather than deleted.
+lane, so redelivery rides the normal relay path (publisher confirms). The
+command inserts a new outbox row with the original message id and a new
+`created_at`; the original published row can still exist until retention
+drops its partition. The dead letter row is kept for audit and marked
+`replayed_at` rather than deleted.
 
 **Single id** replays immediately, with no confirmation prompt:
 

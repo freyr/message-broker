@@ -16,35 +16,10 @@ interface Platform
     public function insertOutboxSql(): string;
 
     /**
-     * Try to acquire exclusive, session-scoped ownership of one lane
-     * (pg_try_advisory_lock). Self-releases if
-     * the relay's connection dies — crash recovery without lease bookkeeping.
-     * One relay per lane is what guarantees total in-order publishing.
-     */
-    public function tryAcquireLaneSql(): string;
-
-    /**
-     * Release the lane lock acquired via tryAcquireLaneSql so a restarting or
-     * standby relay can take the lane over immediately. Bound with :lane.
-     * Implementations MUST derive the lock key identically to tryAcquireLaneSql()
-     * (same hash, same casts) — a mismatched key makes the release a silent no-op.
-     */
-    public function releaseLaneSql(): string;
-
-    /**
-     * Contiguous prefix of one owned lane, ordered by id (UUIDv7 = time).
-     * No SKIP LOCKED — skipping a locked head row would violate ordering;
-     * exclusivity is lane-level, via the advisory lock.
-     */
-    public function selectLanePrefixSql(): string;
-
-    /**
-     * Competing drain (opt-in): up to :limit eligible rows of one lane
-     * (available_at <= :now), ordered by id — a FIFO bias, not a contract —
-     * with FOR UPDATE SKIP LOCKED so concurrent claimers never block each
-     * other. Bound with :lane, :now, :limit. Contrast selectLanePrefixSql():
-     * eligibility moves into SQL here because rows overtake freely; the
-     * ordered drain keeps its head-check-in-code semantics (D17).
+     * Claim query: up to :limit unpublished, due rows of one lane
+     * (published_at IS NULL, available_at <= :now) with FOR UPDATE SKIP
+     * LOCKED, so concurrent relay workers never block each other. Bound with
+     * :lane, :now, :limit. No ordering contract.
      */
     public function selectClaimBatchSql(): string;
 
@@ -52,8 +27,10 @@ interface Platform
     public function insertDeduplicationSql(): string;
 
     /**
-     * DDL for outbox_messages, message_deduplication,
-     * dead_letters. The body column is BYTEA for both formats.
+     * DDL for the partitioned outbox_messages table (with its DEFAULT
+     * partition), message_deduplication and dead_letters. The body column is
+     * BYTEA for both formats. Daily outbox partitions are not part of this
+     * DDL; OutboxPartitionManager creates them.
      *
      * @return list<string>
      */

@@ -7,7 +7,7 @@ long-running processes as CLI commands.
 
 It assumes a PostgreSQL database and a RabbitMQ broker reachable
 from your application. See [TRANSPORTS.md](TRANSPORTS.md) for the AMQP
-competing-relay mode, and
+relay, and
 [CLI_REFERENCE.md](CLI_REFERENCE.md) for every command's full option list.
 
 ## Define a message
@@ -24,7 +24,7 @@ final class OrderPlaced extends Message
 {
     public static function create(string $orderId, int $totalCents): self
     {
-        return new self(key: $orderId, name: 'order.placed', payload: [
+        return new self(name: 'order.placed', payload: [
             'order_id' => $orderId,
             'total_cents' => $totalCents,
         ]);
@@ -36,6 +36,8 @@ final class OrderPlaced extends Message
 
 `OutboxProducer` writes through your application's own `PDO` connection, so
 the outbox row commits or rolls back atomically with your own state change.
+The producer opens no transaction itself: atomicity holds only inside the
+transaction that your application opens.
 `OutboxStore` is the storage interface; `PdoOutboxStore` is the shipped PDO
 implementation — construct it with your connection and a `Platform`
 (`PostgreSqlPlatform`).
@@ -62,13 +64,15 @@ $pdo->commit(); // the outbox row commits atomically with your data
 ```
 
 A *lane* is a named drain of the outbox table. One producer instance writes
-to one lane; exactly one ordered relay serves that lane at a time, which is
-what guarantees total in-order publishing per lane.
+to one lane. Any number of identical relay workers drain that lane, and rows
+publish in any order, so consumers must be order-insensitive.
 
 ## Run the schema setup
 
-Before producing anything, create `outbox_messages`, `message_deduplication`,
-and `dead_letters`:
+Before producing anything, create `outbox_messages` (a table partitioned by
+`created_at`, one partition per UTC day, no default partition),
+`message_deduplication`, and `dead_letters`. The command also creates the
+first daily partitions:
 
 ```bash
 php bin/console message-broker:setup:schema --format=json
@@ -76,12 +80,15 @@ php bin/console message-broker:setup:schema --format=json
 
 `--format` is a global, setup-time choice (`json` or `avro`) and must match
 the `WireFormat` your producer uses. The `body` column is `BYTEA` for both
-formats. See [CLI_REFERENCE.md](CLI_REFERENCE.md) for
+formats. `--premake-days` (default `3`) sets how many days of partitions
+the command creates ahead. See [CLI_REFERENCE.md](CLI_REFERENCE.md) for
 `--dump-sql` and every other command's options.
 
 ## Run a relay
 
-A relay drains one outbox lane to one transport target, preserving order. It
+A relay drains one outbox lane to one transport target. Each relay worker
+claims a batch of rows with `FOR UPDATE SKIP LOCKED`, publishes the batch with
+publisher confirms, and marks the rows published. It never deletes rows. It
 needs a dedicated `AMQPChannel` — publisher confirms are channel-global
 state, so nothing else may publish on the same channel.
 
@@ -99,9 +106,32 @@ $relay = new AmqpRelay(
 $relay->run(); // blocks; SIGTERM/SIGINT to stop
 ```
 
-This is the *ordered* relay — the default, and the one to reach for unless
-your consumers are explicitly order-insensitive. See
-[TRANSPORTS.md](TRANSPORTS.md) for the opt-in `CompetingAmqpRelay`.
+Run more workers on the same lane to scale throughput; each worker has its
+own database connection and its own channel. See
+[TRANSPORTS.md](TRANSPORTS.md) for the details.
+
+## Schedule the outbox maintenance
+
+Rows stay in `outbox_messages` until their daily partition expires. There is
+no default partition, so an insert for a day with no partition fails. Run
+`message-broker:outbox:maintain` once a day to create the upcoming partitions
+and drop the expired ones:
+
+```php
+use Freyr\MessageBroker\Console\OutboxMaintainCommand;
+use Freyr\MessageBroker\Outbox\OutboxPartitionManager;
+
+$application->add(new OutboxMaintainCommand(new OutboxPartitionManager($pdo)));
+```
+
+```bash
+php bin/console message-broker:outbox:maintain --retention-days=7 --premake-days=3
+```
+
+The retention period is also the age limit of an unpublished row: an expired
+partition is dropped with its unpublished rows. See
+[CLI_REFERENCE.md](CLI_REFERENCE.md) for the options and the exit codes, and
+[PRODUCTION.md](PRODUCTION.md) for pg_partman.
 
 ## Run a consumer
 
@@ -162,11 +192,11 @@ crash-only deployment model and why it is safe.
 
 ## Next steps
 
-- [TRANSPORTS.md](TRANSPORTS.md) — AMQP configuration in full (both relay
-  modes).
+- [TRANSPORTS.md](TRANSPORTS.md) — AMQP configuration in full (relay,
+  consumer, retry).
 - [SCHEMA_AVRO.md](SCHEMA_AVRO.md) — switching to Avro for produce-time
   contract enforcement.
 - [CLI_REFERENCE.md](CLI_REFERENCE.md) — every command and option.
 - [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md) — inspecting, replaying, and
   purging dead letters.
-- [PRODUCTION.md](PRODUCTION.md) — deployment, observability, and scaling.
+- [PRODUCTION.md](PRODUCTION.md) — deployment, retention, observability, and scaling.

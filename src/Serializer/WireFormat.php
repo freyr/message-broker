@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Serializer;
 
 /**
- * Produce-side encoder (E2): turns Message::wire()['payload'] into the final
+ * Produce-side encoder (E2): turns Message::payload() into the final
  * wire body bytes stored verbatim in the outbox `body` column. The encode is
  * also the poison check (E5) — a non-publishable payload throws here, inside
  * the application's transaction, so nothing commits. The relay pumps the
@@ -19,7 +19,7 @@ interface WireFormat
     public function contentType(): string;
 
     /**
-     * @param array<string, mixed> $payload Message::wire()['payload']
+     * @param array<string, mixed> $payload Message::payload()
      *
      * @return string final wire body bytes (payload only)
      */

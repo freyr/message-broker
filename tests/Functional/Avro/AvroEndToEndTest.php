@@ -35,7 +35,7 @@ use RuntimeException;
 /**
  * The Avro promise (registry-free, encode-at-produce): produce (Avro encoded at
  * the door → outbox `body` = Confluent-framed bytes with a schema id DERIVED
- * from the committed schema, envelope in the `metadata` column) → relay
+ * from the committed schema, envelope in the id, message_name and created_at columns) → relay
  * (byte-pump: verbatim body + individual x-message-* headers) → RabbitMQ →
  * consumer (resolves the writer schema by id against its own reader schema by
  * message name — filling reader defaults) → dispatcher. Plus the failure circle
@@ -186,15 +186,14 @@ final class AvroEndToEndTest extends FunctionalTestCase
 
         // Outbox row body is the FINAL Confluent-framed Avro bytes; the id is
         // derived from the committed schema, not registry-assigned.
-        $row = self::$pdo->query('SELECT metadata, body FROM outbox_messages LIMIT 1')?->fetch(\PDO::FETCH_ASSOC);
+        $row = self::$pdo->query('SELECT id, message_name, body FROM outbox_messages LIMIT 1')?->fetch(\PDO::FETCH_ASSOC);
         self::assertIsArray($row, 'outbox row must exist');
         $frame = ConfluentFrame::parse(static::platform()->readBody($row['body']));
         $v1Json = file_get_contents(self::V1_PATH);
         self::assertIsString($v1Json);
         self::assertSame(DerivedSchemaId::fromSchemaJson($v1Json), $frame->schemaId, 'body carries the derived id');
-        $metadata = json_decode((string) $row['metadata'], true);
-        self::assertSame($message->id, $metadata['message_id'], 'metadata column holds the envelope');
-        self::assertSame('order.placed', $metadata['message_name']);
+        self::assertSame($message->id, $row['id'], 'the row columns hold the envelope');
+        self::assertSame('order.placed', $row['message_name']);
 
         self::assertSame(1, $this->relay->drainOnce());
         $this->consumer()
@@ -209,7 +208,7 @@ final class AvroEndToEndTest extends FunctionalTestCase
         // Produce-time headers survive alongside x-* library headers.
         self::assertSame('corr-7', $this->dispatched[0]->headers['correlation_id']);
 
-        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'), 'outbox drained');
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages WHERE published_at IS NULL'), 'outbox drained');
         self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM dead_letters'));
     }
 

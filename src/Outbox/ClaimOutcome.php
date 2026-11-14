@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Outbox;
 
 /**
- * Result of a competing-drain publish callback: which claimed rows to delete
- * (published) and which to retry, each at its own available_at. The AMQP
+ * Result of a drain publish callback: which claimed rows to mark published
+ * and which to retry, each at its own available_at. The AMQP
  * publisher returns all-or-nothing outcomes — one confirm wait covers the
  * batch, so a failure cannot attribute delivery per record — but the shape
  * permits partial outcomes for publishers that can attest per-record delivery.
@@ -14,7 +14,7 @@ namespace Freyr\MessageBroker\Outbox;
 final readonly class ClaimOutcome
 {
     /**
-     * @param list<string> $publishedIds rows to delete — published successfully
+     * @param list<string> $publishedIds rows to mark published — published successfully
      * @param array<string, int> $retryAtMs row id => next available_at, epoch ms
      */
     public function __construct(

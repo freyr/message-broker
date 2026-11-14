@@ -29,7 +29,7 @@ final class OutboxProduceTest extends FunctionalTestCase
         );
     }
 
-    public function testProduceInsertsRowWithEncodedBodyAndMetadata(): void
+    public function testProduceInsertsUnpublishedRowWithEncodedBody(): void
     {
         $message = OrderPlaced::create('o-123', 4999);
 
@@ -41,11 +41,12 @@ final class OutboxProduceTest extends FunctionalTestCase
         self::assertNotFalse($row, 'expected one outbox row');
         self::assertSame($message->id, $row['id']);
         self::assertSame('orders', $row['lane']);
-        self::assertSame('o-123', $row['message_key']);
+        self::assertSame('order.placed', $row['message_name']);
+        self::assertSame(0, (int) $row['attempts']);
+        self::assertNull($row['published_at'], 'a new row waits for the relay');
         self::assertSame(
-            'order.placed',
-            $row['message_name'],
-            'message_name column mirrors metadata.message_name'
+            $message->createdAt,
+            (int) (new \DateTimeImmutable((string) $row['created_at'], new \DateTimeZone('UTC')))->format('Uv'),
         );
 
         // body is the payload only (JSON format).
@@ -54,15 +55,23 @@ final class OutboxProduceTest extends FunctionalTestCase
             'total_cents' => 4999,
         ], json_decode(static::platform()->readBody($row['body']), true, flags: JSON_THROW_ON_ERROR));
 
-        // metadata column holds the envelope.
-        $metadata = json_decode((string) $row['metadata'], true, flags: JSON_THROW_ON_ERROR);
-        self::assertSame($message->id, $metadata['message_id']);
-        self::assertSame('order.placed', $metadata['message_name']);
-        self::assertSame($message->createdAt, $metadata['created_at']);
-
         self::assertSame([
             'correlation_id' => 'c-1',
         ], json_decode((string) $row['headers'], true, flags: JSON_THROW_ON_ERROR));
+    }
+
+    public function testProducerRejectsAnOverLongLaneWithAClearError(): void
+    {
+        $producer = new OutboxProducer(
+            store: new PdoOutboxStore(self::$pdo, static::platform()),
+            wireFormat: new JsonWireFormat(),
+            lane: str_repeat('l', 65),
+        );
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Outbox lane must be 1 to 64 characters');
+
+        $producer->produce(OrderPlaced::create('o-1', 100));
     }
 
     public function testProduceJoinsTheApplicationTransaction(): void

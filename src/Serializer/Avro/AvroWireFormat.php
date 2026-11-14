@@ -13,8 +13,8 @@ use RuntimeException;
 /**
  * Produce-side Avro encoder (E2): encodes the payload record, frames it
  * Confluent-style (magic 0x00 + 4-byte big-endian schema id), and returns
- * the bytes for the outbox `body` (LONGBLOB). The metadata envelope is
- * written to the `metadata` column by the producer — not here.
+ * the bytes for the outbox `body` (BYTEA). The envelope (id, name,
+ * created_at) travels as x-message-* headers — not here.
  *
  * Encode order matters: the payload is encoded FIRST (this is the E5/D17
  * poison check — AvroIOTypeException on a non-conforming payload, inside the
