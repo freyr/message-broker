@@ -126,6 +126,24 @@ more throughput. A prefetch above 32 adds little. Do not set
 `synchronous_commit = off` for the consumer connection: after a database
 crash, a message that is already acked can lose its processing.
 
+**With business work, the handler time limits a consumer.** A handler that
+takes 30–50 ms makes the commit cost small. The throughput then grows linearly
+with the number of consumer processes. A local benchmark (the handler sleeps
+inside the consumer transaction, 300 messages for each process) gave these
+numbers in msg/s:
+
+| Consumer processes | Handler 30 ms | Handler 50 ms |
+|---|---|---|
+| 4 | 107 | 70 |
+| 8 | 212 | 139 |
+| 12 | 328 | 206 |
+| 16 | 443 | 276 |
+
+This is 80–87% of the limit of the sleep alone (processes ÷ handler time).
+Prefetch 1 and prefetch 32 give the same result within 3%. To get more
+throughput with slow handlers, add consumer processes. Run the benchmark with
+`make bench-consumer ARGS="<messages> <processes> <prefetch> <handler-ms>"`.
+
 **Scale by adding workers to a lane.** Run N identical `AmqpRelay` worker
 processes against one lane. Each claims a batch of eligible rows via
 `FOR UPDATE SKIP LOCKED` inside a transaction owned by the outbox store,
