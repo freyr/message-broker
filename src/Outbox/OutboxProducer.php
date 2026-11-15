@@ -34,8 +34,8 @@ final readonly class OutboxProducer
     public function produce(Message $message, array $headers = []): void
     {
         // Encode at the door: the real encode IS the conformance check. A
-        // non-publishable payload throws here (JsonException /
-        // AvroIOTypeException) inside the application's transaction — nothing
+        // non-publishable payload throws here (JsonException) inside the
+        // application's transaction — nothing
         // commits, and the bytes that were validated are the bytes stored.
         $body = $this->wireFormat->encode($message->name, $message->payload());
 

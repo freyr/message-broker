@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Outbox\OutboxPartitionManager;
-use Freyr\MessageBroker\Serializer\Format;
 use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Storage\PostgreSqlPlatform;
 use PDO;
@@ -15,12 +14,6 @@ use RuntimeException;
 abstract class FunctionalTestCase extends TestCase
 {
     protected static PDO $pdo;
-
-    /** Subclasses producing Avro bodies override this. */
-    protected static function outboxFormat(): Format
-    {
-        return Format::Json;
-    }
 
     protected static function platform(): Platform
     {
@@ -45,7 +38,7 @@ abstract class FunctionalTestCase extends TestCase
         foreach ($leftovers->fetchAll(PDO::FETCH_COLUMN) as $name) {
             self::$pdo->exec(sprintf('DROP TABLE "%s"', (string) $name)); // detached daily tables survive the parent
         }
-        foreach (static::platform()->schemaSql(static::outboxFormat()) as $ddl) {
+        foreach (static::platform()->schemaSql() as $ddl) {
             self::$pdo->exec($ddl);
         }
     }

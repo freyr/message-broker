@@ -1,4 +1,4 @@
-.PHONY: help build logs shell install test phpstan cs-check cs-fix schema-compat bench bench-consumer bench-format
+.PHONY: help build logs shell install test phpstan cs-check cs-fix bench bench-consumer
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -30,14 +30,8 @@ cs-check: ## Check code style with ECS
 cs-fix: ## Fix code style with ECS
 	docker compose run --rm php vendor/bin/ecs check --fix
 
-schema-compat: ## Run the offline Avro compatibility gate (CI-only; JVM/maven, no server)
-	docker compose --profile schema-compat run --rm schema-compat
-
 bench: ## Relay throughput benchmark; ARGS="<rows> <workers> <batch> [full|db-only|amqp-only]"
 	docker compose run --rm php php tests/Functional/Scripts/amqp-relay-bench.php $(ARGS)
 
 bench-consumer: ## Consumer throughput benchmark; ARGS="<messages> <workers> <prefetch> <handler-sleep-ms>"
 	docker compose run --rm php php tests/Functional/Scripts/amqp-consumer-bench.php $(ARGS)
-
-bench-format: ## JSON against Avro benchmark; ARGS="<json|avro> <messages> <small|order> [consumers]"
-	docker compose run --rm php php tests/Functional/Scripts/format-bench.php $(ARGS)

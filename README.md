@@ -1,6 +1,6 @@
 # Freyr Message Broker
 
-Standalone PHP messaging library: transactional outbox on a partitioned PostgreSQL table, consumer-side deduplication and dead-lettering with replay, and an AMQP producer and consumer. Plain PDO storage on PostgreSQL, no framework coupling.
+Standalone PHP messaging library: transactional outbox on a partitioned PostgreSQL table, consumer-side deduplication and dead-lettering with replay, and an AMQP producer and consumer. Messages are JSON. Plain PDO storage on PostgreSQL, no framework coupling.
 
 ## What it is
 
@@ -8,7 +8,7 @@ True **exactly-once** processing is rare and genuinely hard to build in PHP — 
 
 It runs over **AMQP (RabbitMQ)** so you adopt it within your existing infrastructure instead of standing up a new broker: competing-consumer queues, routed by message name. It gives no ordering guarantee: rows publish in any order, and consumers must be order-insensitive.
 
-> **Status: early development.** No stable release yet; every API may change without notice.
+> **Status: 0.x.** No stable release yet; every API may change between minor versions.
 
 ## Install
 
@@ -21,7 +21,6 @@ Requires PHP ≥ 8.4, `ext-pdo_pgsql`, and PostgreSQL 14+. Install the pieces yo
 | Need | Add |
 |---|---|
 | AMQP transport | `composer require php-amqplib/php-amqplib` |
-| Avro wire format | `composer require apache/avro` |
 | Graceful shutdown | `ext-pcntl` (relay/consumer SIGTERM handling) |
 
 ## Quickstart
@@ -46,7 +45,6 @@ after the retention period (default 7 days), unpublished rows included — see [
 
 - [Quickstart](docs/QUICKSTART.md) — produce → relay → consume, end to end
 - [Transports](docs/TRANSPORTS.md) — AMQP relay/consumer setup, lanes
-- [Schema and Avro](docs/SCHEMA_AVRO.md) — wire formats, schema registration, compatibility
 - [CLI Reference](docs/CLI_REFERENCE.md) — every shipped console command
 - [DLQ Operations](docs/DLQ_OPERATIONS.md) — inspecting, replaying, and purging dead letters
 - [Production](docs/PRODUCTION.md) — observability, graceful shutdown, operational guidance

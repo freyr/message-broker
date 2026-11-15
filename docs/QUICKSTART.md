@@ -42,10 +42,9 @@ transaction that your application opens.
 implementation — construct it with your connection and a `Platform`
 (`PostgreSqlPlatform`).
 
-The wire format is encoded at produce time: `JsonWireFormat` (shown here) or
-`AvroWireFormat` (see [SCHEMA_AVRO.md](SCHEMA_AVRO.md)) turns the payload
-into the exact bytes stored in the outbox `body` column, and a
-non-conforming payload throws inside your transaction — nothing commits.
+The payload is encoded at produce time: `JsonWireFormat` turns it into the
+exact bytes stored in the outbox `body` column, and a payload that cannot be
+encoded throws inside your transaction — nothing commits.
 
 ```php
 use Freyr\MessageBroker\Outbox\OutboxProducer;
@@ -75,12 +74,11 @@ Before producing anything, create `outbox_messages` (a table partitioned by
 first daily partitions:
 
 ```bash
-php bin/console message-broker:setup:schema --format=json
+php bin/console message-broker:setup:schema
 ```
 
-`--format` is a global, setup-time choice (`json` or `avro`) and must match
-the `WireFormat` your producer uses. The `body` column is `BYTEA` for both
-formats. `--premake-days` (default `3`) sets how many days of partitions
+The `body` column is `BYTEA`. `--premake-days` (default `3`) sets how many
+days of partitions
 the command creates ahead. See [CLI_REFERENCE.md](CLI_REFERENCE.md) for
 `--dump-sql` and every other command's options.
 
@@ -194,8 +192,6 @@ crash-only deployment model and why it is safe.
 
 - [TRANSPORTS.md](TRANSPORTS.md) — AMQP configuration in full (relay,
   consumer, retry).
-- [SCHEMA_AVRO.md](SCHEMA_AVRO.md) — switching to Avro for produce-time
-  contract enforcement.
 - [CLI_REFERENCE.md](CLI_REFERENCE.md) — every command and option.
 - [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md) — inspecting, replaying, and
   purging dead letters.

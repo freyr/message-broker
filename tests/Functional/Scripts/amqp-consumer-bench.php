@@ -13,7 +13,6 @@ use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
-use Freyr\MessageBroker\Serializer\Format;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Storage\PostgreSqlPlatform;
@@ -55,7 +54,7 @@ $amqp = static fn (): AMQPStreamConnection => new AMQPStreamConnection(
 $platform = new PostgreSqlPlatform();
 
 $db = $pdo();
-foreach ($platform->schemaSql(Format::Json) as $ddl) {
+foreach ($platform->schemaSql() as $ddl) {
     $db->exec($ddl);
 }
 $db->exec('TRUNCATE message_deduplication');

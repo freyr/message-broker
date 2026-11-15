@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Storage;
 
-use Freyr\MessageBroker\Serializer\Format;
 use PDO;
 use PDOStatement;
 
@@ -17,7 +16,7 @@ use PDOStatement;
  *   - deduplication insert     → INSERT ... ON CONFLICT DO NOTHING
  *   - headers                  → JSONB
  *   - timestamps               → TIMESTAMP(3), UTC by convention
- *   - body column              → BYTEA (opaque wire bytes, both JSON and Avro)
+ *   - body column              → BYTEA (opaque wire bytes)
  */
 final readonly class PostgreSqlPlatform implements Platform
 {
@@ -79,12 +78,10 @@ final readonly class PostgreSqlPlatform implements Platform
         return $value;
     }
 
-    public function schemaSql(Format $format): array
+    public function schemaSql(): array
     {
-        // The body is opaque wire bytes (the relay byte-pumps it). It is BYTEA
-        // for BOTH formats — JSON text round-trips through BYTEA unchanged, and
-        // we avoid per-format binding rules. $format therefore does not change
-        // column types.
+        // The body is opaque wire bytes (the relay byte-pumps it). It is
+        // BYTEA: JSON text round-trips through BYTEA unchanged.
         //
         // outbox_messages is partitioned by created_at: the partition key is
         // known at insert (published_at is not), and the primary key of a

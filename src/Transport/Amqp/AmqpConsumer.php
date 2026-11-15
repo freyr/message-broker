@@ -342,7 +342,7 @@ final class AmqpConsumer
     {
         // Store the reconstructed canonical document, not the wire bytes:
         // readable in dlq:show and replayable through the outbox regardless
-        // of the queue's wire format (JSON or Avro). Raw bytes are kept only
+        // of the queue's wire format. Raw bytes are kept only
         // for stage-1 failures (deadLetterRaw), which never replay anyway.
         $document = json_encode([
             'metadata' => [

@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Removed
+
+- **BREAKING:** the Avro wire format: `AvroWireFormat`, `AvroDeserializer`, the file schema registry and store, `schema:validate`, and the offline CI compatibility gate. Messages are JSON only.
+- **BREAKING:** the `Format` enum; `Platform::schemaSql()` takes no argument, and `setup:schema` has no `--format` option.
+- The `apache/avro` suggestion in `composer.json`.
+
 ## [0.1.0] - 2026-11-15
 
 ### Added
