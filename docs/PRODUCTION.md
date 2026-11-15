@@ -144,32 +144,6 @@ Prefetch 1 and prefetch 32 give the same result within 3%. To get more
 throughput with slow handlers, add consumer processes. Run the benchmark with
 `make bench-consumer ARGS="<messages> <processes> <prefetch> <handler-ms>"`.
 
-**JSON or Avro.** Avro bodies are smaller, but the Avro library is pure PHP,
-so encode and decode use more CPU. A local benchmark (20,000 messages, two
-runs) gave these numbers. "order" is an order event with 20 fields, an address
-and 5 line items; "small" has 3 fields.
-
-| | JSON order | Avro order | JSON small | Avro small |
-|---|---|---|---|---|
-| Body size | 988 B | 451 B | 88 B | 49 B |
-| Encode (CPU, per message) | 1.4 µs | 22 µs | 0.2 µs | 2.3 µs |
-| Decode (CPU, per message) | 3.6 µs | 33 µs | 0.6 µs | 3.7 µs |
-| Produce, 100 per transaction | 14,300 msg/s | 12,300 msg/s | 17,800 msg/s | 16,700 msg/s |
-| Relay, 1 worker | 18–24k msg/s | 20–27k msg/s | 26–29k msg/s | 26–29k msg/s |
-| Relay transfer | 18–24 MB/s | 9–12 MB/s | 2.5 MB/s | 1.4 MB/s |
-| Outbox size for 20,000 rows | 24.5 MB | 12.8 MB | 5.1 MB | 4.3 MB |
-
-- The CPU cost of Avro is small next to a commit (about 1 ms) or a handler.
-  The consumer throughput is the same for both formats.
-- For a large payload, Avro halves the network transfer, the broker memory
-  and the outbox size. For a small payload, the row and header overhead is
-  larger than the body, so the gain is small.
-- Choose the format for the schema contract (compatibility checks in CI,
-  reader and writer resolution), not for speed.
-
-Run the benchmark with
-`make bench-format ARGS="<json|avro> <messages> <small|order> [consumers]"`.
-
 **Scale by adding workers to a lane.** Run N identical `AmqpRelay` worker
 processes against one lane. Each claims a batch of eligible rows via
 `FOR UPDATE SKIP LOCKED` inside a transaction owned by the outbox store,

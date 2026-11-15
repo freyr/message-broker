@@ -8,8 +8,7 @@ use Freyr\MessageBroker\Consumer\IncomingMessage;
 
 /**
  * Consumer-side stage 1 → 2: transport bytes into the transport-agnostic
- * IncomingMessage. Content type is explicit consumer configuration — a
- * consumer is TOLD its queue carries JSON or Avro, never sniffs.
+ * IncomingMessage. JsonDeserializer is the shipped implementation.
  */
 interface Deserializer
 {

@@ -150,11 +150,10 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM dead_letters'));
     }
 
-    public function testSetupSchemaAvroFormatUsesByteaBody(): void
+    public function testSetupSchemaDumpUsesByteaBody(): void
     {
         $tester = new CommandTester(new SetupSchemaCommand(self::$pdo, $this->platform));
         $tester->execute([
-            '--format' => 'avro',
             '--dump-sql' => true,
         ]);
 

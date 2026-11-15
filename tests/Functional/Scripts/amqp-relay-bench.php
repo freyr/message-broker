@@ -14,7 +14,6 @@ use Freyr\MessageBroker\Outbox\ClaimOutcome;
 use Freyr\MessageBroker\Outbox\OutboxPartitionManager;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\PdoOutboxStore;
-use Freyr\MessageBroker\Serializer\Format;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Storage\PostgreSqlPlatform;
 use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
@@ -31,7 +30,7 @@ $amqp = static fn (): AMQPStreamConnection => new AMQPStreamConnection(getenv('A
 
 $db = $pdo();
 $platform = new PostgreSqlPlatform();
-foreach ($platform->schemaSql(Format::Json) as $ddl) {
+foreach ($platform->schemaSql() as $ddl) {
     $db->exec($ddl);
 }
 (new OutboxPartitionManager($db))->ensurePartitions(1);

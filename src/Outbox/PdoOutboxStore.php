@@ -27,7 +27,7 @@ final readonly class PdoOutboxStore implements OutboxStore
         $statement->bindValue('id', $record->id);
         $statement->bindValue('lane', $record->lane);
         $statement->bindValue('message_name', $record->messageName);
-        $this->platform->bindBody($statement, 'body', $record->body); // final wire bytes (JSON text or Avro)
+        $this->platform->bindBody($statement, 'body', $record->body); // final wire bytes
         $statement->bindValue('headers', json_encode($record->headers, JSON_THROW_ON_ERROR));
         $statement->bindValue('created_at', self::timestamp($record->createdAt));
         $statement->bindValue('available_at', self::timestamp($record->availableAt ?? $record->createdAt));

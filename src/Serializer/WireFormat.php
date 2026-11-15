@@ -15,7 +15,7 @@ namespace Freyr\MessageBroker\Serializer;
  */
 interface WireFormat
 {
-    /** The global transport content type (e.g. application/json, avro/binary). */
+    /** The global transport content type (e.g. application/json). */
     public function contentType(): string;
 
     /**

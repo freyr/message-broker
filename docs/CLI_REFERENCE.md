@@ -29,7 +29,6 @@ skips the partitions that are already attached.
 
 | Option | Description |
 | --- | --- |
-| `--format` | `json` or `avro` (default `json`). Selects the outbox `body` column type and the rest of the DDL. Must match the `WireFormat` your producer uses. |
 | `--premake-days` | Create daily outbox partitions from today to today plus this many days (default `3`). |
 | `--dump-sql` | Print the DDL instead of executing it, including the partition DDL. The partition DDL is for a new database only. |
 
@@ -87,32 +86,6 @@ Runs a registered consumer. Blocks until stopped.
 | --- | --- |
 | `name` (argument, required) | The registered consumer name. |
 | `--require-signals` | Fail immediately at startup if `ext-pcntl` is unavailable. |
-
-## `message-broker:schema:register`
-
-Registers mapped Avro schemas with the schema registry — an out-of-band CI
-step; the runtime never registers.
-
-**Constructor:** `new SchemaRegisterCommand(FileSchemaStore $schemas, SchemaRegistrar $registrar)`
-
-| Option | Description |
-| --- | --- |
-| `--subject` | Register only this subject (message name); default registers every subject mapped in `$schemas`. |
-| `--compatibility` | Pin the subject's compatibility level before registering (e.g. `FULL`, `BACKWARD`). Governs the subject before its first version — the first schema itself has no predecessor to be checked against, but the policy is in place before any later version can arrive under the registry default. |
-| `--dry-run` | List the subjects that would be registered without writing anything. |
-
-## `message-broker:schema:compatibility`
-
-Sets or shows a subject's registry compatibility level, independent of
-registering a schema version. See [SCHEMA_AVRO.md](SCHEMA_AVRO.md) for the
-valid levels and the `IncompatibleSchema`/`RegistryUnavailable` error split.
-
-**Constructor:** `new SchemaCompatibilityCommand(SchemaRegistrar $registrar)`
-
-| Option | Description |
-| --- | --- |
-| `--subject` | Required. The subject (message name) to govern. |
-| `--level` | Level to set. Omit to print the current level (or `(registry default)` if no per-subject override exists). |
 
 ## `message-broker:dlq:list`
 

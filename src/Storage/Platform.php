@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Storage;
 
-use Freyr\MessageBroker\Serializer\Format;
 use PDOStatement;
 
 /**
@@ -27,14 +26,14 @@ interface Platform
     public function insertDeduplicationSql(): string;
 
     /**
-     * DDL for the partitioned outbox_messages table (with its DEFAULT
-     * partition), message_deduplication and dead_letters. The body column is
-     * BYTEA for both formats. Daily outbox partitions are not part of this
-     * DDL; OutboxPartitionManager creates them.
+     * DDL for the partitioned outbox_messages table (no DEFAULT partition),
+     * message_deduplication and dead_letters. The body column is BYTEA.
+     * Daily outbox partitions are not part of this DDL;
+     * OutboxPartitionManager creates them.
      *
      * @return list<string>
      */
-    public function schemaSql(Format $format): array;
+    public function schemaSql(): array;
 
     /**
      * Bind the body parameter on a prepared statement. The body is opaque wire
