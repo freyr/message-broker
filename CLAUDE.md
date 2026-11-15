@@ -1,6 +1,6 @@
 # Freyr Message Broker
 
-Standalone PHP messaging library (PHP ≥ 8.4): transactional outbox (partitioned PostgreSQL table, no ordering guarantee), consumer-side deduplication and DLQ, an AMQP producer/consumer. No framework coupling, plain PDO on PostgreSQL.
+Standalone PHP messaging library (PHP 8.4 and 8.5, composer constraint ≥ 8.4): transactional outbox (partitioned PostgreSQL table, no ordering guarantee), consumer-side deduplication and DLQ, an AMQP producer/consumer. No framework coupling, plain PDO on PostgreSQL.
 
 **Core concept.** The aim is a *true* outbox/inbox **exactly-once** layer for the PHP community — at-least-once delivery + consumer-side dedup/DLQ yielding exactly-once *processing*, the semantics that normally demand bespoke per-project glue. This library ships the **AMQP transport only** (RabbitMQ) so teams adopt it within their own infrastructure rather than being forced onto one broker: non-FIFO competing-consumer queues, routed by message name. There is no ordering at all: one `AmqpRelay` class, and any number of identical workers drain one lane via `FOR UPDATE SKIP LOCKED` claims, so rows publish in any order and consumers must be order-insensitive. Consumer-side dedup absorbs the duplicates a worker crash can produce. The relay marks rows published (`published_at`) and never deletes; `message-broker:outbox:maintain` drops expired daily partitions with `DETACH PARTITION ... CONCURRENTLY` (PostgreSQL 14+, so there is no DEFAULT partition and partitions are created ahead; pg_partman may create them). An expired partition that still holds unpublished rows is kept by default (reported, and the command exits with FAILURE); `--drop-unpublished` drops it with those rows (the retention period then is a hard age limit). Scope is **PostgreSQL + AMQP only**: there is no ordering of any kind (no per-lane order, no per-key FIFO, no Kafka transport). Research + decisions live in the vault.
 
@@ -23,6 +23,8 @@ docker compose run --rm php vendor/bin/ecs check
 ```
 
 Functional tests need PostgreSQL + RabbitMQ — both in compose.
+
+The image builds on PHP 8.4 by default. To run on another version, rebuild with the build argument: `PHP_VERSION=8.5 docker compose build php`. CI tests 8.4 and 8.5 and runs PHP 8.6 as an advisory job.
 
 ## Mutation testing
 

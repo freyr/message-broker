@@ -9,6 +9,8 @@ True **exactly-once** processing is rare and genuinely hard to build in PHP — 
 It runs over **AMQP (RabbitMQ)** so you adopt it within your existing infrastructure instead of standing up a new broker: competing-consumer queues, routed by message name. It gives no ordering guarantee: rows publish in any order, and consumers must be order-insensitive.
 
 > **Status: 0.x.** No stable release yet; every API may change between minor versions.
+> A minor release (0.**x**.0) holds a major change and can break code. A patch release
+> (0.x.**y**) holds smaller improvements and fixes.
 
 ## Install
 
@@ -16,7 +18,7 @@ It runs over **AMQP (RabbitMQ)** so you adopt it within your existing infrastruc
 composer require freyr/message-broker
 ```
 
-Requires PHP ≥ 8.4, `ext-pdo_pgsql`, and PostgreSQL 14+. Install the pieces you use:
+Requires PHP 8.4 or 8.5 (tested in CI on both), `ext-pdo_pgsql`, and PostgreSQL 14+. Install the pieces you use:
 
 | Need | Add |
 |---|---|
