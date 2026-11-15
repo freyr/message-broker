@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## From 0.6.x to the next release
+## From 0.6.x to 0.7.0
 
 This release has no backward-compatibility aliases. Change your `use` statements and your wiring code as shown below.
 The database schema, the wire format and the behavior of the relay and of the consumer do not change.

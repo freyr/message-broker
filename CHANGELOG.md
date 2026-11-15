@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-15
+
+The code is split into a core and two adapters inside this package. `UPGRADE.md` has the full table of old and new class names.
+
 ### Changed
 
 - **Breaking:** the code moves to three folders with separate namespaces and three PSR-4 roots: the core in `src/broker/` (`Freyr\MessageBroker\`), the PostgreSQL adapter in `src/adapter/postgresql/` (`Freyr\MessageBroker\Adapter\PostgreSql\`) and the AMQP adapter in `src/adapter/amqp/` (`Freyr\MessageBroker\Adapter\Amqp\`). The six PostgreSQL classes and the six AMQP classes change namespace; `Transport\DeduplicationStore` is now `Consumer\DeduplicationStore` and `Transport\IdleSleep` is now `Outbox\IdleSleep`. The namespace `Freyr\MessageBroker\Transport` no longer exists. There are no aliases. See `UPGRADE.md` for the full table of old and new class names and for before and after wiring examples
