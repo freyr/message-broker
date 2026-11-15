@@ -1,4 +1,4 @@
-.PHONY: help build logs shell install test phpstan cs-check cs-fix infection bench bench-consumer
+.PHONY: help build logs shell install test phpstan deptrac cs-check cs-fix infection bench bench-consumer
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -23,6 +23,9 @@ test: ## Run tests against PostgreSQL and RabbitMQ
 
 phpstan: ## Run PHPStan
 	docker compose run --rm php vendor/bin/phpstan analyse --memory-limit=-1
+
+deptrac: ## Check the dependency rules between the layers
+	docker compose run --rm php vendor/bin/deptrac analyse --no-progress
 
 cs-check: ## Check code style with ECS
 	docker compose run --rm php vendor/bin/ecs check
