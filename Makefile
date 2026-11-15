@@ -1,4 +1,4 @@
-.PHONY: help build logs shell install test phpstan cs-check cs-fix schema-compat bench bench-consumer
+.PHONY: help build logs shell install test phpstan cs-check cs-fix schema-compat bench bench-consumer bench-format
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -38,3 +38,6 @@ bench: ## Relay throughput benchmark; ARGS="<rows> <workers> <batch> [full|db-on
 
 bench-consumer: ## Consumer throughput benchmark; ARGS="<messages> <workers> <prefetch> <handler-sleep-ms>"
 	docker compose run --rm php php tests/Functional/Scripts/amqp-consumer-bench.php $(ARGS)
+
+bench-format: ## JSON against Avro benchmark; ARGS="<json|avro> <messages> <small|order> [consumers]"
+	docker compose run --rm php php tests/Functional/Scripts/format-bench.php $(ARGS)

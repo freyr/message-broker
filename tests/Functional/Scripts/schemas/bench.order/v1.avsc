@@ -1,0 +1,40 @@
+{
+  "type": "record",
+  "name": "OrderPlaced",
+  "namespace": "freyr.messagebroker.bench",
+  "fields": [
+    {"name": "order_id", "type": "string"},
+    {"name": "customer_id", "type": "string"},
+    {"name": "status", "type": {"type": "enum", "name": "OrderStatus", "symbols": ["PLACED", "PAID", "SHIPPED", "CANCELLED"]}},
+    {"name": "placed_at", "type": {"type": "long", "logicalType": "timestamp-millis"}},
+    {"name": "currency", "type": "string"},
+    {"name": "subtotal_cents", "type": "long"},
+    {"name": "tax_cents", "type": "long"},
+    {"name": "shipping_cents", "type": "long"},
+    {"name": "total_cents", "type": "long"},
+    {"name": "coupon_code", "type": ["null", "string"], "default": null},
+    {"name": "channel", "type": "string"},
+    {"name": "shipping_address", "type": {
+      "type": "record",
+      "name": "Address",
+      "fields": [
+        {"name": "name", "type": "string"},
+        {"name": "street", "type": "string"},
+        {"name": "city", "type": "string"},
+        {"name": "postal_code", "type": "string"},
+        {"name": "country", "type": "string"}
+      ]
+    }},
+    {"name": "items", "type": {"type": "array", "items": {
+      "type": "record",
+      "name": "LineItem",
+      "fields": [
+        {"name": "sku", "type": "string"},
+        {"name": "name", "type": "string"},
+        {"name": "quantity", "type": "int"},
+        {"name": "unit_price_cents", "type": "long"}
+      ]
+    }}},
+    {"name": "tags", "type": {"type": "array", "items": "string"}}
+  ]
+}
