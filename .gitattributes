@@ -11,5 +11,7 @@
 /Makefile export-ignore
 /compose.yaml export-ignore
 /deptrac.yaml export-ignore
+/ecs.php export-ignore
+/phpstan.dist.neon export-ignore
 /infection.json5 export-ignore
 /phpunit.xml.dist export-ignore
