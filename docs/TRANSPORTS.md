@@ -22,8 +22,8 @@ queues before the producers send messages that must arrive.
 ### Config classes
 
 ```php
-use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
-use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
+use Freyr\MessageBroker\Adapter\Amqp\AmqpPublishConfig;
+use Freyr\MessageBroker\Adapter\Amqp\AmqpQueueConfig;
 
 $publish = new AmqpPublishConfig(exchange: 'orders', publisherConfirms: true);
 $queue = new AmqpQueueConfig(queue: 'orders_q', prefetch: 32);
@@ -134,12 +134,12 @@ period (default 7 days), until the row is published; only
 `--drop-unpublished` drops it.
 
 ```php
-use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Outbox\Relay;
-use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
-use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
+use Freyr\MessageBroker\Adapter\Amqp\AmqpMessagePublisher;
+use Freyr\MessageBroker\Adapter\Amqp\AmqpPublishConfig;
 
 // Each worker owns its own PDO connection and its own dedicated AMQPChannel.
 $worker = new Relay(

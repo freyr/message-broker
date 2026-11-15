@@ -8,6 +8,16 @@ Messages are JSON (`JsonWireFormat`, `JsonDeserializer`). Encoding happens at **
 
 Design spec and research notes live in the vault: `~/Vaults/Freyr/message-broker/`.
 
+## Layout
+
+Three folders, three PSR-4 roots (the package is one Composer package for now; a repo split is planned):
+
+- `src/broker/` is the core, namespace `Freyr\MessageBroker\`. Ports, relay loop, delivery processor, console commands, wire format, retry. No `PDO`, no `PhpAmqpLib`, no adapter class in its code, and no `{@see}` to an adapter class in its docblocks.
+- `src/adapter/postgresql/` is the PostgreSQL adapter, flat namespace `Freyr\MessageBroker\Adapter\PostgreSql\` (stores, retention, schema installer, `PdoTransaction`).
+- `src/adapter/amqp/` is the AMQP adapter, flat namespace `Freyr\MessageBroker\Adapter\Amqp\` (consumer, publisher, wait queue, configs).
+
+An adapter imports the core and its own package only, never the other adapter. Tests follow the same split: `tests/broker/` (no database, no broker; also the shared fixtures), `tests/adapter/postgresql/` (needs PostgreSQL) and `tests/adapter/amqp/` (needs RabbitMQ and PostgreSQL), run as the PHPUnit suites `broker`, `postgresql` and `amqp`. A test of one adapter never imports a test class of the other; the shared database set-up is the trait `Tests\Fixtures\PostgreSqlTestSupport`. The upgrade table from 0.6.x is in `UPGRADE.md`.
+
 ## Connection pooling
 
 No component holds a session-scoped lock. The relay and the consumer use only transaction-scoped locks, so every pool mode works, including a transaction-mode pooler. See `docs/PRODUCTION.md` → *Connection pooling*.
@@ -30,6 +40,6 @@ The image builds on PHP 8.4 by default. To run on another version, rebuild with 
 
 Infection measures the quality of the tests; pcov (in the Docker image) collects the coverage. `make infection` runs the full suite on all CPU cores (about 1 minute locally); reports go to `var/infection/` (`infection.html` lists each escaped mutant). The thresholds are in `infection.json5` (`minMsi`, `minCoveredMsi`): 94% (measured 95.7%). Raise them when the tests improve; never lower them.
 
-CI runs Infection on the changed lines of `src/` on each pull request (part of `ci-gate`), and the full suite on `main`. A pull request whose changed lines score below the threshold fails: add or tighten the tests that the escaped mutants show.
+CI runs Infection on the changed lines of `src/broker/` and `src/adapter/` on each pull request (part of `ci-gate`), and the full suite on `main`. A pull request whose changed lines score below the threshold fails: add or tighten the tests that the escaped mutants show.
 
-Parallel workers are isolated. Infection sets `TEST_TOKEN` for each worker; `FunctionalTestCase` then uses the database `<name>_t<token>` (created on first use) and appends `_t<token>` to queue and exchange names. Pass every AMQP queue or exchange name of a functional test through `self::isolated()`.
+Parallel workers are isolated. Infection sets `TEST_TOKEN` for each worker; the functional base classes (`FunctionalTestCase`, `AmqpFunctionalTestCase`, both use `PostgreSqlTestSupport`) then use the database `<name>_t<token>` (created on first use) and appends `_t<token>` to queue and exchange names. Pass every AMQP queue or exchange name of a functional test through `self::isolated()`.

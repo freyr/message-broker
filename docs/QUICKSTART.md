@@ -47,7 +47,7 @@ encoded throws inside your transaction — nothing commits.
 
 ```php
 use Freyr\MessageBroker\Outbox\OutboxProducer;
-use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 
 $pdo = new PDO($dsn, $user, $password, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
@@ -90,8 +90,8 @@ state, so nothing else may publish on the same channel.
 
 ```php
 use Freyr\MessageBroker\Outbox\Relay;
-use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
-use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
+use Freyr\MessageBroker\Adapter\Amqp\AmqpMessagePublisher;
+use Freyr\MessageBroker\Adapter\Amqp\AmqpPublishConfig;
 
 $relay = new Relay(
     outbox: $outbox,
@@ -118,7 +118,7 @@ and drop the expired ones:
 
 ```php
 use Freyr\MessageBroker\Console\OutboxMaintainCommand;
-use Freyr\MessageBroker\Outbox\PostgreSqlOutboxRetention;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxRetention;
 
 $application->add(new OutboxMaintainCommand(new PostgreSqlOutboxRetention($pdo)));
 ```
@@ -142,15 +142,15 @@ budget is exhausted.
 ```php
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
-use Freyr\MessageBroker\DeadLetter\PostgreSqlDeadLetterStore;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
-use Freyr\MessageBroker\Storage\PdoTransaction;
-use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
-use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
-use Freyr\MessageBroker\Transport\PostgreSqlDeduplicationStore;
+use Freyr\MessageBroker\Adapter\PostgreSql\PdoTransaction;
+use Freyr\MessageBroker\Adapter\Amqp\AmqpConsumer;
+use Freyr\MessageBroker\Adapter\Amqp\AmqpQueueConfig;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeduplicationStore;
 
 $consumer = new AmqpConsumer(
     channel: $channel,

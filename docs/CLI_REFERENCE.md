@@ -8,7 +8,7 @@ application's `Symfony\Component\Console\Application`:
 
 ```php
 use Freyr\MessageBroker\Console\SetupSchemaCommand;
-use Freyr\MessageBroker\Storage\PostgreSqlSchemaInstaller;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlSchemaInstaller;
 
 $application->add(new SetupSchemaCommand(new PostgreSqlSchemaInstaller($pdo)));
 ```

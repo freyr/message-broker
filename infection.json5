@@ -1,7 +1,7 @@
 {
     "$schema": "vendor/infection/infection/resources/schema.json",
     "source": {
-        "directories": ["src"]
+        "directories": ["src/broker", "src/adapter/postgresql", "src/adapter/amqp"]
     },
     // Parallel workers are isolated: each TEST_TOKEN gets its own database and queue names.
     "timeout": 20,

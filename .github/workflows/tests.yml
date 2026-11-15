@@ -157,7 +157,7 @@ jobs:
 
       - run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
 
-      # Pull request: mutate only the changed lines of src/. Thresholds come from infection.json5.
+      # Pull request: mutate only the changed lines of src/broker/ and src/adapter/. Thresholds come from infection.json5.
       - name: Mutation tests (changed lines)
         if: github.event_name == 'pull_request'
         run: >-
