@@ -38,10 +38,9 @@
         "php-amqplib/php-amqplib": "Required for the AMQP transport",
         "phpunit/phpunit": "Required for Freyr\\MessageBroker\\Testing\\*, the test kit of contract test cases and fakes"
     },
-    "extra": {
-        "branch-alias": {
-            "dev-main": "1.0-dev"
-        }
+    "replace": {
+        "freyr/message-broker-postgresql": "self.version",
+        "freyr/message-broker-amqp": "self.version"
     },
     "autoload": {
         "psr-4": {

@@ -54,3 +54,13 @@ Infection measures the quality of the tests; pcov (in the Docker image) collects
 CI runs Infection on the changed lines of `src/broker/` and `src/adapter/` on each pull request (part of `ci-gate`), and the full suite on `main`. A pull request whose changed lines score below the threshold fails: add or tighten the tests that the escaped mutants show.
 
 Parallel workers are isolated. Infection sets `TEST_TOKEN` for each worker; the functional base classes (`FunctionalTestCase`, `AmqpFunctionalTestCase`, both use `Adapter\PostgreSql\Testing\PostgreSqlTestSupport`) then use the database `<name>_t<token>` (created on first use) and appends `_t<token>` to queue and exchange names. Pass every AMQP queue or exchange name of a functional test through `self::isolated()`.
+
+## Package manifests and split rehearsal
+
+`packages/<name>/` (`core`, `postgresql`, `amqp`) holds the files that will be at the ROOT of each future repo: `composer.json`, `phpunit.xml.dist` and `infection.json5`. The code and the tests stay where they are; in the future repo they are `src/` and `tests/`. The root `composer.json` stays the one package that users install, with `replace` for the two adapter packages and no `branch-alias`.
+
+`make split-rehearsal PACKAGE=<core|postgresql|amqp> [ARGS=--infection]` (script `tools/split-rehearsal.sh`, runs in the `php` service) assembles the three future packages in a temporary folder, installs the chosen one alone through Composer path repositories (no package of this repo comes from Packagist) and runs its tests alone. It fails when a package needs a class of another package that its manifest does not give. CI runs the job `split-rehearsal` for each package (part of `ci-gate`), with `--infection` on `main`.
+
+At each minor release, change `REHEARSAL_VERSION` in `tools/split-rehearsal.sh` and the `^0.x` constraints between the packages in `packages/*/composer.json` together.
+
+Each package measures its Infection score alone, with its own tests: the thresholds in `packages/*/infection.json5` are the measured values rounded down (core 92, postgresql 94, amqp 98). Raise them when the tests improve; never lower them. The root `infection.json5` (94) stays the gate for the whole code.

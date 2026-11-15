@@ -1,0 +1,15 @@
+# Files that are not part of the installed package (composer archive / GitHub zip).
+# The test kit in src/ stays shipped.
+/.github/ export-ignore
+/docs/ export-ignore
+/packages/ export-ignore
+/tests/ export-ignore
+/tools/ export-ignore
+/.gitattributes export-ignore
+/CLAUDE.md export-ignore
+/Dockerfile export-ignore
+/Makefile export-ignore
+/compose.yaml export-ignore
+/deptrac.yaml export-ignore
+/infection.json5 export-ignore
+/phpunit.xml.dist export-ignore

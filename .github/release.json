@@ -4,7 +4,7 @@
       "name": "message-broker",
       "path": ".",
       "tag": "v{version}",
-      "ignore": ["tests/**", "*.md", "docs/**", ".idea/**"],
+      "ignore": ["tests/**", "*.md", "docs/**", ".idea/**", "packages/**", "tools/**"],
       "initial": "0.5.0"
     }
   ]
