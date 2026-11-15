@@ -42,17 +42,19 @@ exchange (transport-native delay), rather than an in-process sleep:
 
 ```php
 use Freyr\MessageBroker\Retry\Backoff;
-use Freyr\MessageBroker\Transport\Amqp\AmqpRetryPolicy;
+use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
 
-$retryPolicy = new AmqpRetryPolicy(
+$retryPolicy = new ExponentialRetryPolicy(
     maxAttempts: 5,
     backoff: Backoff::exponential(initialDelayMs: 1_000, maxDelayMs: 300_000),
 );
 ```
 
-`AmqpRetryPolicy::decide()` returns `retry` (republish to the TTL wait queue,
-`x-attempt` incremented) while `$attempt < maxAttempts`, otherwise
-`deadLetter`.
+`ExponentialRetryPolicy::decide()` returns `retry` (republish to the TTL wait
+queue, `x-attempt` incremented) while `$attempt < maxAttempts`, otherwise
+`deadLetter`. Any class that implements `Freyr\MessageBroker\Retry\RetryPolicy`
+(`decide(int $attempt, Throwable $error, IncomingMessage $message)`) replaces
+it; the message parameter lets a policy decide per message name.
 
 The consumer puts its channel in publisher-confirm mode at the first retry. It
 acks the original delivery only after the broker confirms the republish. A

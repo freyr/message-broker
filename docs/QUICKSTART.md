@@ -142,28 +142,35 @@ budget is exhausted.
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
+use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Retry\Backoff;
+use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
+use Freyr\MessageBroker\Storage\PdoTransaction;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
-use Freyr\MessageBroker\Transport\Amqp\AmqpRetryPolicy;
 use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
 
 $consumer = new AmqpConsumer(
     channel: $channel,
     queue: new AmqpQueueConfig('orders_q'),
-    deserializer: new JsonDeserializer(),
-    dispatcher: new CallableDispatcher(static function (IncomingMessage $m): void {
-        // your handler — denormalize $m->payload and act
-    }),
-    pdo: $pdo,
-    deduplication: new PdoDeduplicationStore($pdo, new PostgreSqlPlatform()),
-    retryPolicy: new AmqpRetryPolicy(maxAttempts: 5, backoff: Backoff::exponential(initialDelayMs: 1_000, maxDelayMs: 300_000)),
-    deadLetters: new PdoDeadLetterStore($pdo, new PostgreSqlPlatform()),
-    name: 'orders_consumer',
+    processor: new DeliveryProcessor(
+        deserializer: new JsonDeserializer(),
+        dispatcher: new CallableDispatcher(static function (IncomingMessage $m): void {
+            // your handler — denormalize $m->payload and act
+        }),
+        transaction: new PdoTransaction($pdo), // the SAME connection as the dedup store and the handler
+        deduplication: new PdoDeduplicationStore($pdo, new PostgreSqlPlatform()),
+        retryPolicy: new ExponentialRetryPolicy(maxAttempts: 5, backoff: Backoff::exponential(initialDelayMs: 1_000, maxDelayMs: 300_000)),
+        deadLetters: new PdoDeadLetterStore($pdo, new PostgreSqlPlatform()),
+        name: 'orders_consumer',
+    ),
 );
 $consumer->run(); // blocks
 ```
+
+`DeliveryProcessor` holds the transport-neutral exactly-once algorithm and
+imports no AMQP class. `AmqpConsumer` is the AMQP loop around it.
 
 `name` scopes deduplication — the same message id delivered to two
 differently-named consumers is processed by both; delivered twice to the

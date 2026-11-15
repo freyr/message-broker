@@ -9,8 +9,14 @@ All notable changes to this project will be documented in this file.
 - **Breaking:** `message-broker:outbox:maintain` and `OutboxPartitionManager::purge()` no longer drop an expired partition that holds unpublished rows (`published_at IS NULL`). The partition is kept and reported, and the command exits with code 1; it is dropped on a later run once its rows are published. A table that the run detached and then found to hold unpublished rows, an expired detached table, and a partition with a pending detach are attached again, so the relay can publish their rows
 - `PartitionPurgeReport` has a new `kept` list (partition name to unpublished row count), `unpublishedRowsKept()` and `hasKept()`
 
+- **Breaking:** `AmqpConsumer` is split into a transport-neutral `Consumer\DeliveryProcessor` (the exactly-once algorithm, no AMQP import) and a thin AMQP loop. The constructor of `AmqpConsumer` changes from 13 parameters to `(AMQPChannel $channel, AmqpQueueConfig $queue, DeliveryProcessor $processor, int $confirmTimeoutSec = 5)`. Pass `deserializer`, `dispatcher`, `deduplication`, `retryPolicy`, `deadLetters`, `name`, `errorHandler`, `logger` and `events` to `DeliveryProcessor`, and give it `new PdoTransaction($pdo)` as `transaction` in place of the `pdo` parameter
+- **Breaking:** `Transport\Amqp\AmqpRetryPolicy` is renamed to `Retry\ExponentialRetryPolicy` (same constructor and behavior, no alias). It implements the new interface `Retry\RetryPolicy`, whose `decide(int $attempt, Throwable $error, IncomingMessage $message)` takes the message as a third parameter
+- The retry republish to the TTL wait queue moves from `AmqpConsumer` to `Transport\Amqp\WaitQueuePublisher`; the behavior is unchanged
+
 ### Added
 
+- `Storage\Transaction` and `Storage\PdoTransaction`: the database transaction of one delivery
+- `Consumer\Delivery` (a transport-neutral delivery, with `deliveryCount`), `Consumer\DeliveryControl` and `Transport\Amqp\AmqpDeliveryControl`
 - Option `--drop-unpublished` of `message-broker:outbox:maintain` and parameter `$dropUnpublished` of `purge()`: the previous behavior, a hard age limit that drops the partition with its unpublished rows
 
 ## [0.5.0] - 2026-11-15

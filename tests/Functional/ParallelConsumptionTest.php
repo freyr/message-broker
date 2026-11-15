@@ -5,21 +5,23 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
+use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Outbox\PdoOutboxStore;
+use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
+use Freyr\MessageBroker\Storage\PdoTransaction;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingEvents;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpRelay;
-use Freyr\MessageBroker\Transport\Amqp\AmqpRetryPolicy;
 use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
@@ -119,16 +121,18 @@ final class ParallelConsumptionTest extends FunctionalTestCase
         return new AmqpConsumer(
             channel: $this->workerChannel,
             queue: new AmqpQueueConfig(queue: self::isolated(self::QUEUE), prefetch: 1),
-            deserializer: new JsonDeserializer(),
-            dispatcher: new CallableDispatcher(function (IncomingMessage $incoming): void {
-                $this->dispatched[] = $incoming;
-            }),
-            pdo: self::$pdo,
-            deduplication: new PdoDeduplicationStore(self::$pdo, static::platform()),
-            retryPolicy: new AmqpRetryPolicy(),
-            deadLetters: new PdoDeadLetterStore(self::$pdo, static::platform()),
-            name: 'parallel', // ONE dedup scope shared by both workers
-            events: $events,
+            processor: new DeliveryProcessor(
+                deserializer: new JsonDeserializer(),
+                dispatcher: new CallableDispatcher(function (IncomingMessage $incoming): void {
+                    $this->dispatched[] = $incoming;
+                }),
+                transaction: new PdoTransaction(self::$pdo),
+                deduplication: new PdoDeduplicationStore(self::$pdo, static::platform()),
+                retryPolicy: new ExponentialRetryPolicy(),
+                deadLetters: new PdoDeadLetterStore(self::$pdo, static::platform()),
+                name: 'parallel', // ONE dedup scope shared by both workers
+                events: $events,
+            ),
         );
     }
 

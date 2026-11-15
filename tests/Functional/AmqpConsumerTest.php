@@ -5,16 +5,18 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
+use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
 use Freyr\MessageBroker\Retry\Backoff;
+use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
+use Freyr\MessageBroker\Storage\PdoTransaction;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingLogger;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
-use Freyr\MessageBroker\Transport\Amqp\AmqpRetryPolicy;
 use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
@@ -84,17 +86,19 @@ final class AmqpConsumerTest extends FunctionalTestCase
         return new AmqpConsumer(
             channel: $this->channel,
             queue: new AmqpQueueConfig(self::isolated(self::QUEUE), prefetch: 8),
-            deserializer: new JsonDeserializer(),
-            dispatcher: new CallableDispatcher($dispatch),
-            pdo: $pdo,
-            deduplication: new PdoDeduplicationStore($pdo, $platform),
-            retryPolicy: new AmqpRetryPolicy(
-                maxAttempts: $maxAttempts,
-                backoff: Backoff::exponential(initialDelayMs: 100, maxDelayMs: 100),
+            processor: new DeliveryProcessor(
+                deserializer: new JsonDeserializer(),
+                dispatcher: new CallableDispatcher($dispatch),
+                transaction: new PdoTransaction($pdo),
+                deduplication: new PdoDeduplicationStore($pdo, $platform),
+                retryPolicy: new ExponentialRetryPolicy(
+                    maxAttempts: $maxAttempts,
+                    backoff: Backoff::exponential(initialDelayMs: 100, maxDelayMs: 100),
+                ),
+                deadLetters: new PdoDeadLetterStore($pdo, $platform),
+                name: 'orders_consumer',
+                logger: $logger ?? new RecordingLogger(),
             ),
-            deadLetters: new PdoDeadLetterStore($pdo, $platform),
-            name: 'orders_consumer',
-            logger: $logger ?? new RecordingLogger(),
         );
     }
 
