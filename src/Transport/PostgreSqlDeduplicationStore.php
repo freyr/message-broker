@@ -5,32 +5,35 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Transport;
 
 use Freyr\MessageBroker\Consumer\IncomingMessage;
-use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Time\EpochMillis;
 use PDO;
 use PDOStatement;
 
 /**
- * Insert-or-ignore deduplication keyed by (message_id, consumer) — the default
+ * PostgreSQL insert-or-ignore deduplication keyed by (message_id, consumer) — the default
  * DeduplicationStore implementation. Constructed with the consumer's own PDO
  * connection so acquire() joins the consumer's transaction. The insert is
  * prepared once per store (one parse per connection, not per message).
  */
-final class PdoDeduplicationStore implements DeduplicationStore
+final class PostgreSqlDeduplicationStore implements DeduplicationStore
 {
     private ?PDOStatement $insert = null;
 
     /** @param positive-int $deleteChunkSize rows removed per cleanup statement */
     public function __construct(
         private readonly PDO $pdo,
-        private readonly Platform $platform,
         private readonly int $deleteChunkSize = 10_000,
     ) {}
 
     /** @return bool false = already processed (duplicate), skip dispatch */
     public function acquire(IncomingMessage $message, string $consumer): bool
     {
-        $this->insert ??= $this->pdo->prepare($this->platform->insertDeduplicationSql());
+        $this->insert ??= $this->pdo->prepare(<<<'SQL'
+            INSERT INTO message_deduplication (message_id, consumer, message_name, created_at)
+            VALUES (:message_id, :consumer, :message_name, :created_at)
+            ON CONFLICT (message_id, consumer) DO NOTHING
+            SQL);
+        // rowCount() = 0 on conflict: the duplicate signal.
         $this->insert->execute([
             'message_id' => $message->messageId,
             'consumer' => $consumer,

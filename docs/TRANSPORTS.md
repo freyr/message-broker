@@ -131,16 +131,15 @@ period (default 7 days), until the row is published; only
 `--drop-unpublished` drops it.
 
 ```php
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
-use Freyr\MessageBroker\Storage\PostgreSqlPlatform;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpRelay;
 
 // Each worker owns its own PDO connection and its own dedicated AMQPChannel.
 $worker = new AmqpRelay(
-    outbox: new PdoOutboxStore($workerPdo, new PostgreSqlPlatform()),
+    outbox: new PostgreSqlOutboxStore($workerPdo),
     amqp: $workerChannel,
     publish: new AmqpPublishConfig(exchange: 'orders'),
     contentType: JsonWireFormat::CONTENT_TYPE,

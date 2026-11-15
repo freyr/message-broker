@@ -12,10 +12,10 @@ use RuntimeException;
 use Symfony\Component\Clock\Clock;
 
 /**
- * Partitions and retention of the outbox_messages table. The relay never
- * deletes rows; they leave the table here, one daily partition at a time.
+ * PostgreSQL implementation of OutboxRetention: partitions and retention of
+ * the outbox_messages table. The relay never deletes rows; they leave the table here, one daily partition at a time.
  *
- *  - ensurePartitions() creates one range partition per UTC day
+ *  - ensureCapacity() creates one range partition per UTC day
  *    (outbox_messages_pYYYYMMDD, [day, day + 1)) from today to today + N days.
  *    It creates a plain table and ATTACHes it, which takes only a SHARE UPDATE
  *    EXCLUSIVE lock on outbox_messages, so producers and relays never wait.
@@ -45,7 +45,7 @@ use Symfony\Component\Clock\Clock;
  * earlier run detached but did not drop, and a partition with a pending
  * detach (it is finalized first, because only a fully detached table can be
  * attached again). ATTACH takes only SHARE UPDATE EXCLUSIVE on
- * outbox_messages, as ensurePartitions() does, so producers and relays do not
+ * outbox_messages, as ensureCapacity() does, so producers and relays do not
  * wait. DETACH ... CONCURRENTLY leaves a CHECK constraint equal to the
  * partition constraint on the table; ATTACH uses it to skip the validation
  * scan, and a later detach of the same table works with it in place. If the
@@ -55,7 +55,7 @@ use Symfony\Component\Clock\Clock;
  * There is no DEFAULT partition (DETACH ... CONCURRENTLY does not allow one):
  * an insert for a day with no partition fails. Create partitions ahead of time.
  */
-final readonly class OutboxPartitionManager
+final readonly class PostgreSqlOutboxRetention implements OutboxRetention
 {
     public const string TABLE = 'outbox_messages';
     private const string DAILY_PREFIX = 'outbox_messages_p';
@@ -67,6 +67,8 @@ final readonly class OutboxPartitionManager
     /**
      * DDL that creates and attaches the daily partitions from $today to
      * $today + $daysAhead (inclusive). For a schema with no partition yet.
+     * $today (default: the current UTC day) is a test parameter of this class,
+     * not part of the OutboxRetention port.
      *
      * @return list<string>
      */
@@ -88,9 +90,12 @@ final readonly class OutboxPartitionManager
      * A partition that is already attached (made by this class or by
      * pg_partman) is skipped.
      *
+     * $today (default: the current UTC day) is a test parameter of this class,
+     * not part of the OutboxRetention port.
+     *
      * @return list<string> the daily partition names that now exist for that range
      */
-    public function ensurePartitions(int $daysAhead = 3, ?DateTimeImmutable $today = null): array
+    public function ensureCapacity(int $daysAhead, ?DateTimeImmutable $today = null): array
     {
         self::assertNotNegative('daysAhead', $daysAhead);
         $day = self::utcMidnight($today);
@@ -117,21 +122,22 @@ final readonly class OutboxPartitionManager
     /**
      * Drop every daily partition that lies wholly before the cutoff (today
      * 00:00 UTC minus $retentionDays). A partition that holds unpublished rows
-     * is kept and reported in PartitionPurgeReport::$kept, unless
+     * is kept and reported in RetentionReport::$kept, unless
      * $dropUnpublished is true; then it is dropped with them and reported in
-     * PartitionPurgeReport::$unpublished. Also finishes a detach that an
+     * RetentionReport::$unpublished. Also finishes a detach that an
      * earlier run did not complete, and drops an expired daily table that an
      * earlier run detached but did not drop (the same rule applies to both).
      *
      * Must run outside a transaction: DETACH ... CONCURRENTLY cannot run in
-     * a transaction block.
+     * a transaction block. $today (default: the current UTC day) is a test
+     * parameter of this class, not part of the OutboxRetention port.
      */
     public function purge(
         int $retentionDays,
         bool $dryRun = false,
-        ?DateTimeImmutable $today = null,
         bool $dropUnpublished = false,
-    ): PartitionPurgeReport {
+        ?DateTimeImmutable $today = null,
+    ): RetentionReport {
         if ($retentionDays < 1) {
             throw new \InvalidArgumentException("retentionDays must be 1 or more, got {$retentionDays}");
         }
@@ -184,7 +190,7 @@ final readonly class OutboxPartitionManager
             $dropped[] = $name;
         }
 
-        return new PartitionPurgeReport($cutoff, $dropped, $unpublished, $kept);
+        return new RetentionReport($cutoff, $dropped, $unpublished, $kept);
     }
 
     private function attach(string $name, DateTimeImmutable $from): void

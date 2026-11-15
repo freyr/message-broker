@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Outbox\OutboxProducer;
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
@@ -69,7 +69,7 @@ final class AmqpRelayTest extends FunctionalTestCase
         $this->channel->queue_purge(self::isolated(self::QUEUE));
 
         $this->producer = new OutboxProducer(
-            new PdoOutboxStore(self::$pdo, static::platform()),
+            new PostgreSqlOutboxStore(self::$pdo),
             new JsonWireFormat(),
             lane: self::LANE,
         );
@@ -89,7 +89,7 @@ final class AmqpRelayTest extends FunctionalTestCase
         ?AMQPChannel $channel = null,
     ): AmqpRelay {
         return new AmqpRelay(
-            outbox: new PdoOutboxStore(self::newConnection(), static::platform()),
+            outbox: new PostgreSqlOutboxStore(self::newConnection()),
             amqp: $channel ?? self::$amqp->channel(),
             publish: new AmqpPublishConfig(exchange: $exchange ?? self::isolated(self::EXCHANGE)),
             contentType: JsonWireFormat::CONTENT_TYPE,

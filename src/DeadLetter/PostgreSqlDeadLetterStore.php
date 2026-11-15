@@ -4,21 +4,20 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\DeadLetter;
 
-use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Time\EpochMillis;
 use PDO;
+use PDOStatement;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * PDO-backed dead-letter table access — the default DeadLetterStore implementation.
+ * PostgreSQL dead-letter table access (plain PDO) — the default DeadLetterStore implementation.
  */
-final readonly class PdoDeadLetterStore implements DeadLetterStore
+final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
 {
     private const string DATETIME_FORMAT = 'Y-m-d H:i:s.v';
 
     public function __construct(
         private PDO $pdo,
-        private Platform $platform,
     ) {}
 
     public function store(DeadLetter $deadLetter): void
@@ -35,7 +34,7 @@ final readonly class PdoDeadLetterStore implements DeadLetterStore
         $statement->bindValue('source', $deadLetter->source);
         $statement->bindValue('message_id', $deadLetter->messageId);
         $statement->bindValue('message_name', $deadLetter->messageName);
-        $this->platform->bindBody($statement, 'body', $deadLetter->body);
+        self::bindBody($statement, 'body', $deadLetter->body);
         $statement->bindValue('headers', json_encode($deadLetter->headers, JSON_THROW_ON_ERROR));
         $statement->bindValue('error_class', $deadLetter->errorClass);
         $statement->bindValue('error_message', $deadLetter->errorMessage);
@@ -179,6 +178,29 @@ final readonly class PdoDeadLetterStore implements DeadLetterStore
         return $statement->rowCount();
     }
 
+    private static function bindBody(PDOStatement $statement, string $name, string $body): void
+    {
+        // BYTEA requires a binary bind; PARAM_LOB makes pdo_pgsql send binary
+        // format. JSON text bound this way round-trips through BYTEA unchanged.
+        $statement->bindValue($name, $body, PDO::PARAM_LOB);
+    }
+
+    private static function readBody(mixed $value): string
+    {
+        // pdo_pgsql returns BYTEA as a stream resource.
+        if (is_resource($value)) {
+            $contents = stream_get_contents($value);
+
+            return $contents === false ? '' : $contents;
+        }
+
+        if (!is_string($value)) {
+            throw new \RuntimeException('Body column is not a string or stream');
+        }
+
+        return $value;
+    }
+
     /** @param array<string, mixed> $row */
     private function hydrate(array $row): DeadLetter
     {
@@ -192,7 +214,7 @@ final readonly class PdoDeadLetterStore implements DeadLetterStore
             source: self::string($row, 'source'),
             messageId: self::string($row, 'message_id'),
             messageName: self::string($row, 'message_name'),
-            body: $this->platform->readBody($row['body'] ?? null),
+            body: self::readBody($row['body'] ?? null),
             headers: $headers,
             errorClass: self::string($row, 'error_class'),
             errorMessage: self::string($row, 'error_message'),

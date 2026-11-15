@@ -11,11 +11,10 @@ declare(strict_types=1);
 require dirname(__DIR__, 3).'/vendor/autoload.php';
 
 use Freyr\MessageBroker\Outbox\ClaimOutcome;
-use Freyr\MessageBroker\Outbox\OutboxPartitionManager;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
-use Freyr\MessageBroker\Storage\PostgreSqlPlatform;
+use Freyr\MessageBroker\Storage\PostgreSqlSchemaInstaller;
 use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
@@ -29,11 +28,7 @@ $pdo = static fn (): PDO => new PDO(getenv('POSTGRES_DSN'), getenv('POSTGRES_USE
 $amqp = static fn (): AMQPStreamConnection => new AMQPStreamConnection(getenv('AMQP_HOST') ?: 'rabbitmq', 5672, 'guest', 'guest');
 
 $db = $pdo();
-$platform = new PostgreSqlPlatform();
-foreach ($platform->schemaSql() as $ddl) {
-    $db->exec($ddl);
-}
-(new OutboxPartitionManager($db))->ensurePartitions(1);
+(new PostgreSqlSchemaInstaller($db))->install(1);
 $db->exec('TRUNCATE outbox_messages');
 $body = json_encode([
     'orderId' => str_repeat('x', 36),
@@ -77,7 +72,7 @@ for ($w = 0; $w < $workers; ++$w) {
     $pid = pcntl_fork();
     if ($pid === 0) {
         $wpdo = $pdo();
-        $store = new PdoOutboxStore($wpdo, $platform);
+        $store = new PostgreSqlOutboxStore($wpdo);
         $conn = $mode === 'db-only' ? null : $amqp();
         $publisher = $conn === null ? null : new AmqpMessagePublisher($conn->channel(), new AmqpPublishConfig('mb_bench'), JsonWireFormat::CONTENT_TYPE);
         $publishNs = 0;

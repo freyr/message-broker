@@ -5,18 +5,18 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
-use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
+use Freyr\MessageBroker\DeadLetter\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\Time\EpochMillis;
 use RuntimeException;
 
 final class DeadLetterStoreTest extends FunctionalTestCase
 {
-    private PdoDeadLetterStore $store;
+    private PostgreSqlDeadLetterStore $store;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->store = new PdoDeadLetterStore(self::$pdo, static::platform());
+        $this->store = new PostgreSqlDeadLetterStore(self::$pdo);
     }
 
     public function testFromFailureCapturesErrorChainAndTimestamps(): void
@@ -103,7 +103,7 @@ final class DeadLetterStoreTest extends FunctionalTestCase
 
     public function testCountAndOffsetAndFilteredPurge(): void
     {
-        $store = new PdoDeadLetterStore(self::$pdo, static::platform());
+        $store = new PostgreSqlDeadLetterStore(self::$pdo);
         foreach (['order.placed', 'order.placed', 'order.cancelled'] as $i => $name) {
             $store->store(DeadLetter::fromFailure(
                 source: 'orders_q',

@@ -4,30 +4,34 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Outbox;
 
-use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Time\EpochMillis;
 use PDO;
+use PDOStatement;
 use Throwable;
 
 /**
- * PDO-backed outbox table access — the default OutboxStore implementation.
+ * PostgreSQL outbox table access (plain PDO) — the default OutboxStore implementation.
  * Constructed with the application's connection on the produce side
  * (transaction joining) and with a dedicated connection inside relay processes.
  */
-final readonly class PdoOutboxStore implements OutboxStore
+final readonly class PostgreSqlOutboxStore implements OutboxStore
 {
     public function __construct(
         private PDO $pdo,
-        private Platform $platform,
     ) {}
 
     public function insert(OutboxRecord $record): void
     {
-        $statement = $this->pdo->prepare($this->platform->insertOutboxSql());
+        $statement = $this->pdo->prepare(<<<'SQL'
+            INSERT INTO outbox_messages
+                (id, lane, message_name, body, headers, created_at, available_at, attempts)
+            VALUES
+                (:id, :lane, :message_name, :body, :headers, :created_at, :available_at, 0)
+            SQL);
         $statement->bindValue('id', $record->id);
         $statement->bindValue('lane', $record->lane);
         $statement->bindValue('message_name', $record->messageName);
-        $this->platform->bindBody($statement, 'body', $record->body); // final wire bytes
+        self::bindBody($statement, 'body', $record->body); // final wire bytes
         $statement->bindValue('headers', json_encode($record->headers, JSON_THROW_ON_ERROR));
         $statement->bindValue('created_at', self::timestamp($record->createdAt));
         $statement->bindValue('available_at', self::timestamp($record->availableAt ?? $record->createdAt));
@@ -39,7 +43,18 @@ final readonly class PdoOutboxStore implements OutboxStore
         $this->pdo->beginTransaction();
 
         try {
-            $statement = $this->pdo->prepare($this->platform->selectClaimBatchSql());
+            // Oldest-due first is a fairness bias, not an ordering contract. The
+            // partial index idx_outbox_pending serves this query; published rows
+            // are outside it. FOR UPDATE SKIP LOCKED: concurrent relay workers
+            // never block each other.
+            $statement = $this->pdo->prepare(<<<'SQL'
+                SELECT id, lane, message_name, body, headers, created_at, available_at, attempts
+                FROM outbox_messages
+                WHERE lane = :lane AND published_at IS NULL AND available_at <= :now
+                ORDER BY available_at
+                LIMIT :limit
+                FOR UPDATE SKIP LOCKED
+                SQL);
             $statement->bindValue('lane', $lane);
             $statement->bindValue('now', self::timestamp(EpochMillis::now()));
             $statement->bindValue('limit', $limit, PDO::PARAM_INT);
@@ -144,6 +159,29 @@ final readonly class PdoOutboxStore implements OutboxStore
         return '{'.implode(',', array_map(static fn (string $v): string => '"'.$v.'"', $values)).'}';
     }
 
+    private static function bindBody(PDOStatement $statement, string $name, string $body): void
+    {
+        // BYTEA requires a binary bind; PARAM_LOB makes pdo_pgsql send binary
+        // format. JSON text bound this way round-trips through BYTEA unchanged.
+        $statement->bindValue($name, $body, PDO::PARAM_LOB);
+    }
+
+    private static function readBody(mixed $value): string
+    {
+        // pdo_pgsql returns BYTEA as a stream resource.
+        if (is_resource($value)) {
+            $contents = stream_get_contents($value);
+
+            return $contents === false ? '' : $contents;
+        }
+
+        if (!is_string($value)) {
+            throw new \RuntimeException('Body column is not a string or stream');
+        }
+
+        return $value;
+    }
+
     private static function timestamp(int $epochMilliseconds): string
     {
         return EpochMillis::toDateTime($epochMilliseconds)->format('Y-m-d H:i:s.v');
@@ -156,7 +194,7 @@ final readonly class PdoOutboxStore implements OutboxStore
             id: self::stringColumn($row, 'id'),
             lane: self::stringColumn($row, 'lane'),
             messageName: self::stringColumn($row, 'message_name'),
-            body: $this->platform->readBody($row['body'] ?? null),
+            body: self::readBody($row['body'] ?? null),
             headers: self::jsonColumn($row, 'headers'),
             createdAt: self::epochMilliseconds(self::stringColumn($row, 'created_at')),
             attempts: self::intColumn($row, 'attempts'),

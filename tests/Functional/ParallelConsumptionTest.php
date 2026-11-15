@@ -6,11 +6,11 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
-use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
+use Freyr\MessageBroker\DeadLetter\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
@@ -20,7 +20,7 @@ use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpRelay;
 use Freyr\MessageBroker\Transport\Amqp\AmqpRetryPolicy;
-use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
+use Freyr\MessageBroker\Transport\PostgreSqlDeduplicationStore;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 
@@ -82,7 +82,7 @@ final class ParallelConsumptionTest extends FunctionalTestCase
         $this->channel->queue_bind(self::isolated(self::QUEUE), self::isolated(self::EXCHANGE), 'order.*');
         $this->channel->queue_purge(self::isolated(self::QUEUE));
 
-        $this->outbox = new PdoOutboxStore(self::$pdo, static::platform());
+        $this->outbox = new PostgreSqlOutboxStore(self::$pdo);
         $this->producer = new OutboxProducer($this->outbox, new JsonWireFormat(), lane: self::LANE);
         $this->relay = new AmqpRelay(
             outbox: $this->outbox,
@@ -124,9 +124,9 @@ final class ParallelConsumptionTest extends FunctionalTestCase
                 $this->dispatched[] = $incoming;
             }),
             pdo: self::$pdo,
-            deduplication: new PdoDeduplicationStore(self::$pdo, static::platform()),
+            deduplication: new PostgreSqlDeduplicationStore(self::$pdo),
             retryPolicy: new AmqpRetryPolicy(),
-            deadLetters: new PdoDeadLetterStore(self::$pdo, static::platform()),
+            deadLetters: new PostgreSqlDeadLetterStore(self::$pdo),
             name: 'parallel', // ONE dedup scope shared by both workers
             events: $events,
         );

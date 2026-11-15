@@ -7,7 +7,7 @@ namespace Freyr\MessageBroker\Tests\Functional;
 use Freyr\MessageBroker\Outbox\ClaimOutcome;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Time\EpochMillis;
@@ -22,13 +22,13 @@ final class OutboxClaimTest extends FunctionalTestCase
 {
     private const string LANE = 'claims';
 
-    private PdoOutboxStore $store;
+    private PostgreSqlOutboxStore $store;
     private OutboxProducer $producer;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->store = new PdoOutboxStore(self::$pdo, static::platform());
+        $this->store = new PostgreSqlOutboxStore(self::$pdo);
         $this->producer = new OutboxProducer($this->store, new JsonWireFormat(), lane: self::LANE);
     }
 
@@ -42,7 +42,14 @@ final class OutboxClaimTest extends FunctionalTestCase
     private function rivalClaim(PDO $rival, int $limit): array
     {
         $rival->beginTransaction();
-        $statement = $rival->prepare(static::platform()->selectClaimBatchSql());
+        $statement = $rival->prepare(<<<'SQL'
+            SELECT id, lane, message_name, body, headers, created_at, available_at, attempts
+            FROM outbox_messages
+            WHERE lane = :lane AND published_at IS NULL AND available_at <= :now
+            ORDER BY available_at
+            LIMIT :limit
+            FOR UPDATE SKIP LOCKED
+            SQL);
         $statement->bindValue('lane', self::LANE);
         $statement->bindValue('now', EpochMillis::toDateTime(EpochMillis::now())->format('Y-m-d H:i:s.v'));
         $statement->bindValue('limit', $limit, PDO::PARAM_INT);
@@ -199,7 +206,7 @@ final class OutboxClaimTest extends FunctionalTestCase
         $inserter = self::newConnection();
         $inserter->exec("SET lock_timeout = '2s'");
         $insertingProducer = new OutboxProducer(
-            new PdoOutboxStore($inserter, static::platform()),
+            new PostgreSqlOutboxStore($inserter),
             new JsonWireFormat(),
             lane: self::LANE,
         );

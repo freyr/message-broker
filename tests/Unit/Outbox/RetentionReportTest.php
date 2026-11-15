@@ -5,14 +5,14 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Unit\Outbox;
 
 use DateTimeImmutable;
-use Freyr\MessageBroker\Outbox\PartitionPurgeReport;
+use Freyr\MessageBroker\Outbox\RetentionReport;
 use PHPUnit\Framework\TestCase;
 
-final class PartitionPurgeReportTest extends TestCase
+final class RetentionReportTest extends TestCase
 {
     public function testCountsDroppedAndKeptRowsSeparately(): void
     {
-        $report = new PartitionPurgeReport(
+        $report = new RetentionReport(
             new DateTimeImmutable('2026-03-03'),
             ['a', 'b'],
             [
@@ -32,7 +32,7 @@ final class PartitionPurgeReportTest extends TestCase
 
     public function testNothingIsKeptByDefault(): void
     {
-        $report = new PartitionPurgeReport(new DateTimeImmutable('2026-03-03'), ['a'], []);
+        $report = new RetentionReport(new DateTimeImmutable('2026-03-03'), ['a'], []);
 
         self::assertSame([], $report->kept);
         self::assertSame(0, $report->unpublishedRowsKept());
