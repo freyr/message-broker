@@ -26,6 +26,7 @@ use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Exception\AMQPTimeoutException;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
+use PHPUnit\Framework\Attributes\RequiresPhpExtension;
 use PHPUnit\Framework\MockObject\Stub;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LogLevel;
@@ -322,6 +323,8 @@ final class AmqpConsumerTest extends TestCase
         self::assertTrue($this->cancelled);
     }
 
+    #[RequiresPhpExtension('pcntl')]
+    #[RequiresPhpExtension('posix')]
     public function testSigtermAndSigintStopTheConsumerGracefully(): void
     {
         foreach ([SIGTERM, SIGINT] as $signal) {

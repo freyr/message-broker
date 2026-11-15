@@ -18,7 +18,7 @@ It runs over **AMQP (RabbitMQ)** so you adopt it within your existing infrastruc
 composer require freyr/message-broker
 ```
 
-Requires PHP ≥ 8.4, `ext-pdo_pgsql`, and PostgreSQL 14+. Install the pieces you use:
+Requires PHP 8.4 or 8.5 (tested in CI on both), `ext-pdo_pgsql`, and PostgreSQL 14+. Install the pieces you use:
 
 | Need | Add |
 |---|---|
