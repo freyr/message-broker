@@ -3,7 +3,7 @@
 # A push to main releases from the PR title (freyr/.github release action).
 # A manual run (Actions → Release → Run workflow, on main) tags the head of
 # main with any version that does not exist yet, for example the first release
-# of a line: gh workflow run release.yml --ref main -f version=0.3.0
+# of a line: gh workflow run release.yml --ref main -f version=0.5.0
 name: Release
 
 on:
