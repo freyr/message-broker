@@ -34,7 +34,7 @@ infection: ## Mutation testing with Infection and pcov (full run, all CPU cores)
 	docker compose run --rm php vendor/bin/infection --threads=max $(ARGS)
 
 bench: ## Relay throughput benchmark; ARGS="<rows> <workers> <batch> [full|db-only|amqp-only]"
-	docker compose run --rm php php tests/Functional/Scripts/amqp-relay-bench.php $(ARGS)
+	docker compose run --rm php php tests/adapter/amqp/Scripts/amqp-relay-bench.php $(ARGS)
 
 bench-consumer: ## Consumer throughput benchmark; ARGS="<messages> <workers> <prefetch> <handler-sleep-ms>"
-	docker compose run --rm php php tests/Functional/Scripts/amqp-consumer-bench.php $(ARGS)
+	docker compose run --rm php php tests/adapter/amqp/Scripts/amqp-consumer-bench.php $(ARGS)

@@ -1,4 +1,6 @@
 parameters:
     level: max
     paths:
-        - src/
+        - src/broker/
+        - src/adapter/postgresql/
+        - src/adapter/amqp/

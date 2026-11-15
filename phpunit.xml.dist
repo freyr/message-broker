@@ -11,17 +11,22 @@
          executionOrder="defects"
          resolveDependencies="true">
     <testsuites>
-        <testsuite name="Unit">
-            <directory>tests/Unit</directory>
+        <testsuite name="broker">
+            <directory>tests/broker</directory>
         </testsuite>
-        <testsuite name="Functional">
-            <directory>tests/Functional</directory>
+        <testsuite name="postgresql">
+            <directory>tests/adapter/postgresql</directory>
+        </testsuite>
+        <testsuite name="amqp">
+            <directory>tests/adapter/amqp</directory>
         </testsuite>
     </testsuites>
 
     <source>
         <include>
-            <directory>src</directory>
+            <directory>src/broker</directory>
+            <directory>src/adapter/postgresql</directory>
+            <directory>src/adapter/amqp</directory>
         </include>
     </source>
 

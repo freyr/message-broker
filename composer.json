@@ -43,12 +43,16 @@
     },
     "autoload": {
         "psr-4": {
-            "Freyr\\MessageBroker\\": "src/"
+            "Freyr\\MessageBroker\\": "src/broker/",
+            "Freyr\\MessageBroker\\Adapter\\PostgreSql\\": "src/adapter/postgresql/",
+            "Freyr\\MessageBroker\\Adapter\\Amqp\\": "src/adapter/amqp/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "Freyr\\MessageBroker\\Tests\\": "tests/"
+            "Freyr\\MessageBroker\\Tests\\": "tests/broker/",
+            "Freyr\\MessageBroker\\Adapter\\PostgreSql\\Tests\\": "tests/adapter/postgresql/",
+            "Freyr\\MessageBroker\\Adapter\\Amqp\\Tests\\": "tests/adapter/amqp/"
         }
     },
     "config": {
