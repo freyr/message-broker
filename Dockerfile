@@ -1,4 +1,5 @@
-FROM php:8.4-cli-alpine
+ARG PHP_VERSION=8.4
+FROM php:${PHP_VERSION}-cli-alpine
 
 COPY --from=mlocati/php-extension-installer /usr/bin/install-php-extensions /usr/local/bin/
 
