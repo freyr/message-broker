@@ -50,8 +50,8 @@ final class AmqpConsumerTest extends FunctionalTestCase
     public static function tearDownAfterClass(): void
     {
         $channel = self::$amqp->channel();
-        $channel->queue_delete(self::QUEUE);
-        $channel->queue_delete(self::QUEUE.'.wait.100');
+        $channel->queue_delete(self::isolated(self::QUEUE));
+        $channel->queue_delete(self::isolated(self::QUEUE).'.wait.100');
         $channel->close();
         self::$amqp->close();
     }
@@ -61,8 +61,8 @@ final class AmqpConsumerTest extends FunctionalTestCase
         parent::setUp();
         $this->dispatched = [];
         $this->channel = self::$amqp->channel();
-        $this->channel->queue_declare(self::QUEUE, false, true, false, false);
-        $this->channel->queue_purge(self::QUEUE);
+        $this->channel->queue_declare(self::isolated(self::QUEUE), false, true, false, false);
+        $this->channel->queue_purge(self::isolated(self::QUEUE));
     }
 
     protected function tearDown(): void
@@ -83,7 +83,7 @@ final class AmqpConsumerTest extends FunctionalTestCase
 
         return new AmqpConsumer(
             channel: $this->channel,
-            queue: new AmqpQueueConfig(self::QUEUE, prefetch: 8),
+            queue: new AmqpQueueConfig(self::isolated(self::QUEUE), prefetch: 8),
             deserializer: new JsonDeserializer(),
             dispatcher: new CallableDispatcher($dispatch),
             pdo: $pdo,
@@ -115,7 +115,7 @@ final class AmqpConsumerTest extends FunctionalTestCase
                 )),
             ]),
             '',
-            self::QUEUE,
+            self::isolated(self::QUEUE),
         );
     }
 
@@ -165,7 +165,7 @@ final class AmqpConsumerTest extends FunctionalTestCase
         // The delivery was never acked: closing the channel returns it to the queue.
         $this->channel->close();
         $this->channel = self::$amqp->channel();
-        [, $ready] = $this->channel->queue_declare(self::QUEUE, true);
+        [, $ready] = $this->channel->queue_declare(self::isolated(self::QUEUE), true);
         self::assertSame(1, $ready);
     }
 
@@ -212,7 +212,7 @@ final class AmqpConsumerTest extends FunctionalTestCase
 
         self::assertCount(0, $this->dispatched);
         self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM dead_letters'));
-        self::assertSame(1, self::fetchInt("SELECT COUNT(*) FROM dead_letters WHERE source = '".self::QUEUE."'"));
+        self::assertSame(1, self::fetchInt("SELECT COUNT(*) FROM dead_letters WHERE source = '".self::isolated(self::QUEUE)."'"));
     }
 
     public function testDispatchExceptionExhaustsRetryBudgetAndDeadLetters(): void

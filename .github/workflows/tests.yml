@@ -150,14 +150,14 @@ jobs:
       - name: Mutation tests (changed lines)
         if: github.event_name == 'pull_request'
         run: >-
-          vendor/bin/infection --threads=1 --no-progress --logger-github
+          vendor/bin/infection --threads=max --no-progress --logger-github
           --git-diff-lines --git-diff-base=origin/${{ github.base_ref }}
           --ignore-msi-with-no-mutations
 
       # main: the full run keeps the score at or above the baseline.
       - name: Mutation tests (full)
         if: github.event_name == 'push'
-        run: vendor/bin/infection --threads=1 --no-progress --logger-github=false
+        run: vendor/bin/infection --threads=max --no-progress --logger-github=false
 
   ci-gate:
     name: ci-gate

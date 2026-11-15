@@ -15,6 +15,9 @@ abstract class FunctionalTestCase extends TestCase
 {
     protected static PDO $pdo;
 
+    /** @var array<string, true> */
+    private static array $createdDatabases = [];
+
     protected static function platform(): Platform
     {
         return new PostgreSqlPlatform();
@@ -71,7 +74,61 @@ abstract class FunctionalTestCase extends TestCase
             throw new RuntimeException('Refusing to run: database name must contain "_test"');
         }
 
-        return [$dsn, $user ?: '', $password ?: ''];
+        $user = $user ?: '';
+        $password = $password ?: '';
+        $token = self::workerToken();
+        if ($token !== null) {
+            $dsn = self::workerDatabase($dsn, $user, $password, $token);
+        }
+
+        return [$dsn, $user, $password];
+    }
+
+    /**
+     * The worker index of a parallel run: Infection sets TEST_TOKEN for each
+     * mutant process. Null in a plain PHPUnit run.
+     */
+    private static function workerToken(): ?string
+    {
+        $token = getenv('TEST_TOKEN');
+
+        return is_string($token) && preg_match('/^\d+$/', $token) === 1 ? $token : null;
+    }
+
+    /**
+     * Each parallel worker gets its own database (<name>_t<token>), created
+     * on first use, so that workers never see each other's rows.
+     */
+    private static function workerDatabase(string $dsn, string $user, string $password, string $token): string
+    {
+        if (preg_match('/dbname=([^;]+)/', $dsn, $match) !== 1) {
+            throw new RuntimeException('POSTGRES_DSN has no dbname');
+        }
+        $database = "{$match[1]}_t{$token}";
+        if (!isset(self::$createdDatabases[$database])) {
+            $admin = new PDO($dsn, $user, $password, [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            ]);
+            $exists = $admin->prepare('SELECT 1 FROM pg_database WHERE datname = ?');
+            $exists->execute([$database]);
+            if ($exists->fetchColumn() === false) {
+                $admin->exec(sprintf('CREATE DATABASE "%s"', $database));
+            }
+            self::$createdDatabases[$database] = true;
+        }
+
+        return str_replace("dbname={$match[1]}", "dbname={$database}", $dsn);
+    }
+
+    /**
+     * A queue or exchange name of this worker: the shared name in a plain
+     * PHPUnit run, <name>_t<token> in a parallel run.
+     */
+    protected static function isolated(string $name): string
+    {
+        $token = self::workerToken();
+
+        return $token === null ? $name : "{$name}_t{$token}";
     }
 
     /** A fresh, independent PDO connection (for cross-session lock tests). */
