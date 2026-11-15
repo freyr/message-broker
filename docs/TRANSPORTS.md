@@ -63,6 +63,17 @@ A database failure is not a handler failure. When `BEGIN` fails, or the
 rollback fails on a dead connection, the consumer reports the error and stops.
 The delivery is redelivered, and no retry attempt is used.
 
+**Do not catch a database error in a handler and continue.** The handler runs
+inside the consumer transaction. In PostgreSQL, one failed statement aborts
+the whole transaction. A `COMMIT` of an aborted transaction does a `ROLLBACK`
+and returns no error, so `PDO::commit()` returns `true`. When the handler
+catches the exception and returns, the consumer commits and acks the message,
+but the handler work and the dedup row are not in the database. The message
+is lost, and nothing is logged. The consumer does not detect this. Let
+database errors propagate; the consumer then rolls back and uses the retry
+path. For a statement that is allowed to fail, use `INSERT ... ON CONFLICT`,
+or run it in a savepoint (for example a nested Doctrine DBAL transaction).
+
 **Set a dead-letter exchange on the work queue.** The consumer stops, and
 RabbitMQ redelivers, when a message cannot be decoded for a temporary reason
 or when the database fails. A message that always causes this, or a handler
