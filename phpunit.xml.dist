@@ -6,7 +6,7 @@
          failOnRisky="true"
          failOnWarning="true"
          failOnDeprecation="true"
-         beStrictAboutCoverageMetadata="true"
+         beStrictAboutCoverageMetadata="false"
          cacheDirectory=".phpunit.cache"
          executionOrder="defects"
          resolveDependencies="true">

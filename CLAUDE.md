@@ -23,3 +23,11 @@ docker compose run --rm php vendor/bin/ecs check
 ```
 
 Functional tests need PostgreSQL + RabbitMQ — both in compose.
+
+## Mutation testing
+
+Infection measures the quality of the tests; pcov (in the Docker image) collects the coverage. `make infection` runs the full suite (one thread, about 10 minutes); reports go to `var/infection/` (`infection.html` lists each escaped mutant). The thresholds are in `infection.json5` (`minMsi`, `minCoveredMsi`): the baseline of the first full run, 67%. Raise them when the tests improve; never lower them.
+
+CI runs Infection on the changed lines of `src/` on each pull request (part of `ci-gate`), and the full suite on `main`. A pull request whose changed lines score below the threshold fails: add or tighten the tests that the escaped mutants show.
+
+Infection runs one process, because the functional tests share one database and fixed queue names.
