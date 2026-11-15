@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Transport\Amqp;
 
+use Freyr\MessageBroker\Outbox\OutboxPublisher;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use PhpAmqpLib\Channel\AMQPChannel;
@@ -11,18 +12,27 @@ use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
 
 /**
- * AMQP publish mechanics of AmqpRelay: add the x-message-* envelope headers
- * from the outbox row's columns, publish the batch, ONE confirm wait covering
- * the whole batch. A broker nack is reported per record; an ack covers the
- * rest. The owning relay must hold its AMQPChannel exclusively:
- * publisher-confirm mode is channel-global state, and any other publisher on
- * the same channel corrupts the confirm bookkeeping.
+ * AMQP implementation of the {@see OutboxPublisher} port: add the x-message-*
+ * envelope headers from the outbox row's columns (id, message_name,
+ * created_at), publish the batch, ONE confirm wait covering the whole batch.
+ * A broker nack is reported per record; an ack covers the rest. AMQP has no
+ * batch limit, so one claim is one batch and one confirm wait.
+ *
+ * Channel ownership: the owning relay must hold its AMQPChannel exclusively
+ * and run on its own database connection. Publisher-confirm mode is
+ * channel-global state, and any other publisher on the same channel corrupts
+ * the confirm bookkeeping.
+ *
+ * Failure handling: a nack backs off only the nacked rows and the channel
+ * stays usable. A channel, connection or confirm-timeout failure throws; the
+ * relay then backs off the rows of the call and stops the worker (crash-only),
+ * and the supervisor restarts it with a fresh connection.
  *
  * Messages are published without the mandatory flag: a message that no queue
  * binding matches is dropped by the broker and confirmed. That is the design —
  * a message nobody subscribes to is not a failure.
  */
-final class AmqpMessagePublisher
+final class AmqpMessagePublisher implements OutboxPublisher
 {
     private bool $confirmsEnabled = false;
 
@@ -84,5 +94,11 @@ final class AmqpMessagePublisher
         }
 
         return $this->nacked;
+    }
+
+    /** AMQP has no batch limit: one claim is one batch. */
+    public function maxBatchSize(): int
+    {
+        return PHP_INT_MAX;
     }
 }

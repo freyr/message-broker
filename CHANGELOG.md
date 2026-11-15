@@ -10,11 +10,14 @@ All notable changes to this project will be documented in this file.
 - **Breaking:** renamed classes, same namespaces, no aliases: `Outbox\PdoOutboxStore` -> `Outbox\PostgreSqlOutboxStore`, `Transport\PdoDeduplicationStore` -> `Transport\PostgreSqlDeduplicationStore`, `DeadLetter\PdoDeadLetterStore` -> `DeadLetter\PostgreSqlDeadLetterStore`, `Outbox\OutboxPartitionManager` -> `Outbox\PostgreSqlOutboxRetention`, `Outbox\PartitionPurgeReport` -> `Outbox\RetentionReport`. The three stores take no `Platform` argument any more: `new PostgreSqlOutboxStore($pdo)`, `new PostgreSqlDeduplicationStore($pdo, deleteChunkSize: ...)`, `new PostgreSqlDeadLetterStore($pdo)`
 - **Breaking:** `PostgreSqlOutboxRetention::ensurePartitions($daysAhead = 3, $today = null)` is now `ensureCapacity($daysAhead, $today = null)` (no default for `$daysAhead`). `purge()` takes `(retentionDays, dryRun, dropUnpublished, today)`; `$dropUnpublished` moved before `$today`. `$today` is a test parameter of the PostgreSQL class and is not part of the port
 - **Breaking:** `SetupSchemaCommand` takes a `SchemaInstaller` (was `PDO` and `Platform`). `OutboxMaintainCommand` takes an `OutboxRetention` (was the concrete partition manager). Options, output and exit codes do not change
+- **Breaking:** `Transport\Amqp\AmqpRelay` is removed. The relay loop is now `Outbox\Relay` (no AMQP import) and takes an `Outbox\OutboxPublisher`. Old: `new AmqpRelay($outbox, $channel, $publishConfig, $contentType, lane: 'orders', confirmTimeoutSec: 5)`. New: `new Relay($outbox, new AmqpMessagePublisher($channel, $publishConfig, $contentType, confirmTimeoutSec: 5), lane: 'orders')`. The other arguments (`lane`, `batchSize`, `backoff`, `errorHandler`, `idleSleepMs`, `logger`, `events`) keep their names and defaults. The AMQP behavior is unchanged
+- `Transport\Amqp\AmqpMessagePublisher` implements `OutboxPublisher`; its `maxBatchSize()` returns `PHP_INT_MAX`, so one claim is one batch and one confirm wait
 
 ### Added
 
 - Port `Outbox\OutboxRetention` (`ensureCapacity()`, `purge()`) with the implementation `PostgreSqlOutboxRetention`
 - Port `Storage\SchemaInstaller` (`sql()` for the DDL of a new database, `install()` to create what is missing) with the implementation `Storage\PostgreSqlSchemaInstaller`. One operation covers the tables and the first partitions
+- Port `Outbox\OutboxPublisher` (`publishBatch()` returns the IDs that the transport refused, `maxBatchSize()`): a transport adapter implements it. `Relay` publishes the fresh rows of a claim in chunks of `maxBatchSize()`; a failed call backs off the rows of that call only, and later chunks stay due
 
 ## [0.6.0] - 2026-11-15
 

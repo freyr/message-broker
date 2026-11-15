@@ -17,8 +17,8 @@ use Symfony\Component\Console\Output\OutputInterface;
  * deliberately distinct), so the application registers runners as callables:
  *
  *     new RelayRunCommand([
- *         'orders' => fn () => $ordersAmqpRelay->run(),
- *         'invoices' => fn () => $invoicesAmqpRelay->run(),
+ *         'orders' => fn () => $ordersRelay->run(),
+ *         'invoices' => fn () => $invoicesRelay->run(),
  *     ]);
  */
 #[AsCommand(name: 'message-broker:relay:run', description: 'Run the relay for one outbox lane (blocks)')]

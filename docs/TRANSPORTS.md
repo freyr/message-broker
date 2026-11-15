@@ -93,7 +93,8 @@ relay process, one dedicated channel.
 
 ### The relay
 
-There is one relay class, `AmqpRelay`. Any number of identical worker
+There is one relay class, `Relay`, behind the `OutboxPublisher` port; the AMQP
+transport implements the port with `AmqpMessagePublisher`. Any number of identical worker
 processes drain **one** lane in parallel. Each worker claims a batch of
 eligible rows via `FOR UPDATE SKIP LOCKED` inside a transaction owned by the
 outbox store, publishes the batch with publisher confirms while it holds the
@@ -134,15 +135,19 @@ period (default 7 days), until the row is published; only
 use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
+use Freyr\MessageBroker\Outbox\Relay;
+use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
-use Freyr\MessageBroker\Transport\Amqp\AmqpRelay;
 
 // Each worker owns its own PDO connection and its own dedicated AMQPChannel.
-$worker = new AmqpRelay(
+$worker = new Relay(
     outbox: new PostgreSqlOutboxStore($workerPdo),
-    amqp: $workerChannel,
-    publish: new AmqpPublishConfig(exchange: 'orders'),
-    contentType: JsonWireFormat::CONTENT_TYPE,
+    publisher: new AmqpMessagePublisher(
+        $workerChannel,
+        new AmqpPublishConfig(exchange: 'orders'),
+        JsonWireFormat::CONTENT_TYPE,
+        confirmTimeoutSec: 5,
+    ),
     lane: 'orders',
     batchSize: 500,
     backoff: Backoff::exponential(initialDelayMs: 1_000, maxDelayMs: 300_000),
@@ -150,9 +155,16 @@ $worker = new AmqpRelay(
 $worker->run();
 ```
 
-Constructor arguments: `outbox`, `amqp`, `publish`, `contentType`,
-`lane = 'default'`, `batchSize = 500`, `backoff`, `errorHandler`,
-`idleSleepMs = 200`, `confirmTimeoutSec = 5`, `logger`, `events`.
+`Relay` constructor arguments: `outbox`, `publisher`, `lane = 'default'`,
+`batchSize = 500`, `backoff`, `errorHandler`, `idleSleepMs = 200`, `logger`,
+`events`. `AmqpMessagePublisher` constructor arguments: `amqp`, `publish`,
+`contentType`, `confirmTimeoutSec = 5`.
+
+The relay publishes the fresh rows of a claim in chunks of
+`OutboxPublisher::maxBatchSize()`; each chunk is one `publishBatch()` call.
+The AMQP publisher has no batch limit, so one claim is one chunk and one
+confirm wait. A failed call backs off the rows of that call only; the later
+chunks stay due.
 
 Run N of these as separate processes, each with its own connection and
 channel, all pointed at the same lane name.

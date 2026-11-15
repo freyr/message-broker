@@ -12,15 +12,16 @@ use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
+use Freyr\MessageBroker\Outbox\Relay;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingEvents;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
+use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
-use Freyr\MessageBroker\Transport\Amqp\AmqpRelay;
 use Freyr\MessageBroker\Transport\Amqp\AmqpRetryPolicy;
 use Freyr\MessageBroker\Transport\PostgreSqlDeduplicationStore;
 use PhpAmqpLib\Channel\AMQPChannel;
@@ -50,7 +51,7 @@ final class EndToEndTest extends FunctionalTestCase
     private OutboxStore $outbox;
     private OutboxProducer $producer;
     private PostgreSqlDeadLetterStore $deadLetters;
-    private AmqpRelay $relay; // one long-lived relay per channel, as in production
+    private Relay $relay; // one long-lived relay per channel, as in production
 
     private bool $handlerFails = false;
 
@@ -98,11 +99,13 @@ final class EndToEndTest extends FunctionalTestCase
         $this->outbox = new PostgreSqlOutboxStore(self::$pdo);
         $this->producer = new OutboxProducer($this->outbox, new JsonWireFormat(), lane: self::LANE);
         $this->deadLetters = new PostgreSqlDeadLetterStore(self::$pdo);
-        $this->relay = new AmqpRelay(
+        $this->relay = new Relay(
             outbox: $this->outbox,
-            amqp: $this->relayChannel,
-            publish: new AmqpPublishConfig(exchange: self::isolated(self::EXCHANGE)),
-            contentType: JsonWireFormat::CONTENT_TYPE,
+            publisher: new AmqpMessagePublisher(
+                $this->relayChannel,
+                new AmqpPublishConfig(exchange: self::isolated(self::EXCHANGE)),
+                JsonWireFormat::CONTENT_TYPE,
+            ),
             lane: self::LANE,
         );
     }
