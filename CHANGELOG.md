@@ -12,12 +12,17 @@ All notable changes to this project will be documented in this file.
 - **Breaking:** `SetupSchemaCommand` takes a `SchemaInstaller` (was `PDO` and `Platform`). `OutboxMaintainCommand` takes an `OutboxRetention` (was the concrete partition manager). Options, output and exit codes do not change
 - **Breaking:** `Transport\Amqp\AmqpRelay` is removed. The relay loop is now `Outbox\Relay` (no AMQP import) and takes an `Outbox\OutboxPublisher`. Old: `new AmqpRelay($outbox, $channel, $publishConfig, $contentType, lane: 'orders', confirmTimeoutSec: 5)`. New: `new Relay($outbox, new AmqpMessagePublisher($channel, $publishConfig, $contentType, confirmTimeoutSec: 5), lane: 'orders')`. The other arguments (`lane`, `batchSize`, `backoff`, `errorHandler`, `idleSleepMs`, `logger`, `events`) keep their names and defaults. The AMQP behavior is unchanged
 - `Transport\Amqp\AmqpMessagePublisher` implements `OutboxPublisher`; its `maxBatchSize()` returns `PHP_INT_MAX`, so one claim is one batch and one confirm wait
+- **Breaking:** `AmqpConsumer` is split into a transport-neutral `Consumer\DeliveryProcessor` (the exactly-once algorithm, no AMQP import) and a thin AMQP loop. The constructor of `AmqpConsumer` changes from 13 parameters to `(AMQPChannel $channel, AmqpQueueConfig $queue, DeliveryProcessor $processor, int $confirmTimeoutSec = 5)`. Pass `deserializer`, `dispatcher`, `deduplication`, `retryPolicy`, `deadLetters`, `name`, `errorHandler`, `logger` and `events` to `DeliveryProcessor`, and give it `new PdoTransaction($pdo)` as `transaction` in place of the `pdo` parameter
+- **Breaking:** `Transport\Amqp\AmqpRetryPolicy` is renamed to `Retry\ExponentialRetryPolicy` (same constructor and behavior, no alias). It implements the new interface `Retry\RetryPolicy`, whose `decide(int $attempt, Throwable $error, IncomingMessage $message)` takes the message as a third parameter
+- The retry republish to the TTL wait queue moves from `AmqpConsumer` to `Transport\Amqp\WaitQueuePublisher`; the behavior is unchanged
 
 ### Added
 
 - Port `Outbox\OutboxRetention` (`ensureCapacity()`, `purge()`) with the implementation `PostgreSqlOutboxRetention`
 - Port `Storage\SchemaInstaller` (`sql()` for the DDL of a new database, `install()` to create what is missing) with the implementation `Storage\PostgreSqlSchemaInstaller`. One operation covers the tables and the first partitions
 - Port `Outbox\OutboxPublisher` (`publishBatch()` returns the IDs that the transport refused, `maxBatchSize()`): a transport adapter implements it. `Relay` publishes the fresh rows of a claim in chunks of `maxBatchSize()`; a failed call backs off the rows of that call only, and later chunks stay due
+- `Storage\Transaction` and `Storage\PdoTransaction`: the database transaction of one delivery
+- `Consumer\Delivery` (a transport-neutral delivery, with `deliveryCount`), `Consumer\DeliveryControl` and `Transport\Amqp\AmqpDeliveryControl`
 
 ## [0.6.0] - 2026-11-15
 

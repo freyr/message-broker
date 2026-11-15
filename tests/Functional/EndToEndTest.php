@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
+use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
@@ -14,15 +15,16 @@ use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Outbox\Relay;
 use Freyr\MessageBroker\Retry\Backoff;
+use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
+use Freyr\MessageBroker\Storage\PdoTransaction;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingEvents;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
-use Freyr\MessageBroker\Transport\Amqp\AmqpRetryPolicy;
 use Freyr\MessageBroker\Transport\PostgreSqlDeduplicationStore;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
@@ -129,17 +131,19 @@ final class EndToEndTest extends FunctionalTestCase
         return new AmqpConsumer(
             channel: $this->channel,
             queue: new AmqpQueueConfig(self::isolated(self::QUEUE)),
-            deserializer: new JsonDeserializer(),
-            dispatcher: new CallableDispatcher($dispatch),
-            pdo: self::$pdo,
-            deduplication: new PostgreSqlDeduplicationStore(self::$pdo),
-            retryPolicy: new AmqpRetryPolicy(
-                maxAttempts: 2,
-                backoff: Backoff::exponential(initialDelayMs: 100, maxDelayMs: 100),
+            processor: new DeliveryProcessor(
+                deserializer: new JsonDeserializer(),
+                dispatcher: new CallableDispatcher($dispatch),
+                transaction: new PdoTransaction(self::$pdo),
+                deduplication: new PostgreSqlDeduplicationStore(self::$pdo),
+                retryPolicy: new ExponentialRetryPolicy(
+                    maxAttempts: 2,
+                    backoff: Backoff::exponential(initialDelayMs: 100, maxDelayMs: 100),
+                ),
+                deadLetters: $this->deadLetters,
+                name: 'e2e_consumer',
+                events: $events,
             ),
-            deadLetters: $this->deadLetters,
-            name: 'e2e_consumer',
-            events: $events,
         );
     }
 

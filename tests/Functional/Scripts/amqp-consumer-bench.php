@@ -10,18 +10,20 @@ declare(strict_types=1);
 // make bench-consumer ARGS="<messages> <workers> <prefetch> <handler-sleep-ms>".
 
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
+use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
+use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
+use Freyr\MessageBroker\Storage\PdoTransaction;
 use Freyr\MessageBroker\Storage\PostgreSqlSchemaInstaller;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
-use Freyr\MessageBroker\Transport\Amqp\AmqpRetryPolicy;
 use Freyr\MessageBroker\Transport\PostgreSqlDeduplicationStore;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use Symfony\Component\Uid\Uuid;
@@ -92,17 +94,19 @@ for ($w = 0; $w < $workers; ++$w) {
         $consumer = new AmqpConsumer(
             channel: $amqp()->channel(),
             queue: new AmqpQueueConfig($queue, $prefetch),
-            deserializer: new JsonDeserializer(),
-            dispatcher: new CallableDispatcher(static function (IncomingMessage $message) use ($sleepMs): void {
-                if ($sleepMs > 0) {
-                    usleep($sleepMs * 1000); // simulated business work inside the consumer transaction
-                }
-            }),
-            pdo: $workerPdo,
-            deduplication: new PostgreSqlDeduplicationStore($workerPdo),
-            retryPolicy: new AmqpRetryPolicy(),
-            deadLetters: new PostgreSqlDeadLetterStore($workerPdo),
-            name: 'bench',
+            processor: new DeliveryProcessor(
+                deserializer: new JsonDeserializer(),
+                dispatcher: new CallableDispatcher(static function (IncomingMessage $message) use ($sleepMs): void {
+                    if ($sleepMs > 0) {
+                        usleep($sleepMs * 1000); // simulated business work inside the consumer transaction
+                    }
+                }),
+                transaction: new PdoTransaction($workerPdo),
+                deduplication: new PostgreSqlDeduplicationStore($workerPdo),
+                retryPolicy: new ExponentialRetryPolicy(),
+                deadLetters: new PostgreSqlDeadLetterStore($workerPdo),
+                name: 'bench',
+            ),
         );
         $consumer->run(); // until SIGTERM
         exit(0);
