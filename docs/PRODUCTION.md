@@ -23,11 +23,13 @@ This is safe because:
   that crashes after committing its dedup/dispatch transaction but before
   acking (AMQP) redelivers the message on restart. Both land on consumer-side
   deduplication, which absorbs the duplicate.
-- **The retention period is the only data-loss path.** The produce/relay
-  path never dead-letters — a stuck lane retries with backoff until the row
-  passes the retention period (default 7 days). Then retention drops the row
-  with its partition and reports it. Alert on relay backlog well before that
-  limit.
+- **Retention does not drop unpublished rows by default.** The produce/relay
+  path never dead-letters — a stuck lane retries with backoff. When a row
+  passes the retention period (default 7 days) while it is still unpublished,
+  retention keeps its partition, reports it, and exits with a non-zero code.
+  The partition grows until the relay publishes the rows. Only the opt-in
+  `--drop-unpublished` drops such a row. Alert on relay backlog and on the
+  exit code of the maintain command.
 
 Tune restart backoff (how fast the supervisor retries a crashed process),
 not reconnect logic — there is none to tune.
@@ -96,7 +98,7 @@ and `dead_letters` tables plus these events:
 - **Relay backlog** — the age of the oldest unpublished row
   (`published_at IS NULL`) per lane.
 - **Retention health** — the exit code of `message-broker:outbox:maintain`,
-  its warnings about dropped unpublished rows, and the partition of tomorrow
+  its report of kept partitions with unpublished rows, and the partition of tomorrow
   (it must exist).
 - **Consumer lag** — broker queue depth (AMQP).
 - **DLQ depth** — `SELECT COUNT(*) FROM dead_letters WHERE replayed_at IS NULL`,
@@ -181,7 +183,7 @@ rows overtake it. Watch the age of the oldest unpublished row
 ## Outbox retention
 
 The relay never deletes rows. It sets `published_at`, and the rows stay until
-retention drops their partition. `outbox_messages` is partitioned by
+retention drops their partition, once every row of it is published. `outbox_messages` is partitioned by
 `created_at`, with one partition per UTC day (`outbox_messages_pYYYYMMDD`) and
 no default partition. An insert for a day with no partition fails, and the
 producer's transaction fails with it, so create partitions ahead of time.
@@ -203,11 +205,30 @@ The command:
   (`DETACH PARTITION ... FINALIZE`), and drops an expired table that an earlier
   run detached.
 
-The retention period (`--retention-days`, default 7) is also the age limit of
-an unpublished row. An expired partition is dropped even when it still holds
-unpublished rows; the command reports them as a warning. A relay that stays
-broken for longer than the retention period loses those messages, so alert on
-the age of the oldest unpublished row well before that limit.
+**Unpublished rows.** By default, an expired partition that still holds a row
+with `published_at IS NULL` is kept. The command prints the partition and the
+number of unpublished rows and exits with code 1, so that a scheduler or a
+monitor alerts. A later run drops the partition once its rows are published.
+The same rule covers a partition with a pending detach and an expired table
+that an earlier run detached. A partition that is kept grows, so fix the relay
+or alert on the exit code well before the disk fills.
+
+The check and the detach are not one atomic step. The command counts the
+unpublished rows before the detach and again on the detached table, before
+`DROP TABLE`. No row can reach the table after the detach, so the second count
+catches a row that arrived in between. The command then attaches the table
+again (`ATTACH PARTITION`, which takes only `SHARE UPDATE EXCLUSIVE`), so the
+relay claims and publishes its rows, and a later run drops it. The same
+applies to an expired table that an earlier run detached, and to a partition
+with a pending detach (the command finishes the detach first, then attaches
+it). If the attach fails, the command stops with the error, drops nothing, and
+the table stays detached; fix the cause and run it again. Nothing is locked.
+
+**Hard age limit.** The option `--drop-unpublished` restores the hard age
+limit: the retention period is then also the age limit of an unpublished row.
+The command drops an expired partition with its unpublished rows, prints a
+warning with the number of rows, and exits with code 0. A relay that stays
+broken for longer than the retention period loses those messages.
 
 **Locks.** No step takes an `ACCESS EXCLUSIVE` lock on `outbox_messages`.
 `ATTACH PARTITION` and `DETACH PARTITION ... CONCURRENTLY` take only
@@ -218,8 +239,10 @@ run outside a transaction. A plain `DROP TABLE` or `DETACH PARTITION` of a
 partition takes `ACCESS EXCLUSIVE` on the parent and queues every producer
 behind it; do not run them on this table by hand.
 
-It exits with code 0, also when it dropped unpublished rows, and with code 2
-on invalid options. Use `--dry-run` to preview the changes.
+It exits with code 0 on success (also when it dropped unpublished rows with
+`--drop-unpublished`), with code 1 when it kept at least one expired partition
+because of unpublished rows, and with code 2 on invalid options. Use
+`--dry-run` to preview the changes; a dry run always exits with code 0.
 
 ### With pg_partman
 
@@ -237,4 +260,4 @@ they expire. Configure pg_partman like this:
   the UTC days of this library.
 
 Monitor three signals: the age of the oldest unpublished row per lane, the
-warnings of the maintain command, and the partition of tomorrow.
+exit code of the maintain command, and the partition of tomorrow.

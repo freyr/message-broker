@@ -132,6 +132,12 @@ abstract class FunctionalTestCase extends TestCase
     }
 
     /** A fresh, independent PDO connection (for cross-session lock tests). */
+    /** @return array{string, string, string} DSN, user and password of this worker's test database */
+    protected static function credentials(): array
+    {
+        return self::resolveCredentials();
+    }
+
     protected static function newConnection(): PDO
     {
         [$dsn, $user, $password] = self::resolveCredentials();

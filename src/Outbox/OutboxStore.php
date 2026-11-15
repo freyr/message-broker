@@ -15,7 +15,8 @@ namespace Freyr\MessageBroker\Outbox;
  *    commits atomically with the application's own state change.
  *  - published rows are never deleted by the drain; they keep their
  *    published_at and leave the table only through partition retention
- *    ({@see OutboxPartitionManager}).
+ *    ({@see OutboxPartitionManager}). An unpublished row is never dropped by
+ *    retention unless the operator opts in (drop-unpublished).
  *  - there is no ordering guarantee: rows of one lane publish in any order.
  */
 interface OutboxStore

@@ -111,7 +111,8 @@ final readonly class PdoOutboxStore implements OutboxStore
     /**
      * Failed publish: move available_at to the retry time, increment attempts.
      * There is no exhaustion and no relay-side DLQ: a row that keeps failing
-     * stays until retention drops its partition.
+     * stays in the outbox; retention keeps its partition until the row is
+     * published (unless the operator opts in to dropping unpublished rows).
      *
      * @param non-empty-array<string, int> $retryAtMs row id => next available_at, epoch ms
      * @param array{string, string} $createdAtRange

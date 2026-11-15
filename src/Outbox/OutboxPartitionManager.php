@@ -23,10 +23,34 @@ use Symfony\Component\Clock\Clock;
  *    pg_partman can create the partitions instead.
  *  - purge() drops each daily partition that lies wholly before the retention
  *    cutoff: DETACH PARTITION ... CONCURRENTLY (no ACCESS EXCLUSIVE lock on
- *    outbox_messages), then DROP TABLE on the detached table. The retention
- *    period is also the age limit of an unpublished row: an expired partition
- *    is dropped even when it still holds unpublished rows, and the report
- *    counts them.
+ *    outbox_messages), then DROP TABLE on the detached table. By default an
+ *    expired partition that still holds unpublished rows (published_at IS
+ *    NULL) is kept and reported, so retention never loses a committed message;
+ *    it is dropped on a later run, once its rows are published. With
+ *    $dropUnpublished the retention period is a hard age limit: the partition
+ *    is dropped with its unpublished rows, and the report counts them.
+ *
+ * Safety of the default mode. The check and the detach are not one atomic
+ * step, so purge() counts the unpublished rows twice: before the detach, and
+ * again on the detached table, right before DROP TABLE. After DETACH ...
+ * CONCURRENTLY returns, no new row can reach the table, and every row that
+ * committed before the detach is visible to the second count. A row that
+ * appeared between the first count and the detach is therefore found.
+ *
+ * A detached table that holds unpublished rows is attached again at once
+ * (ALTER TABLE ... ATTACH PARTITION with the bounds of its day), because the
+ * relay claims rows through outbox_messages and could not publish them
+ * otherwise. The table is then reported as kept, and a later run drops it once
+ * its rows are published. The same rule covers an expired table that an
+ * earlier run detached but did not drop, and a partition with a pending
+ * detach (it is finalized first, because only a fully detached table can be
+ * attached again). ATTACH takes only SHARE UPDATE EXCLUSIVE on
+ * outbox_messages, as ensurePartitions() does, so producers and relays do not
+ * wait. DETACH ... CONCURRENTLY leaves a CHECK constraint equal to the
+ * partition constraint on the table; ATTACH uses it to skip the validation
+ * scan, and a later detach of the same table works with it in place. If the
+ * attach itself fails, the exception propagates: the table stays detached,
+ * nothing is dropped, and the caller sees the error. Nothing else is locked.
  *
  * There is no DEFAULT partition (DETACH ... CONCURRENTLY does not allow one):
  * an insert for a day with no partition fails. Create partitions ahead of time.
@@ -92,15 +116,22 @@ final readonly class OutboxPartitionManager
 
     /**
      * Drop every daily partition that lies wholly before the cutoff (today
-     * 00:00 UTC minus $retentionDays), unpublished rows included. Also
-     * finishes a detach that an earlier run did not complete, and drops an
-     * expired daily table that an earlier run detached but did not drop.
+     * 00:00 UTC minus $retentionDays). A partition that holds unpublished rows
+     * is kept and reported in PartitionPurgeReport::$kept, unless
+     * $dropUnpublished is true; then it is dropped with them and reported in
+     * PartitionPurgeReport::$unpublished. Also finishes a detach that an
+     * earlier run did not complete, and drops an expired daily table that an
+     * earlier run detached but did not drop (the same rule applies to both).
      *
      * Must run outside a transaction: DETACH ... CONCURRENTLY cannot run in
      * a transaction block.
      */
-    public function purge(int $retentionDays, bool $dryRun = false, ?DateTimeImmutable $today = null): PartitionPurgeReport
-    {
+    public function purge(
+        int $retentionDays,
+        bool $dryRun = false,
+        ?DateTimeImmutable $today = null,
+        bool $dropUnpublished = false,
+    ): PartitionPurgeReport {
         if ($retentionDays < 1) {
             throw new \InvalidArgumentException("retentionDays must be 1 or more, got {$retentionDays}");
         }
@@ -111,12 +142,23 @@ final readonly class OutboxPartitionManager
 
         $dropped = [];
         $unpublished = [];
+        $kept = [];
         foreach ($this->dailyTables() as $name => $table) {
             if ($table['day']->modify('+1 day') > $cutoff) {
                 continue; // not wholly expired yet
             }
 
-            $pending = $this->count("SELECT COUNT(*) FROM \"{$name}\" WHERE published_at IS NULL");
+            $pending = $this->countUnpublished($name);
+            if ($pending > 0 && !$dropUnpublished) {
+                if (!$dryRun && (!$table['attached'] || $table['detachPending'])) {
+                    if ($table['detachPending']) {
+                        $this->pdo->exec(sprintf('ALTER TABLE %s DETACH PARTITION "%s" FINALIZE', self::TABLE, $name));
+                    }
+                    $this->attach($name, $table['day']);
+                }
+                $kept[$name] = $pending;
+                continue;
+            }
             if ($pending > 0) {
                 $unpublished[$name] = $pending;
             }
@@ -127,12 +169,38 @@ final readonly class OutboxPartitionManager
                 } elseif ($table['attached']) {
                     $this->pdo->exec(sprintf('ALTER TABLE %s DETACH PARTITION "%s" CONCURRENTLY', self::TABLE, $name));
                 }
+                // The table is detached now, so nothing can add a row. Count again:
+                // a row may have arrived between the first count and the detach.
+                if (!$dropUnpublished) {
+                    $late = $this->countUnpublished($name);
+                    if ($late > 0) {
+                        $this->attach($name, $table['day']);
+                        $kept[$name] = $late;
+                        continue;
+                    }
+                }
                 $this->pdo->exec("DROP TABLE \"{$name}\"");
             }
             $dropped[] = $name;
         }
 
-        return new PartitionPurgeReport($cutoff, $dropped, $unpublished);
+        return new PartitionPurgeReport($cutoff, $dropped, $unpublished, $kept);
+    }
+
+    private function attach(string $name, DateTimeImmutable $from): void
+    {
+        $this->pdo->exec(self::attachDdl($name, $from));
+    }
+
+    private static function attachDdl(string $name, DateTimeImmutable $from): string
+    {
+        return sprintf(
+            "ALTER TABLE %s ATTACH PARTITION \"%s\" FOR VALUES FROM ('%s') TO ('%s')",
+            self::TABLE,
+            $name,
+            $from->format('Y-m-d H:i:s'),
+            $from->modify('+1 day')->format('Y-m-d H:i:s'),
+        );
     }
 
     /** @return list<string> */
@@ -146,13 +214,7 @@ final readonly class OutboxPartitionManager
                 $name,
                 self::TABLE,
             ),
-            sprintf(
-                "ALTER TABLE %s ATTACH PARTITION \"%s\" FOR VALUES FROM ('%s') TO ('%s')",
-                self::TABLE,
-                $name,
-                $from->format('Y-m-d H:i:s'),
-                $from->modify('+1 day')->format('Y-m-d H:i:s'),
-            ),
+            self::attachDdl($name, $from),
         ];
     }
 
@@ -201,9 +263,9 @@ final readonly class OutboxPartitionManager
         return $tables;
     }
 
-    private function count(string $sql): int
+    private function countUnpublished(string $table): int
     {
-        $statement = $this->pdo->query($sql);
+        $statement = $this->pdo->query("SELECT COUNT(*) FROM \"{$table}\" WHERE published_at IS NULL");
         $value = $statement === false ? false : $statement->fetchColumn();
 
         return is_numeric($value) ? (int) $value : 0;

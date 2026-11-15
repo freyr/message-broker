@@ -169,7 +169,7 @@ final class SchemaAndMaintainCommandsTest extends FunctionalTestCase
         );
     }
 
-    public function testMaintainDryRunReportsWhatWouldBeDroppedAndChangesNothing(): void
+    public function testMaintainDryRunReportsWhatWouldBeKeptAndChangesNothing(): void
     {
         $old = $this->createExpiredPartitionWithUnpublishedRow();
         $name = 'outbox_messages_p'.$old->format('Ymd');
@@ -180,30 +180,54 @@ final class SchemaAndMaintainCommandsTest extends FunctionalTestCase
             '--dry-run' => true,
         ]);
 
-        self::assertSame(Command::SUCCESS, $status);
+        self::assertSame(Command::SUCCESS, $status, 'a dry run always succeeds');
         $today = new DateTimeImmutable('today', new DateTimeZone('UTC'));
         self::assertSame(
             sprintf(
                 "[dry-run] would ensure daily partitions for today + 3 days.\n"
                 ."[dry-run] Retention cutoff: %s UTC.\n"
-                ."[dry-run] Dropped %s.\n"
-                ."[dry-run] %s held 1 unpublished row(s) older than the retention period; they are dropped.\n",
+                ."[dry-run] %s would be kept: it holds 1 unpublished row(s) older than the retention period. Publish them, or use --drop-unpublished to drop them.\n",
                 $today->modify('-1 day')->format('Y-m-d H:i'),
-                $name,
                 $name,
             ),
             $tester->getDisplay(),
         );
         self::assertContains($name, $this->attachedDailyPartitions(), 'dry-run keeps the partition');
 
-        // A real run drops it and reports without the dry-run prefix.
         $real = new CommandTester(new OutboxMaintainCommand($this->partitions));
-        $real->execute([
+        $status = $real->execute([
             '--retention-days' => '1',
         ]);
-        self::assertStringContainsString("\nDropped {$name}.\n", $real->getDisplay());
-        self::assertStringContainsString("{$name} held 1 unpublished row(s)", $real->getDisplay());
+        self::assertSame(Command::FAILURE, $status);
+        self::assertStringContainsString("\n{$name} is kept: it holds 1 unpublished row(s)", $real->getDisplay());
         self::assertStringNotContainsString('dry-run', $real->getDisplay());
+        self::assertContains($name, $this->attachedDailyPartitions());
+    }
+
+    public function testMaintainDryRunWithDropUnpublishedReportsWhatWouldBeDropped(): void
+    {
+        $old = $this->createExpiredPartitionWithUnpublishedRow();
+        $name = 'outbox_messages_p'.$old->format('Ymd');
+        $tester = new CommandTester(new OutboxMaintainCommand($this->partitions));
+
+        $status = $tester->execute([
+            '--retention-days' => '1',
+            '--dry-run' => true,
+            '--drop-unpublished' => true,
+        ]);
+
+        self::assertSame(Command::SUCCESS, $status);
+        self::assertStringContainsString("[dry-run] Dropped {$name}.\n", $tester->getDisplay());
+        self::assertStringContainsString("[dry-run] {$name} held 1 unpublished row(s) older than the retention period; they are dropped.\n", $tester->getDisplay());
+        self::assertContains($name, $this->attachedDailyPartitions(), 'dry-run keeps the partition');
+
+        $real = new CommandTester(new OutboxMaintainCommand($this->partitions));
+        $status = $real->execute([
+            '--retention-days' => '1',
+            '--drop-unpublished' => true,
+        ]);
+        self::assertSame(Command::SUCCESS, $status);
+        self::assertStringContainsString("\nDropped {$name}.\n", $real->getDisplay());
         self::assertNotContains($name, $this->attachedDailyPartitions());
     }
 
