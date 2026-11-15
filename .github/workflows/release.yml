@@ -1,4 +1,4 @@
-# The release App pushes the tags; Packagist reads versions from them.
+# The release App pushes the tags. The packagist job then asks packagist.org to read the repo.
 #
 # A push to main releases from the PR title (freyr/.github release action).
 # A manual run (Actions → Release → Run workflow, on main) tags the head of
@@ -106,3 +106,14 @@ jobs:
           git push origin "refs/tags/${tag}"
           gh release create "$tag" --title "$tag" --notes-file "$notes" --verify-tag
           echo "Released ${tag} at ${GITHUB_SHA} (previous tag: ${previous:-none})." >> "$GITHUB_STEP_SUMMARY"
+
+  # The only caller of packagist.org: the repo has no Packagist webhook.
+  packagist:
+    needs: [release, manual-release]
+    if: ${{ !cancelled() && (needs.release.result == 'success' || needs.manual-release.result == 'success') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: freyr/.github/actions/packagist@93b8d0f624ac287b129f2d33c838959329fdaf9d # v2.1.0
+        with:
+          username: ${{ vars.PACKAGIST_USERNAME }}
+          api-token: ${{ secrets.PACKAGIST_API_TOKEN }}
