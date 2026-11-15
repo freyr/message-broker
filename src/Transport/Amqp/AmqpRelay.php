@@ -22,7 +22,7 @@ use Throwable;
  * concurrently: each claims a batch of unpublished, due rows via FOR UPDATE
  * SKIP LOCKED inside a store-owned transaction, publishes while holding the
  * claim, and marks the rows published on success (published rows stay for
- * partition retention). Workers never block each other; a crashed worker's
+ * partition retention; a partition with unpublished rows is never dropped by default). Workers never block each other; a crashed worker's
  * rows are instantly reclaimable (its locks die with its connection) and
  * consumer dedup absorbs the republish.
  *

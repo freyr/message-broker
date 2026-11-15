@@ -42,9 +42,10 @@ for example `new OutboxMaintainCommand(new OutboxPartitionManager($pdo))`.
 
 | Option | Description |
 | --- | --- |
-| `--retention-days` | Keep rows, published or not, at least this many days (default `7`). The cutoff is today midnight UTC minus this value. |
+| `--retention-days` | Keep rows at least this many days (default `7`). The cutoff is today midnight UTC minus this value. An expired partition with unpublished rows is kept unless `--drop-unpublished` is set. |
 | `--premake-days` | Create daily partitions from today to today plus this many days (default `3`, `0` creates only today). |
-| `--dry-run` | Report what would change; change nothing. |
+| `--drop-unpublished` | Drop an expired partition even when it holds unpublished rows (data loss). Default: keep it. |
+| `--dry-run` | Report what would be dropped and what would be kept; change nothing. |
 
 The command creates each missing partition as a plain table and attaches it
 (`ATTACH PARTITION`). It drops each daily partition that lies wholly before the
@@ -53,14 +54,23 @@ takes an `ACCESS EXCLUSIVE` lock on `outbox_messages`, so producers and relays
 never wait for it. The command also finishes a detach that an earlier run did
 not complete, and drops an expired table that an earlier run detached.
 
-The retention period (`--retention-days`, default 7) is also the age limit of
-an unpublished row. An expired partition is dropped even when it still holds
-unpublished rows; the command reports them as a warning. A relay that stays
-broken for longer than the retention period loses those messages, so alert on
-the age of the oldest unpublished row well before that limit.
+By default, an expired partition that holds unpublished rows
+(`published_at IS NULL`) is kept, not dropped. The command prints each kept
+partition with its number of unpublished rows. A later run drops the partition
+once its rows are published. A table that is detached but holds unpublished
+rows (an expired table from an earlier run, a pending detach, or a row that
+arrived during the detach) is attached again, so the relay can publish its
+rows.
 
-Exit codes: `0` success (also when it dropped unpublished rows); `2` invalid
-options (`--retention-days` must be 1 or more, `--premake-days` 0 or more).
+With `--drop-unpublished`, the retention period is a hard age limit: the
+command drops the partition with its unpublished rows and prints a warning with
+the number of rows. A relay that stays broken for longer than the retention
+period loses those messages.
+
+Exit codes: `0` success (also when it dropped unpublished rows with
+`--drop-unpublished`, and always on `--dry-run`); `1` at least one expired
+partition was kept because of unpublished rows; `2` invalid options
+(`--retention-days` must be 1 or more, `--premake-days` 0 or more).
 
 ## `message-broker:relay:run <lane>`
 

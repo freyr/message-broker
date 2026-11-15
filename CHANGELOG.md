@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `message-broker:outbox:maintain` and `OutboxPartitionManager::purge()` no longer drop an expired partition that holds unpublished rows (`published_at IS NULL`). The partition is kept and reported, and the command exits with code 1; it is dropped on a later run once its rows are published. A table that the run detached and then found to hold unpublished rows, an expired detached table, and a partition with a pending detach are attached again, so the relay can publish their rows
+- `PartitionPurgeReport` has a new `kept` list (partition name to unpublished row count), `unpublishedRowsKept()` and `hasKept()`
+
+### Added
+
+- Option `--drop-unpublished` of `message-broker:outbox:maintain` and parameter `$dropUnpublished` of `purge()`: the previous behavior, a hard age limit that drops the partition with its unpublished rows
+
 ## [0.5.0] - 2026-11-15
 
 The standalone library (PostgreSQL and AMQP, no framework) has the versions 0.1.0 and 0.5.0; 0.5.0 holds all changes below. The versions 0.2.0 to 0.4.0 belong to the earlier Symfony Messenger bundle of the same package name; their tags point to that separate history.

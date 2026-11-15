@@ -126,8 +126,9 @@ Consumers must be order-insensitive.
 The relay has no dead-letter path. A worker that crashes after publishing but
 before its claim commits leaves the rows unpublished; the next claim
 republishes them, and consumer-side deduplication absorbs the duplicate. An unpublished row
-stays until it passes the retention period (default 7 days); then retention
-drops it with its partition.
+stays in the outbox. Retention keeps its partition, even after the retention
+period (default 7 days), until the row is published; only
+`--drop-unpublished` drops it.
 
 ```php
 use Freyr\MessageBroker\Outbox\PdoOutboxStore;
@@ -183,8 +184,9 @@ partial index on `(lane, available_at)` where `published_at IS NULL` serves
 the claim query.
 
 The relay only sets `published_at`. Rows leave the table when
-`message-broker:outbox:maintain` drops an expired daily partition, with any
-unpublished rows that are still in it. See
+`message-broker:outbox:maintain` drops an expired daily partition. A partition
+that still holds unpublished rows is kept (and the command exits with code 1),
+unless the option `--drop-unpublished` is set. See
 [CLI_REFERENCE.md](CLI_REFERENCE.md) and [PRODUCTION.md](PRODUCTION.md).
 
 ### Operational signal
@@ -192,5 +194,5 @@ unpublished rows that are still in it. See
 Watch the age of the oldest unpublished row (`published_at IS NULL`) per
 lane. A single stuck row does not stall a lane, because other rows overtake
 it, so row age is the signal for a slowly draining lane. Also watch the exit
-code of `message-broker:outbox:maintain` and its warnings about dropped
-unpublished rows.
+code of `message-broker:outbox:maintain`, which is not 0 when it kept a
+partition because of unpublished rows.

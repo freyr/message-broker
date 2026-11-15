@@ -126,8 +126,8 @@ $application->add(new OutboxMaintainCommand(new OutboxPartitionManager($pdo)));
 php bin/console message-broker:outbox:maintain --retention-days=7 --premake-days=3
 ```
 
-The retention period is also the age limit of an unpublished row: an expired
-partition is dropped with its unpublished rows. See
+An expired partition that still holds unpublished rows is kept, and the
+command exits with code 1; `--drop-unpublished` drops it with those rows. See
 [CLI_REFERENCE.md](CLI_REFERENCE.md) for the options and the exit codes, and
 [PRODUCTION.md](PRODUCTION.md) for pg_partman.
 

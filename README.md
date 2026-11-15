@@ -38,7 +38,7 @@ lane, a named drain of that table. Lanes isolate workloads from each other.
 Any number of identical relay workers drain one lane in parallel; scale by
 adding workers to the lane. The relay marks rows published and never deletes
 them. The command `message-broker:outbox:maintain` drops daily partitions
-after the retention period (default 7 days), unpublished rows included — see [docs/TRANSPORTS.md](docs/TRANSPORTS.md) and
+after the retention period (default 7 days). A partition with unpublished rows is kept, and the command exits non-zero, unless `--drop-unpublished` is set — see [docs/TRANSPORTS.md](docs/TRANSPORTS.md) and
 [docs/PRODUCTION.md](docs/PRODUCTION.md).
 
 ## Documentation

@@ -7,6 +7,7 @@ namespace Freyr\MessageBroker\Tests\Functional;
 use DateTimeImmutable;
 use DateTimeZone;
 use Freyr\MessageBroker\Console\OutboxMaintainCommand;
+use Freyr\MessageBroker\Outbox\ClaimOutcome;
 use Freyr\MessageBroker\Outbox\OutboxPartitionManager;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\PdoOutboxStore;
@@ -19,9 +20,9 @@ use Symfony\Component\Uid\Uuid;
 
 /**
  * Partition retention: daily partitions are created ahead (CREATE + ATTACH);
- * an expired partition is detached concurrently and dropped, unpublished rows
- * included (the retention period is their age limit). There is no DEFAULT
- * partition.
+ * an expired partition is detached concurrently and dropped. A partition with
+ * unpublished rows is kept by default, and dropped only with the opt-in
+ * dropUnpublished. There is no DEFAULT partition.
  */
 final class OutboxPartitionManagerTest extends FunctionalTestCase
 {
@@ -33,6 +34,12 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
         parent::setUp();
         foreach ($this->dailyPartitionNames() as $name) {
             self::$pdo->exec("DROP TABLE \"{$name}\"");
+        }
+        // Tests that keep a detached daily table leave it behind.
+        $leftovers = self::$pdo->query("SELECT relname FROM pg_class WHERE relkind = 'r' AND NOT relispartition AND relname ~ '^outbox_messages_p[0-9]{8}$'");
+        self::assertNotFalse($leftovers);
+        foreach ($leftovers->fetchAll(\PDO::FETCH_COLUMN) as $name) {
+            self::$pdo->exec(sprintf('DROP TABLE "%s"', (string) $name));
         }
         $this->partitions = new OutboxPartitionManager(self::$pdo);
         $this->store = new PdoOutboxStore(self::$pdo, static::platform());
@@ -139,59 +146,221 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
         $this->insertAt('2026-03-10 13:00:00');
     }
 
-    public function testPurgeDropsExpiredPartitionsIncludingUnpublishedRows(): void
+    public function testPurgeKeepsAnExpiredPartitionWithUnpublishedRowsAndDropsTheRest(): void
     {
         $this->partitions->ensurePartitions(3, self::day('2026-03-01'));
-        $this->insertAt('2026-03-01 10:00:00', published: true);  // expired → dropped
-        $this->insertAt('2026-03-02 10:00:00', published: false); // expired, unpublished → dropped, reported
+        $this->insertAt('2026-03-01 10:00:00', published: true);  // expired, all published → dropped
+        $this->insertAt('2026-03-02 10:00:00', published: false); // expired, unpublished → kept, reported
         $this->insertAt('2026-03-02 11:00:00', published: false);
+        $this->insertAt('2026-03-02 12:00:00', published: true);
         $this->insertAt('2026-03-04 10:00:00', published: false); // inside retention → untouched
 
         // today 2026-03-05, retention 2 days → cutoff 2026-03-03 00:00
         $report = $this->partitions->purge(2, today: self::day('2026-03-05'));
 
+        self::assertSame(['outbox_messages_p20260301'], $report->dropped);
+        self::assertSame([
+            'outbox_messages_p20260302' => 2,
+        ], $report->kept);
+        self::assertSame([], $report->unpublished);
+        self::assertTrue($report->hasKept());
+        self::assertSame(2, $report->unpublishedRowsKept());
+        self::assertSame(0, $report->unpublishedRowsDropped());
+        self::assertSame(
+            ['outbox_messages_p20260302', 'outbox_messages_p20260303', 'outbox_messages_p20260304'],
+            $this->dailyPartitionNames(),
+        );
+        self::assertSame(4, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
+    }
+
+    public function testPurgeDropsAKeptPartitionOnALaterRunOnceItsRowsArePublished(): void
+    {
+        $this->partitions->ensurePartitions(0, self::day('2026-03-01'));
+        $this->insertAt('2026-03-01 10:00:00', published: false);
+
+        $first = $this->partitions->purge(1, today: self::day('2026-03-05'));
+        self::assertSame([], $first->dropped);
+        self::assertSame([
+            'outbox_messages_p20260301' => 1,
+        ], $first->kept);
+
+        self::$pdo->exec('UPDATE outbox_messages SET published_at = created_at');
+        $second = $this->partitions->purge(1, today: self::day('2026-03-05'));
+
+        self::assertSame(['outbox_messages_p20260301'], $second->dropped);
+        self::assertSame([], $second->kept);
+        self::assertFalse($second->hasKept());
+        self::assertSame([], $this->dailyPartitionNames());
+    }
+
+    public function testPurgeWithDropUnpublishedDropsThePartitionAndReportsTheRows(): void
+    {
+        $this->partitions->ensurePartitions(3, self::day('2026-03-01'));
+        $this->insertAt('2026-03-01 10:00:00', published: true);
+        $this->insertAt('2026-03-02 10:00:00', published: false);
+        $this->insertAt('2026-03-02 11:00:00', published: false);
+        $this->insertAt('2026-03-04 10:00:00', published: false); // inside retention → untouched
+
+        $report = $this->partitions->purge(2, today: self::day('2026-03-05'), dropUnpublished: true);
+
         self::assertSame(['outbox_messages_p20260301', 'outbox_messages_p20260302'], $report->dropped);
         self::assertSame([
             'outbox_messages_p20260302' => 2,
         ], $report->unpublished);
+        self::assertSame([], $report->kept);
         self::assertSame(2, $report->unpublishedRowsDropped());
         self::assertSame(['outbox_messages_p20260303', 'outbox_messages_p20260304'], $this->dailyPartitionNames());
         self::assertSame(0, $this->standaloneDailyTableCount(), 'detached tables are dropped too');
         self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
     }
 
-    public function testDryRunReportsWithoutDropping(): void
+    public function testDryRunReportsWhatWouldBeKeptAndDroppedWithoutChangingAnything(): void
+    {
+        $this->partitions->ensurePartitions(1, self::day('2026-03-01'));
+        $this->insertAt('2026-03-01 10:00:00', published: false);
+        $this->insertAt('2026-03-02 10:00:00', published: true);
+
+        $report = $this->partitions->purge(1, dryRun: true, today: self::day('2026-03-05'));
+
+        self::assertSame(['outbox_messages_p20260302'], $report->dropped);
+        self::assertSame([
+            'outbox_messages_p20260301' => 1,
+        ], $report->kept);
+        self::assertSame(['outbox_messages_p20260301', 'outbox_messages_p20260302'], $this->dailyPartitionNames());
+    }
+
+    public function testDryRunWithDropUnpublishedReportsWithoutDropping(): void
     {
         $this->partitions->ensurePartitions(0, self::day('2026-03-01'));
         $this->insertAt('2026-03-01 10:00:00', published: false);
 
-        $report = $this->partitions->purge(1, dryRun: true, today: self::day('2026-03-05'));
+        $report = $this->partitions->purge(1, dryRun: true, today: self::day('2026-03-05'), dropUnpublished: true);
 
         self::assertSame(['outbox_messages_p20260301'], $report->dropped);
         self::assertSame(1, $report->unpublishedRowsDropped());
+        self::assertSame([], $report->kept);
         self::assertSame(['outbox_messages_p20260301'], $this->dailyPartitionNames());
+    }
+
+    public function testPurgeKeepsTheDetachedTableWhenAnUnpublishedRowArrivesBetweenTheCountAndTheDetach(): void
+    {
+        $this->partitions->ensurePartitions(1, self::day('2026-03-01'));
+        $this->insertAt('2026-03-01 10:00:00', published: true);
+        $this->insertAt('2026-03-02 10:00:00', published: true);
+
+        // A row commits on another connection after the first count and just
+        // before the detach runs.
+        $rival = self::newConnection();
+        [$dsn, $user, $password] = self::credentials();
+        $racing = new class($dsn, $user, $password, $rival) extends \PDO {
+            public function __construct(
+                string $dsn,
+                string $user,
+                string $password,
+                private readonly \PDO $rival
+            ) {
+                parent::__construct($dsn, $user, $password, [
+                    \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+                ]);
+            }
+
+            public function exec(string $statement): int|false
+            {
+                if (str_contains($statement, 'DETACH PARTITION "outbox_messages_p20260301" CONCURRENTLY')) {
+                    $this->rival->exec(
+                        "INSERT INTO outbox_messages (id, lane, message_name, body, headers, created_at, available_at, attempts)
+                         VALUES ('01900000-0000-7000-8000-0000000000b1', 'retention', 'm', '\\x7b7d', '{}', '2026-03-01 11:00:00', '2026-03-01 11:00:00', 0)",
+                    );
+                }
+
+                return parent::exec($statement);
+            }
+        };
+        $manager = new OutboxPartitionManager($racing);
+
+        $report = $manager->purge(1, today: self::day('2026-03-05'));
+
+        self::assertSame(['outbox_messages_p20260302'], $report->dropped, 'the loop goes on after a kept table');
+        self::assertSame([
+            'outbox_messages_p20260301' => 1,
+        ], $report->kept);
+        self::assertSame(0, $this->standaloneDailyTableCount(), 'the table is attached again, not left detached');
+        self::assertSame(['outbox_messages_p20260301'], $this->dailyPartitionNames());
+        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM outbox_messages WHERE published_at IS NULL'));
+
+        $this->publishAllClaimable('the relay claims the late row through outbox_messages');
+
+        // detach (second time, with the old CHECK constraint in place), then drop
+        $later = $this->partitions->purge(1, today: self::day('2026-03-05'));
+        self::assertSame(['outbox_messages_p20260301'], $later->dropped);
+        self::assertSame([], $later->kept);
+        self::assertSame([], $this->dailyPartitionNames());
+        self::assertSame(0, $this->standaloneDailyTableCount());
+    }
+
+    public function testPurgeAttachesAnExpiredDetachedTableThatHoldsUnpublishedRows(): void
+    {
+        self::$pdo->exec('CREATE TABLE outbox_messages_p20260301 (LIKE outbox_messages)');
+        self::$pdo->exec("INSERT INTO outbox_messages_p20260301 (id, lane, message_name, body, headers, created_at, available_at, attempts)
+            VALUES ('01900000-0000-7000-8000-0000000000a1', 'retention', 'm', '\\x7b7d', '{}', '2026-03-01 10:00:00', '2026-03-01 10:00:00', 0)");
+
+        $report = $this->partitions->purge(1, today: self::day('2026-03-05'));
+
+        self::assertSame([], $report->dropped);
+        self::assertSame([
+            'outbox_messages_p20260301' => 1,
+        ], $report->kept);
+        self::assertSame(0, $this->standaloneDailyTableCount());
+        self::assertSame(['outbox_messages_p20260301'], $this->dailyPartitionNames());
+
+        $this->publishAllClaimable('the relay can claim the row of the re-attached table');
+        $later = $this->partitions->purge(1, today: self::day('2026-03-05'));
+        self::assertSame(['outbox_messages_p20260301'], $later->dropped);
+        self::assertSame([], $this->dailyPartitionNames());
+        self::assertSame(0, $this->standaloneDailyTableCount());
+    }
+
+    public function testDryRunLeavesAnExpiredDetachedTableDetached(): void
+    {
+        self::$pdo->exec('CREATE TABLE outbox_messages_p20260301 (LIKE outbox_messages)');
+        self::$pdo->exec("INSERT INTO outbox_messages_p20260301 (id, lane, message_name, body, headers, created_at, available_at, attempts)
+            VALUES ('01900000-0000-7000-8000-0000000000a1', 'retention', 'm', '\\x7b7d', '{}', '2026-03-01 10:00:00', '2026-03-01 10:00:00', 0)");
+
+        $report = $this->partitions->purge(1, dryRun: true, today: self::day('2026-03-05'));
+
+        self::assertSame([
+            'outbox_messages_p20260301' => 1,
+        ], $report->kept);
+        self::assertSame(1, $this->standaloneDailyTableCount());
+    }
+
+    public function testPurgeFinalizesAndAttachesAPartitionWithAPendingDetachThatHoldsUnpublishedRows(): void
+    {
+        $this->partitions->ensurePartitions(0, self::day('2026-03-01'));
+        $this->insertAt('2026-03-01 10:00:00', published: false);
+        $this->leaveDetachPending('outbox_messages_p20260301');
+
+        $report = $this->partitions->purge(1, today: self::day('2026-03-05'));
+
+        self::assertSame([], $report->dropped);
+        self::assertSame([
+            'outbox_messages_p20260301' => 1,
+        ], $report->kept);
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM pg_inherits WHERE inhdetachpending'));
+        self::assertSame(['outbox_messages_p20260301'], $this->dailyPartitionNames());
+        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM outbox_messages WHERE published_at IS NULL'));
+
+        $this->publishAllClaimable('the relay claims the row of the re-attached partition');
+        $later = $this->partitions->purge(1, today: self::day('2026-03-05'));
+        self::assertSame(['outbox_messages_p20260301'], $later->dropped);
+        self::assertSame([], $this->dailyPartitionNames());
     }
 
     public function testPurgeFinishesAnInterruptedConcurrentDetach(): void
     {
         $this->partitions->ensurePartitions(0, self::day('2026-03-01'));
 
-        // An open transaction that uses outbox_messages makes the second phase
-        // of DETACH ... CONCURRENTLY wait; the timeout cancels it there, and
-        // the partition stays "detach pending".
-        $rival = self::newConnection();
-        $rival->beginTransaction();
-        $rival->query('SELECT COUNT(*) FROM outbox_messages');
-        self::$pdo->exec("SET statement_timeout = '1s'");
-        try {
-            self::$pdo->exec('ALTER TABLE outbox_messages DETACH PARTITION outbox_messages_p20260301 CONCURRENTLY');
-            self::fail('the detach must wait for the open transaction');
-        } catch (PDOException) {
-        } finally {
-            self::$pdo->exec('RESET statement_timeout');
-        }
-        $rival->rollBack();
-        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM pg_inherits WHERE inhdetachpending'));
+        $this->leaveDetachPending('outbox_messages_p20260301');
 
         $report = $this->partitions->purge(1, today: self::day('2026-03-05'));
 
@@ -223,7 +392,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
         }
     }
 
-    public function testMaintainCommandCreatesPartitionsAndDropsExpiredUnpublishedRows(): void
+    public function testMaintainCommandKeepsAnExpiredPartitionWithUnpublishedRowsAndFails(): void
     {
         $command = new CommandTester(new OutboxMaintainCommand($this->partitions));
 
@@ -234,18 +403,46 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
         $command->assertCommandIsSuccessful();
         self::assertContains('outbox_messages_p'.gmdate('Ymd'), $this->dailyPartitionNames());
 
-        // An expired daily partition with an unpublished row: dropped, reported, exit code 0.
         $old = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->modify('-10 day')->setTime(0, 0);
+        $name = 'outbox_messages_p'.$old->format('Ymd');
         $this->partitions->ensurePartitions(0, $old);
         $this->insertAt($old->format('Y-m-d').' 10:00:00', published: false);
 
-        $command->execute([
+        $status = $command->execute([
             '--retention-days' => '1',
         ]);
 
-        $command->assertCommandIsSuccessful();
-        self::assertStringContainsString('unpublished', $command->getDisplay());
-        self::assertNotContains('outbox_messages_p'.$old->format('Ymd'), $this->dailyPartitionNames());
+        self::assertSame(Command::FAILURE, $status);
+        self::assertStringContainsString("{$name} is kept: it holds 1 unpublished row(s)", $command->getDisplay());
+        self::assertContains($name, $this->dailyPartitionNames());
+
+        self::$pdo->exec('UPDATE outbox_messages SET published_at = created_at');
+        $status = $command->execute([
+            '--retention-days' => '1',
+        ]);
+
+        self::assertSame(Command::SUCCESS, $status);
+        self::assertStringContainsString("Dropped {$name}.", $command->getDisplay());
+        self::assertNotContains($name, $this->dailyPartitionNames());
+    }
+
+    public function testMaintainCommandDropsUnpublishedRowsWithTheOptIn(): void
+    {
+        $command = new CommandTester(new OutboxMaintainCommand($this->partitions));
+        $old = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->modify('-10 day')->setTime(0, 0);
+        $name = 'outbox_messages_p'.$old->format('Ymd');
+        $this->partitions->ensurePartitions(0, $old);
+        $this->insertAt($old->format('Y-m-d').' 10:00:00', published: false);
+
+        $status = $command->execute([
+            '--retention-days' => '1',
+            '--drop-unpublished' => true,
+        ]);
+
+        self::assertSame(Command::SUCCESS, $status);
+        self::assertStringContainsString("Dropped {$name}.", $command->getDisplay());
+        self::assertStringContainsString("{$name} held 1 unpublished row(s)", $command->getDisplay());
+        self::assertNotContains($name, $this->dailyPartitionNames());
     }
 
     public function testMaintainCommandRejectsInvalidOptions(): void
@@ -258,6 +455,38 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
         self::assertSame(Command::INVALID, $command->execute([
             '--premake-days' => '-1',
         ]));
+    }
+
+    /**
+     * An open transaction that uses outbox_messages makes the second phase of
+     * DETACH ... CONCURRENTLY wait; the timeout cancels it there, and the
+     * partition stays "detach pending".
+     */
+    private function leaveDetachPending(string $partition): void
+    {
+        $rival = self::newConnection();
+        $rival->beginTransaction();
+        $rival->query('SELECT COUNT(*) FROM outbox_messages');
+        self::$pdo->exec("SET statement_timeout = '1s'");
+        try {
+            self::$pdo->exec("ALTER TABLE outbox_messages DETACH PARTITION {$partition} CONCURRENTLY");
+            self::fail('the detach must wait for the open transaction');
+        } catch (PDOException) {
+        } finally {
+            self::$pdo->exec('RESET statement_timeout');
+        }
+        $rival->rollBack();
+        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM pg_inherits WHERE inhdetachpending'));
+    }
+
+    private function publishAllClaimable(string $message): void
+    {
+        $published = $this->store->drainClaimed(
+            'retention',
+            10,
+            static fn (array $claimed): ClaimOutcome => ClaimOutcome::published(array_map(static fn (OutboxRecord $record): string => $record->id, $claimed)),
+        );
+        self::assertSame(1, $published, $message);
     }
 
     private function insertAt(string $createdAtUtc, bool $published = false): void

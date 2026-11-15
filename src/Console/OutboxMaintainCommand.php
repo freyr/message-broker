@@ -14,8 +14,11 @@ use Symfony\Component\Console\Output\OutputInterface;
 /**
  * Outbox retention, meant for a daily schedule: create the daily partitions
  * ahead of time, then drop the expired ones (DETACH ... CONCURRENTLY, then
- * DROP). The retention period is also the age limit of an unpublished row:
- * expired unpublished rows are dropped and reported as a warning.
+ * DROP). An expired partition that still holds unpublished rows is kept by
+ * default: it is reported and the command exits with FAILURE, so a scheduler
+ * alerts. --drop-unpublished makes the retention period a hard age limit: such
+ * a partition is dropped with its unpublished rows, and the command warns.
+ * A dry run changes nothing and always exits with SUCCESS.
  */
 #[AsCommand(
     name: 'message-broker:outbox:maintain',
@@ -32,8 +35,9 @@ final class OutboxMaintainCommand extends Command
     protected function configure(): void
     {
         $this
-            ->addOption('retention-days', null, InputOption::VALUE_REQUIRED, 'Keep rows (published or not) at least this many days', '7')
+            ->addOption('retention-days', null, InputOption::VALUE_REQUIRED, 'Keep rows at least this many days; an expired partition with unpublished rows is kept unless --drop-unpublished', '7')
             ->addOption('premake-days', null, InputOption::VALUE_REQUIRED, 'Create daily partitions this many days ahead', '3')
+            ->addOption('drop-unpublished', null, InputOption::VALUE_NONE, 'Also drop expired partitions that hold unpublished rows (data loss); by default they are kept')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Report what would change without changing anything');
     }
 
@@ -56,7 +60,7 @@ final class OutboxMaintainCommand extends Command
             $output->writeln(sprintf('<info>Daily partitions present: %s.</info>', implode(', ', $created)));
         }
 
-        $report = $this->partitions->purge($retentionDays, $dryRun);
+        $report = $this->partitions->purge($retentionDays, $dryRun, dropUnpublished: $input->getOption('drop-unpublished') === true);
         $output->writeln(sprintf('<info>%sRetention cutoff: %s UTC.</info>', $prefix, $report->cutoff->format('Y-m-d H:i')));
         foreach ($report->dropped as $name) {
             $output->writeln("<info>{$prefix}Dropped {$name}.</info>");
@@ -64,8 +68,12 @@ final class OutboxMaintainCommand extends Command
         foreach ($report->unpublished as $name => $count) {
             $output->writeln("<comment>{$prefix}{$name} held {$count} unpublished row(s) older than the retention period; they are dropped.</comment>");
         }
+        foreach ($report->kept as $name => $count) {
+            $verb = $dryRun ? 'would be kept' : 'is kept';
+            $output->writeln("<error>{$prefix}{$name} {$verb}: it holds {$count} unpublished row(s) older than the retention period. Publish them, or use --drop-unpublished to drop them.</error>");
+        }
 
-        return Command::SUCCESS;
+        return $report->hasKept() && !$dryRun ? Command::FAILURE : Command::SUCCESS;
     }
 
     private static function intOption(mixed $value, bool $allowZero = false): ?int
