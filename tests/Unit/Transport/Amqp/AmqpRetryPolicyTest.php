@@ -28,6 +28,23 @@ final class AmqpRetryPolicyTest extends TestCase
         self::assertSame(200, $second->delayMs);
     }
 
+    public function testDefaultPolicyRetriesFourTimesThenDeadLetters(): void
+    {
+        $policy = new AmqpRetryPolicy();
+
+        self::assertSame(RetryAction::Retry, $policy->decide(4, new RuntimeException('boom'))->action);
+        self::assertSame(RetryAction::DeadLetter, $policy->decide(5, new RuntimeException('boom'))->action);
+    }
+
+    public function testDefaultBackoffStartsAtOneSecondAndCapsAtFiveMinutes(): void
+    {
+        $policy = new AmqpRetryPolicy(maxAttempts: 20);
+
+        self::assertSame(1_000, $policy->decide(1, new RuntimeException('boom'))->delayMs);
+        self::assertSame(4_000, $policy->decide(2, new RuntimeException('boom'))->delayMs);
+        self::assertSame(300_000, $policy->decide(10, new RuntimeException('boom'))->delayMs);
+    }
+
     public function testDeadLettersWhenAttemptsExhausted(): void
     {
         $policy = new AmqpRetryPolicy(

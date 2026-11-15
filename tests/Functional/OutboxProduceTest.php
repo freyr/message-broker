@@ -110,5 +110,10 @@ final class OutboxProduceTest extends FunctionalTestCase
 
         self::assertContains(BrokerEvents::PRODUCED, $events->names());
         self::assertSame($message->id, $events->records[0]['context']['message_id']);
+        self::assertSame([
+            'lane' => 'orders',
+            'message_id' => $message->id,
+            'message_name' => 'order.placed',
+        ], $events->records[0]['context']);
     }
 }

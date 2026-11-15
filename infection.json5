@@ -16,7 +16,8 @@
     },
     "testFramework": "phpunit",
     "testFrameworkOptions": "--no-progress",
-    // Baseline of the first full run (804 mutants, 543 killed). Raise it as tests improve.
-    "minMsi": 67,
-    "minCoveredMsi": 67
+    // Measured 95.7% (852 mutants, 37 escaped); one point of margin for timeout variance.
+    // Raise it as tests improve; never lower it.
+    "minMsi": 94,
+    "minCoveredMsi": 94
 }

@@ -21,5 +21,10 @@ final class SignalSupportTest extends TestCase
         self::assertNotNull($warning);
         self::assertStringContainsString('pcntl', $warning);
         self::assertStringContainsString('SIGKILL', $warning);
+        self::assertSame(
+            'ext-pcntl is not loaded: SIGTERM/SIGINT graceful shutdown is unavailable; '
+            .'the process can only be stopped with SIGKILL, which drops in-flight work.',
+            $warning,
+        );
     }
 }

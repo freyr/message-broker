@@ -223,4 +223,70 @@ final class OutboxClaimTest extends FunctionalTestCase
             'the new row awaits the next pass',
         );
     }
+
+    public function testInsertStoresTheGivenAvailableAtAndDefaultsItToCreatedAt(): void
+    {
+        $createdAt = EpochMillis::now();
+        $later = $createdAt + 90_000;
+        $this->store->insert(new OutboxRecord('01900000-0000-7000-8000-000000000001', self::LANE, 'order.placed', '{}', [], $createdAt, availableAt: $later));
+        $this->store->insert(new OutboxRecord('01900000-0000-7000-8000-000000000002', self::LANE, 'order.placed', '{}', [], $createdAt));
+
+        $availableAt = static fn (string $id): int => self::fetchInt(
+            "SELECT (EXTRACT(EPOCH FROM available_at) * 1000)::bigint FROM outbox_messages WHERE id = '{$id}'",
+        );
+        self::assertSame($later, $availableAt('01900000-0000-7000-8000-000000000001'));
+        self::assertSame($createdAt, $availableAt('01900000-0000-7000-8000-000000000002'));
+    }
+
+    public function testClaimedRecordsCarryAllProduceTimeHeaders(): void
+    {
+        $this->producer->produce(OrderPlaced::create('o-1', 100), [
+            'correlation_id' => 'c-1',
+            'tenant' => 't-9',
+        ]);
+
+        $seen = [];
+        $this->store->drainClaimed(
+            self::LANE,
+            10,
+            static function (array $claimed) use (&$seen): ClaimOutcome {
+                $seen = $claimed[0]->headers;
+
+                return ClaimOutcome::published(self::ids($claimed));
+            },
+        );
+
+        self::assertEquals([
+            'correlation_id' => 'c-1',
+            'tenant' => 't-9',
+        ], $seen);
+    }
+
+    public function testRetryOutcomeBacksOffEachRowAtItsOwnTimeAndCountsTheAttempt(): void
+    {
+        $this->producer->produce(OrderPlaced::create('o-1', 100));
+        $this->producer->produce(OrderPlaced::create('o-2', 200));
+        $base = EpochMillis::now() + 60_000;
+        $retryAt = [];
+
+        $this->store->drainClaimed(
+            self::LANE,
+            10,
+            static function (array $claimed) use (&$retryAt, $base): ClaimOutcome {
+                foreach (self::ids($claimed) as $position => $id) {
+                    $retryAt[$id] = $base + $position * 10_000;
+                }
+
+                return ClaimOutcome::retryAll($retryAt);
+            },
+        );
+
+        self::assertCount(2, $retryAt);
+        foreach ($retryAt as $id => $expected) {
+            self::assertSame($expected, self::fetchInt(
+                "SELECT (EXTRACT(EPOCH FROM available_at) * 1000)::bigint FROM outbox_messages WHERE id = '{$id}'",
+            ));
+            self::assertSame(1, self::fetchInt("SELECT attempts FROM outbox_messages WHERE id = '{$id}'"));
+        }
+    }
 }
