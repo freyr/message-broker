@@ -91,14 +91,17 @@ needs a dedicated `AMQPChannel` — publisher confirms are channel-global
 state, so nothing else may publish on the same channel.
 
 ```php
+use Freyr\MessageBroker\Outbox\Relay;
+use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
-use Freyr\MessageBroker\Transport\Amqp\AmqpRelay;
 
-$relay = new AmqpRelay(
+$relay = new Relay(
     outbox: $outbox,
-    amqp: $channel,                                  // a dedicated PhpAmqpLib AMQPChannel
-    publish: new AmqpPublishConfig(exchange: 'orders'),
-    contentType: JsonWireFormat::CONTENT_TYPE,
+    publisher: new AmqpMessagePublisher(
+        $channel,                                    // a dedicated PhpAmqpLib AMQPChannel
+        new AmqpPublishConfig(exchange: 'orders'),
+        JsonWireFormat::CONTENT_TYPE,
+    ),
     lane: 'orders',
 );
 $relay->run(); // blocks; SIGTERM/SIGINT to stop
