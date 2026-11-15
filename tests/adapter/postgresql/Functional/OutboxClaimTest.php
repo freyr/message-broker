@@ -9,7 +9,7 @@ use Freyr\MessageBroker\Outbox\ClaimOutcome;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
-use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
+use Freyr\MessageBroker\Testing\OrderPlaced;
 use Freyr\MessageBroker\Time\EpochMillis;
 use PDO;
 
@@ -140,21 +140,6 @@ final class OutboxClaimTest extends FunctionalTestCase
         self::assertSame(0, $rounds);
     }
 
-    public function testEmptyClaimReturnsZeroWithoutInvokingCallback(): void
-    {
-        $invoked = false;
-        $published = $this->store->drainClaimed(self::LANE, 10, function (array $claimed) use (
-            &$invoked
-        ): ClaimOutcome {
-            $invoked = true;
-
-            return ClaimOutcome::published([]);
-        });
-
-        self::assertSame(0, $published);
-        self::assertFalse($invoked, 'callback must not run for an empty claim');
-    }
-
     public function testConcurrentClaimsAreDisjointAndNonBlocking(): void
     {
         $this->producer->produce(OrderPlaced::create('o-1', 100));
@@ -243,30 +228,6 @@ final class OutboxClaimTest extends FunctionalTestCase
         );
         self::assertSame($later, $availableAt('01900000-0000-7000-8000-000000000001'));
         self::assertSame($createdAt, $availableAt('01900000-0000-7000-8000-000000000002'));
-    }
-
-    public function testClaimedRecordsCarryAllProduceTimeHeaders(): void
-    {
-        $this->producer->produce(OrderPlaced::create('o-1', 100), [
-            'correlation_id' => 'c-1',
-            'tenant' => 't-9',
-        ]);
-
-        $seen = [];
-        $this->store->drainClaimed(
-            self::LANE,
-            10,
-            static function (array $claimed) use (&$seen): ClaimOutcome {
-                $seen = $claimed[0]->headers;
-
-                return ClaimOutcome::published(self::ids($claimed));
-            },
-        );
-
-        self::assertEquals([
-            'correlation_id' => 'c-1',
-            'tenant' => 't-9',
-        ], $seen);
     }
 
     public function testRetryOutcomeBacksOffEachRowAtItsOwnTimeAndCountsTheAttempt(): void

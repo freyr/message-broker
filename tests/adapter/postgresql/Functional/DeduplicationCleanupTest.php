@@ -18,15 +18,6 @@ final class DeduplicationCleanupTest extends FunctionalTestCase
         $this->store = new PostgreSqlDeduplicationStore(self::$pdo);
     }
 
-    public function testAcquireIsAtomicPerMessageAndConsumer(): void
-    {
-        $incoming = $this->incoming('m-1');
-
-        self::assertTrue($this->store->acquire($incoming, 'orders_consumer'));
-        self::assertFalse($this->store->acquire($incoming, 'orders_consumer'), 'duplicate must be rejected');
-        self::assertTrue($this->store->acquire($incoming, 'other_consumer'), 'dedup is scoped per consumer');
-    }
-
     public function testCleanupRemovesOnlyEntriesCreatedBeforeThreshold(): void
     {
         $this->store->acquire($this->incoming('m-old'), 'orders_consumer');

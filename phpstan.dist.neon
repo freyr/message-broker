@@ -4,3 +4,10 @@ parameters:
         - src/broker/
         - src/adapter/postgresql/
         - src/adapter/amqp/
+    ignoreErrors:
+        # The traits of the test kit are used by test classes, which PHPStan does not analyse.
+        -
+            identifier: trait.unused
+            paths:
+                - src/broker/Testing/TestIsolation.php
+                - src/adapter/postgresql/Testing/PostgreSqlTestSupport.php

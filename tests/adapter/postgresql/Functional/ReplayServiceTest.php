@@ -12,8 +12,8 @@ use Freyr\MessageBroker\Message;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
-use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
-use Freyr\MessageBroker\Tests\Fixtures\RecordingEvents;
+use Freyr\MessageBroker\Testing\OrderPlaced;
+use Freyr\MessageBroker\Testing\RecordingEvents;
 use PDO;
 use RuntimeException;
 

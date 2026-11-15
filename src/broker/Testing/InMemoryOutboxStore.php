@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\MessageBroker\Tests\Fixtures;
+namespace Freyr\MessageBroker\Testing;
 
 use Freyr\MessageBroker\Outbox\ClaimOutcome;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
@@ -15,16 +15,12 @@ use LogicException;
  * claims unpublished, due rows of a lane (oldest first, up to the limit),
  * passes them to the callback, and applies the outcome (published rows are
  * marked, retried rows get attempts + 1 and the new available_at). When the
- * callback throws, nothing is applied.
+ * callback throws, nothing is applied. Rows of an open claim are skipped by a
+ * nested claim of the same store, as a database skips locked rows. Pass an
+ * {@see InMemoryTransaction} to make inserts roll back with it.
  */
-final class InMemoryOutboxStore implements OutboxStore
+final class InMemoryOutboxStore implements OutboxStore, TransactionParticipant
 {
-    /** @var array<string, OutboxRecord> row id => current state */
-    private array $rows = [];
-
-    /** @var array<string, true> */
-    private array $published = [];
-
     /** @var list<int> sizes of the claims that were passed to the callback */
     public array $claimSizes = [];
 
@@ -32,6 +28,20 @@ final class InMemoryOutboxStore implements OutboxStore
 
     /** @var (callable(int): void)|null called at the start of each drainClaimed() with the call number */
     public $onDrain;
+
+    /** @var array<string, OutboxRecord> row id => current state */
+    private array $rows = [];
+
+    /** @var array<string, true> */
+    private array $published = [];
+
+    /** @var array<string, true> rows of the claims that are open now */
+    private array $claiming = [];
+
+    public function __construct(?InMemoryTransaction $transaction = null)
+    {
+        $transaction?->enlist($this);
+    }
 
     public function insert(OutboxRecord $record): void
     {
@@ -51,7 +61,10 @@ final class InMemoryOutboxStore implements OutboxStore
             if (count($claimed) >= $limit) {
                 break;
             }
-            if ($row->lane === $lane && !isset($this->published[$id]) && ($row->availableAt ?? 0) <= $now) {
+            if ($row->lane === $lane
+                && !isset($this->published[$id])
+                && !isset($this->claiming[$id])
+                && ($row->availableAt ?? 0) <= $now) {
                 $claimed[] = $row;
             }
         }
@@ -60,15 +73,25 @@ final class InMemoryOutboxStore implements OutboxStore
         }
         $this->claimSizes[] = count($claimed);
 
-        /** @var ClaimOutcome $outcome */
-        $outcome = $publish($claimed);
-
         $claimedIds = array_map(static fn (OutboxRecord $r): string => $r->id, $claimed);
-        $retryIds = array_map('strval', array_keys($outcome->retryAtMs));
-        $overlap = array_intersect($outcome->publishedIds, $retryIds);
-        $foreign = array_diff([...$outcome->publishedIds, ...$retryIds], $claimedIds);
-        if ($overlap !== [] || $foreign !== []) {
-            throw new LogicException('The outcome breaks the drainClaimed() contract.');
+        foreach ($claimedIds as $id) {
+            $this->claiming[$id] = true;
+        }
+
+        try {
+            /** @var ClaimOutcome $outcome */
+            $outcome = $publish($claimed);
+
+            $retryIds = array_map('strval', array_keys($outcome->retryAtMs));
+            $overlap = array_intersect($outcome->publishedIds, $retryIds);
+            $foreign = array_diff([...$outcome->publishedIds, ...$retryIds], $claimedIds);
+            if ($overlap !== [] || $foreign !== []) {
+                throw new LogicException('The outcome breaks the drainClaimed() contract.');
+            }
+        } finally {
+            foreach ($claimedIds as $id) {
+                unset($this->claiming[$id]);
+            }
         }
 
         foreach ($outcome->publishedIds as $id) {
@@ -108,5 +131,16 @@ final class InMemoryOutboxStore implements OutboxStore
             array_map('strval', array_keys($this->rows)),
             fn (string $id): bool => !isset($this->published[$id]),
         ));
+    }
+
+    public function snapshot(): mixed
+    {
+        return [$this->rows, $this->published];
+    }
+
+    public function restore(mixed $snapshot): void
+    {
+        /** @var array{array<string, OutboxRecord>, array<string, true>} $snapshot */
+        [$this->rows, $this->published] = $snapshot;
     }
 }

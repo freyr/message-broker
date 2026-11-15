@@ -28,6 +28,10 @@
             <directory>src/adapter/postgresql</directory>
             <directory>src/adapter/amqp</directory>
         </include>
+        <exclude>
+            <directory>src/broker/Testing</directory>
+            <directory>src/adapter/postgresql/Testing</directory>
+        </exclude>
     </source>
 
     <php>

@@ -1,7 +1,10 @@
 {
     "$schema": "vendor/infection/infection/resources/schema.json",
     "source": {
-        "directories": ["src/broker", "src/adapter/postgresql", "src/adapter/amqp"]
+        "directories": ["src/broker", "src/adapter/postgresql", "src/adapter/amqp"],
+        // The test kit (src/broker/Testing, src/adapter/postgresql/Testing) is test code: it is not mutated.
+        // The names are relative to each source directory.
+        "excludes": ["Testing"]
     },
     // Parallel workers are isolated: each TEST_TOKEN gets its own database and queue names.
     "timeout": 20,

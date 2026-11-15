@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Freyr\MessageBroker\Tests\Fixtures;
+namespace Freyr\MessageBroker\Testing;
 
 use Freyr\MessageBroker\Message;
 

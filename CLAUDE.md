@@ -16,7 +16,17 @@ Three folders, three PSR-4 roots (the package is one Composer package for now; a
 - `src/adapter/postgresql/` is the PostgreSQL adapter, flat namespace `Freyr\MessageBroker\Adapter\PostgreSql\` (stores, retention, schema installer, `PdoTransaction`).
 - `src/adapter/amqp/` is the AMQP adapter, flat namespace `Freyr\MessageBroker\Adapter\Amqp\` (consumer, publisher, wait queue, configs).
 
-An adapter imports the core and its own package only, never the other adapter. Deptrac enforces these rules (`deptrac.yaml`): the core uses no adapter, no `PDO` and no `PhpAmqpLib`; the PostgreSQL adapter uses no `PhpAmqpLib`; the AMQP adapter uses no `PDO`. Tests follow the same split: `tests/broker/` (no database, no broker; also the shared fixtures), `tests/adapter/postgresql/` (needs PostgreSQL) and `tests/adapter/amqp/` (needs RabbitMQ and PostgreSQL), run as the PHPUnit suites `broker`, `postgresql` and `amqp`. A test of one adapter never imports a test class of the other; the shared database set-up is the trait `Tests\Fixtures\PostgreSqlTestSupport`. The upgrade table from 0.6.x is in `UPGRADE.md`.
+An adapter imports the core and its own package only, never the other adapter. Deptrac enforces these rules (`deptrac.yaml`): the core uses no adapter, no `PDO` and no `PhpAmqpLib`; the PostgreSQL adapter uses no `PhpAmqpLib`; the AMQP adapter uses no `PDO`. Tests follow the same split: `tests/broker/` (no database, no broker), `tests/adapter/postgresql/` (needs PostgreSQL) and `tests/adapter/amqp/` (needs RabbitMQ and PostgreSQL), run as the PHPUnit suites `broker`, `postgresql` and `amqp`. A test under `tests/adapter/` never imports the test namespace of the core (`Freyr\MessageBroker\Tests\`) or of the other adapter; what adapter tests share comes from the test kit (below). The upgrade table from 0.6.x is in `UPGRADE.md`.
+
+### Test kit
+
+`src/broker/Testing/` (namespace `Freyr\MessageBroker\Testing\`) is in `src`, not in `tests`, because an adapter repo gets the `src` of the core and not its `tests`. It holds, and may use PHPUnit (so `phpunit/phpunit` is in `suggest`):
+
+- The abstract contract test cases `OutboxStoreContractTestCase`, `DeduplicationStoreContractTestCase`, `DeadLetterStoreContractTestCase`, `TransactionContractTestCase` and `OutboxPublisherContractTestCase`. An adapter test extends one, returns its implementation from the abstract factory method, and inherits the tests. The tests state the contract of the port and never a detail of PostgreSQL or RabbitMQ. A new adapter (MySQL, SQS) must extend them.
+- The in-memory fakes `InMemoryOutboxStore`, `InMemoryDeduplicationStore`, `InMemoryDeadLetterStore`, `InMemoryTransaction` (the in-memory stores join it and roll back with it), `FakeOutboxPublisher` and `RecordingDeliveryControl`. Each fake passes the same contract test case as the real implementation (`tests/broker/Testing/`).
+- Small helpers: `OrderPlaced`, `Unserializable`, `Recording*`, `StubDeduplicationStore` and the trait `TestIsolation` (`isolated()` names for parallel workers).
+
+`src/adapter/postgresql/Testing/PostgreSqlTestSupport` is the PostgreSQL part (connection, schema, `TEST_TOKEN` database); the AMQP adapter tests use it too. Test code in `Testing/` is not mutated (Infection) and not counted as coverage. See `docs/TESTING.md`.
 
 ## Connection pooling
 
@@ -43,4 +53,4 @@ Infection measures the quality of the tests; pcov (in the Docker image) collects
 
 CI runs Infection on the changed lines of `src/broker/` and `src/adapter/` on each pull request (part of `ci-gate`), and the full suite on `main`. A pull request whose changed lines score below the threshold fails: add or tighten the tests that the escaped mutants show.
 
-Parallel workers are isolated. Infection sets `TEST_TOKEN` for each worker; the functional base classes (`FunctionalTestCase`, `AmqpFunctionalTestCase`, both use `PostgreSqlTestSupport`) then use the database `<name>_t<token>` (created on first use) and appends `_t<token>` to queue and exchange names. Pass every AMQP queue or exchange name of a functional test through `self::isolated()`.
+Parallel workers are isolated. Infection sets `TEST_TOKEN` for each worker; the functional base classes (`FunctionalTestCase`, `AmqpFunctionalTestCase`, both use `Adapter\PostgreSql\Testing\PostgreSqlTestSupport`) then use the database `<name>_t<token>` (created on first use) and appends `_t<token>` to queue and exchange names. Pass every AMQP queue or exchange name of a functional test through `self::isolated()`.

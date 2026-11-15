@@ -35,7 +35,8 @@
         "symplify/easy-coding-standard": "^13.3"
     },
     "suggest": {
-        "php-amqplib/php-amqplib": "Required for the AMQP transport"
+        "php-amqplib/php-amqplib": "Required for the AMQP transport",
+        "phpunit/phpunit": "Required for Freyr\\MessageBroker\\Testing\\*, the test kit of contract test cases and fakes"
     },
     "extra": {
         "branch-alias": {

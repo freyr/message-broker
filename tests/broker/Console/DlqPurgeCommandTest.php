@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Console;
 
 use Freyr\MessageBroker\Console\DlqPurgeCommand;
+use Freyr\MessageBroker\Testing\InMemoryDeadLetterStore;
 use Freyr\MessageBroker\Tests\Fixtures\DeadLetterFactory;
-use Freyr\MessageBroker\Tests\Fixtures\InMemoryDeadLetterStore;
 use Freyr\MessageBroker\Time\EpochMillis;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\Clock;
@@ -74,8 +74,6 @@ final class DlqPurgeCommandTest extends TestCase
 
     public function testForcedPurgePassesAllFiltersAndReportsTheCount(): void
     {
-        $this->store->purgeResult = 2;
-
         $status = $this->tester->execute([
             '--force' => true,
             '--name' => 'order.placed',
@@ -86,7 +84,8 @@ final class DlqPurgeCommandTest extends TestCase
         ]);
 
         self::assertSame(0, $status);
-        self::assertSame("Purged 2 dead letters.\n", $this->tester->getDisplay());
+        self::assertSame("Purged 1 dead letters.\n", $this->tester->getDisplay());
+        self::assertSame(2, $this->store->count(), 'only dl-1 matches the three filters');
         self::assertSame([[
             'messageName' => 'order.placed',
             'source' => 'orders_q',
