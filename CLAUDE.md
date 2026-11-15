@@ -16,7 +16,7 @@ Three folders, three PSR-4 roots (the package is one Composer package for now; a
 - `src/adapter/postgresql/` is the PostgreSQL adapter, flat namespace `Freyr\MessageBroker\Adapter\PostgreSql\` (stores, retention, schema installer, `PdoTransaction`).
 - `src/adapter/amqp/` is the AMQP adapter, flat namespace `Freyr\MessageBroker\Adapter\Amqp\` (consumer, publisher, wait queue, configs).
 
-An adapter imports the core and its own package only, never the other adapter. Tests follow the same split: `tests/broker/` (no database, no broker; also the shared fixtures), `tests/adapter/postgresql/` (needs PostgreSQL) and `tests/adapter/amqp/` (needs RabbitMQ and PostgreSQL), run as the PHPUnit suites `broker`, `postgresql` and `amqp`. A test of one adapter never imports a test class of the other; the shared database set-up is the trait `Tests\Fixtures\PostgreSqlTestSupport`. The upgrade table from 0.6.x is in `UPGRADE.md`.
+An adapter imports the core and its own package only, never the other adapter. Deptrac enforces these rules (`deptrac.yaml`): the core uses no adapter, no `PDO` and no `PhpAmqpLib`; the PostgreSQL adapter uses no `PhpAmqpLib`; the AMQP adapter uses no `PDO`. Tests follow the same split: `tests/broker/` (no database, no broker; also the shared fixtures), `tests/adapter/postgresql/` (needs PostgreSQL) and `tests/adapter/amqp/` (needs RabbitMQ and PostgreSQL), run as the PHPUnit suites `broker`, `postgresql` and `amqp`. A test of one adapter never imports a test class of the other; the shared database set-up is the trait `Tests\Fixtures\PostgreSqlTestSupport`. The upgrade table from 0.6.x is in `UPGRADE.md`.
 
 ## Connection pooling
 
@@ -30,6 +30,7 @@ Run quality gates and tests through Docker (never host PHP):
 docker compose run --rm php vendor/bin/phpunit
 docker compose run --rm php vendor/bin/phpstan analyse --memory-limit=-1
 docker compose run --rm php vendor/bin/ecs check
+docker compose run --rm php vendor/bin/deptrac analyse
 ```
 
 Functional tests need PostgreSQL + RabbitMQ — both in compose.
