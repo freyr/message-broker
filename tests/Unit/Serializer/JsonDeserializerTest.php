@@ -62,6 +62,31 @@ final class JsonDeserializerTest extends TestCase
         ]);
     }
 
+    public function testBodyNestedJustBelowTheJsonDecodeDepthLimitIsAccepted(): void
+    {
+        $incoming = $this->deserializer->deserialize(str_repeat('[', 511).str_repeat(']', 511), self::envelope());
+
+        self::assertSame('m-1', $incoming->messageId);
+    }
+
+    public function testBodyNestedToTheJsonDecodeDepthLimitIsMalformed(): void
+    {
+        $this->expectException(MalformedMessage::class);
+        $this->expectExceptionMessage('Body is not valid JSON');
+
+        $this->deserializer->deserialize(str_repeat('[', 512).str_repeat(']', 512), self::envelope());
+    }
+
+    /** @return array<string, mixed> */
+    private static function envelope(): array
+    {
+        return [
+            MetadataHeader::MESSAGE_ID => 'm-1',
+            MetadataHeader::MESSAGE_NAME => 'order.placed',
+            MetadataHeader::CREATED_AT => 1765476000123,
+        ];
+    }
+
     public function testBodyNotDecodingToObjectThrowsMalformedMessage(): void
     {
         $bytes = (string) json_encode('just a string');

@@ -149,6 +149,53 @@ final class DeadLetterStoreTest extends FunctionalTestCase
         self::assertSame($replayed->id, $done[0]->id);
     }
 
+    public function testListReturnsAtMostOneHundredRowsByDefault(): void
+    {
+        for ($i = 0; $i < 101; ++$i) {
+            $this->store->store($this->deadLetter(messageId: "m-{$i}"));
+        }
+
+        self::assertCount(100, $this->store->list());
+        self::assertCount(101, $this->store->list(limit: 101));
+    }
+
+    public function testHeadersNestedJustBelowTheJsonDecodeDepthLimitRoundTrip(): void
+    {
+        $headers = 'leaf';
+        for ($level = 0; $level < 511; ++$level) {
+            $headers = [
+                'k' => $headers,
+            ];
+        }
+        $deadLetter = DeadLetter::fromFailure(
+            source: 'orders_q',
+            messageId: 'm-deep',
+            messageName: 'order.placed',
+            body: '{}',
+            headers: $headers,
+            error: new RuntimeException('boom'),
+            attempts: 1,
+        );
+        $this->store->store($deadLetter);
+
+        self::assertSame($headers, $this->store->find($deadLetter->id)?->headers);
+    }
+
+    public function testHeadersNestedToTheJsonDecodeDepthLimitAreRefusedOnRead(): void
+    {
+        $deadLetter = $this->deadLetter(messageId: 'm-deeper');
+        $this->store->store($deadLetter);
+        $json = str_repeat('{"k":', 512).'1'.str_repeat('}', 512);
+        self::$pdo->prepare('UPDATE dead_letters SET headers = :headers WHERE id = :id')->execute([
+            'headers' => $json,
+            'id' => $deadLetter->id,
+        ]);
+
+        $this->expectException(\JsonException::class);
+
+        $this->store->find($deadLetter->id);
+    }
+
     private function deadLetter(string $messageId, string $messageName = 'order.placed'): DeadLetter
     {
         return DeadLetter::fromFailure(
