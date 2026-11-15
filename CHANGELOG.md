@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-The first release of the standalone library (PostgreSQL and AMQP, no framework) will be 0.3.0. The versions 0.1.0 to 0.2.3 belong to the earlier Symfony Messenger bundle of the same package name; their tags point to that separate history.
+The first release of the standalone library (PostgreSQL and AMQP, no framework) is 0.5.0. The versions 0.1.0 to 0.4.0 belong to the earlier Symfony Messenger bundle of the same package name; their tags point to that separate history.
 
 ### Added
 
