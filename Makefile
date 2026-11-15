@@ -1,4 +1,4 @@
-.PHONY: help build logs shell install test phpstan deptrac cs-check cs-fix infection bench bench-consumer
+.PHONY: help build logs shell install test phpstan deptrac cs-check cs-fix infection split-rehearsal bench bench-consumer
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -35,6 +35,9 @@ cs-fix: ## Fix code style with ECS
 
 infection: ## Mutation testing with Infection and pcov (full run, all CPU cores); ARGS for extra options
 	docker compose run --rm php vendor/bin/infection --threads=max $(ARGS)
+
+split-rehearsal: ## Split rehearsal of one future package; PACKAGE=core|postgresql|amqp, ARGS=--infection
+	docker compose run --rm php tools/split-rehearsal.sh $(PACKAGE) $(ARGS)
 
 bench: ## Relay throughput benchmark; ARGS="<rows> <workers> <batch> [full|db-only|amqp-only]"
 	docker compose run --rm php php tests/adapter/amqp/Scripts/amqp-relay-bench.php $(ARGS)

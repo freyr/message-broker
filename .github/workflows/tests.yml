@@ -244,10 +244,78 @@ jobs:
           AMQP_VHOST: "/"
         run: vendor/bin/phpunit
 
+  # Each future package (see packages/ and "Package manifests and split rehearsal" in CLAUDE.md) is assembled in a
+  # temporary folder, installed ALONE through Composer path repositories, and its tests run alone.
+  # The core entry does not use the services; all entries have them for a simple matrix.
+  split-rehearsal:
+    name: Split rehearsal (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [core, postgresql, amqp]
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: message_broker_test
+          POSTGRES_USER: broker
+          POSTGRES_PASSWORD: broker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U broker"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+      rabbitmq:
+        image: rabbitmq:4.3.1-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: guest
+          RABBITMQ_DEFAULT_PASS: guest
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd="rabbitmq-diagnostics ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+    env:
+      POSTGRES_DSN: "pgsql:host=127.0.0.1;port=5432;dbname=message_broker_test"
+      POSTGRES_USER: broker
+      POSTGRES_PASSWORD: broker
+      AMQP_HOST: 127.0.0.1
+      AMQP_PORT: "5672"
+      AMQP_USER: guest
+      AMQP_PASSWORD: guest
+      AMQP_VHOST: "/"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # pcov is only needed for Infection, which runs on main.
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_pgsql, sockets, mbstring, pcntl
+          coverage: ${{ github.event_name == 'push' && 'pcov' || 'none' }}
+          tools: composer:v2
+
+      - name: Split rehearsal
+        if: github.event_name == 'pull_request'
+        run: tools/split-rehearsal.sh ${{ matrix.package }}
+
+      - name: Split rehearsal (with Infection)
+        if: github.event_name == 'push'
+        run: tools/split-rehearsal.sh ${{ matrix.package }} --infection
+
   ci-gate:
     name: ci-gate
     if: always()
-    needs: [ecs, phpstan, deptrac, functional-tests, mutation]
+    needs: [ecs, phpstan, deptrac, functional-tests, mutation, split-rehearsal]
     runs-on: ubuntu-latest
     steps:
       - uses: freyr/.github/actions/ci-gate@b0c5431e29887b95f0031751c6d92506a2b2fc81 # v2.0.0
