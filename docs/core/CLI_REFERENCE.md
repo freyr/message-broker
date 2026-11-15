@@ -24,7 +24,8 @@ Duration options (`--since`, `--older-than`) share one format:
 Creates the `outbox_messages` table (partitioned by `created_at`, with the
 first daily partitions and no default partition), `message_deduplication`,
 and `dead_letters` (or prints the DDL without executing it). A second run
-skips the partitions that are already attached.
+skips the partitions that are already attached. The tables and the installer
+are described in [../postgresql/STORAGE.md](../postgresql/STORAGE.md).
 
 **Constructor:** `new SetupSchemaCommand(SchemaInstaller $installer)`, for example
 `new SetupSchemaCommand(new PostgreSqlSchemaInstaller($pdo))`. The `SchemaInstaller` port
@@ -51,25 +52,8 @@ for example `new OutboxMaintainCommand(new PostgreSqlOutboxRetention($pdo))`.
 | `--drop-unpublished` | Drop an expired partition even when it holds unpublished rows (data loss). Default: keep it. |
 | `--dry-run` | Report what would be dropped and what would be kept; change nothing. |
 
-The command creates each missing partition as a plain table and attaches it
-(`ATTACH PARTITION`). It drops each daily partition that lies wholly before the
-cutoff: `DETACH PARTITION ... CONCURRENTLY`, then `DROP TABLE`. Neither step
-takes an `ACCESS EXCLUSIVE` lock on `outbox_messages`, so producers and relays
-never wait for it. The command also finishes a detach that an earlier run did
-not complete, and drops an expired table that an earlier run detached.
-
-By default, an expired partition that holds unpublished rows
-(`published_at IS NULL`) is kept, not dropped. The command prints each kept
-partition with its number of unpublished rows. A later run drops the partition
-once its rows are published. A table that is detached but holds unpublished
-rows (an expired table from an earlier run, a pending detach, or a row that
-arrived during the detach) is attached again, so the relay can publish its
-rows.
-
-With `--drop-unpublished`, the retention period is a hard age limit: the
-command drops the partition with its unpublished rows and prints a warning with
-the number of rows. A relay that stays broken for longer than the retention
-period loses those messages.
+The partitions, the retention rules and the locks are described in
+[../postgresql/RETENTION.md](../postgresql/RETENTION.md).
 
 Exit codes: `0` success (also when it dropped unpublished rows with
 `--drop-unpublished`, and always on `--dry-run`); `1` at least one expired
@@ -165,11 +149,10 @@ Deletes dead letters.
 
 ## `message-broker:dedup:cleanup`
 
-Prunes `message_deduplication` entries older than a given age. It deletes in
-chunks of 10,000 rows (`PostgreSqlDeduplicationStore` constructor argument
-`deleteChunkSize`); each chunk is a short statement that the index on
-`created_at` serves, so the cleanup holds no long transaction. Keep the
-threshold longer than the time in which a duplicate can arrive.
+Prunes `message_deduplication` entries older than a given age. Keep the
+threshold longer than the time in which a duplicate can arrive. The chunked
+delete of the PostgreSQL store is described in
+[../postgresql/STORAGE.md](../postgresql/STORAGE.md).
 
 **Constructor:** `new DedupCleanupCommand(DeduplicationStore $store)`
 

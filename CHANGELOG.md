@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Test kit in the core, namespace `Freyr\MessageBroker\Testing\` (`src/broker/Testing/`): the abstract contract test cases `OutboxStoreContractTestCase`, `DeduplicationStoreContractTestCase`, `DeadLetterStoreContractTestCase`, `TransactionContractTestCase` and `OutboxPublisherContractTestCase` for the authors of adapters, and the in-memory fakes `InMemoryOutboxStore`, `InMemoryDeduplicationStore`, `InMemoryDeadLetterStore`, `InMemoryTransaction` and `FakeOutboxPublisher` (and `RecordingDeliveryControl`). The test cases extend the PHPUnit `TestCase`, so `phpunit/phpunit` is now in `suggest`. `Adapter\PostgreSql\Testing\PostgreSqlTestSupport` is the PostgreSQL test set-up for the adapter tests. See `docs/TESTING.md`
+- Test kit in the core, namespace `Freyr\MessageBroker\Testing\` (`src/broker/Testing/`): the abstract contract test cases `OutboxStoreContractTestCase`, `DeduplicationStoreContractTestCase`, `DeadLetterStoreContractTestCase`, `TransactionContractTestCase` and `OutboxPublisherContractTestCase` for the authors of adapters, and the in-memory fakes `InMemoryOutboxStore`, `InMemoryDeduplicationStore`, `InMemoryDeadLetterStore`, `InMemoryTransaction` and `FakeOutboxPublisher` (and `RecordingDeliveryControl`). The test cases extend the PHPUnit `TestCase`, so `phpunit/phpunit` is now in `suggest`. `Adapter\PostgreSql\Testing\PostgreSqlTestSupport` is the PostgreSQL test set-up for the adapter tests. See `docs/core/TESTING.md`
 
 ### Changed
 

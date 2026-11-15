@@ -83,7 +83,7 @@ for name in core postgresql amqp; do
     mkdir -p "${target}"
     cp "${REPO_ROOT}/packages/${name}/composer.json" \
         "${REPO_ROOT}/packages/${name}/phpunit.xml.dist" \
-        "${REPO_ROOT}/packages/${name}/infection.json5" "${target}/"
+        "${REPO_ROOT}/packages/${name}/infection.json5" "${REPO_ROOT}/packages/${name}/README.md" "${target}/"
     cp -R "${REPO_ROOT}/$(package_src "${name}")" "${target}/src"
     cp -R "${REPO_ROOT}/$(package_tests "${name}")" "${target}/tests"
 done
