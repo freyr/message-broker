@@ -94,6 +94,8 @@ final class AmqpConsumer
      * The attempt is the x-attempt header when it is an int (at least 1), else 1.
      * The delivery count is the x-delivery-count header (quorum queues) when it
      * is an int, else null.
+     *
+     * @internal
      */
     public function deliveryFrom(AMQPMessage $message): Delivery
     {
