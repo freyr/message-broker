@@ -9,8 +9,8 @@ use Freyr\MessageBroker\Consumer\IncomingMessage;
 /**
  * Consumer-side deduplication — the storage seam that turns at-least-once
  * delivery into exactly-once processing. The default
- * {@see PdoDeduplicationStore} speaks plain PDO; an alternative backing
- * (e.g. a Doctrine DBAL store) implements this same contract, so the
+ * {@see PostgreSqlDeduplicationStore} speaks plain PDO on PostgreSQL; an
+ * adapter for another database implements this same contract, so the
  * consumers stay storage-agnostic.
  *
  * Contract for implementations:

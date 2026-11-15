@@ -7,9 +7,9 @@ namespace Freyr\MessageBroker\DeadLetter;
 /**
  * Dead-letter table access — the storage seam behind the consumers (write
  * side) and the replay service plus DLQ console tooling (read/replay side).
- * The default {@see PdoDeadLetterStore} speaks plain PDO; an alternative
- * backing (e.g. a Doctrine DBAL store) implements this same contract, so the
- * consumers, replay service, and commands stay storage-agnostic.
+ * The default {@see PostgreSqlDeadLetterStore} speaks plain PDO on
+ * PostgreSQL; an adapter for another database implements this same contract,
+ * so the consumers, replay service, and commands stay storage-agnostic.
  */
 interface DeadLetterStore
 {

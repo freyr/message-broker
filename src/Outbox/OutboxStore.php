@@ -6,16 +6,16 @@ namespace Freyr\MessageBroker\Outbox;
 
 /**
  * Outbox table access — the storage seam behind the producer (write side) and
- * the relay (drain side). The default {@see PdoOutboxStore} speaks plain PDO;
- * an alternative backing (e.g. a Doctrine DBAL store) implements this same
+ * the relay (drain side). The default {@see PostgreSqlOutboxStore} speaks plain
+ * PDO on PostgreSQL; an adapter for another database implements this same
  * contract, so the producer, relay, and replay service stay storage-agnostic.
  *
  * Contract for implementations:
  *  - insert() must run on the caller's connection/transaction so the outbox row
  *    commits atomically with the application's own state change.
  *  - published rows are never deleted by the drain; they keep their
- *    published_at and leave the table only through partition retention
- *    ({@see OutboxPartitionManager}). An unpublished row is never dropped by
+ *    published_at and leave the table only through retention
+ *    ({@see OutboxRetention}). An unpublished row is never dropped by
  *    retention unless the operator opts in (drop-unpublished).
  *  - there is no ordering guarantee: rows of one lane publish in any order.
  */

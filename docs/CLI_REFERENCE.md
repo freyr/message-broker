@@ -8,8 +8,9 @@ application's `Symfony\Component\Console\Application`:
 
 ```php
 use Freyr\MessageBroker\Console\SetupSchemaCommand;
+use Freyr\MessageBroker\Storage\PostgreSqlSchemaInstaller;
 
-$application->add(new SetupSchemaCommand($pdo, $platform));
+$application->add(new SetupSchemaCommand(new PostgreSqlSchemaInstaller($pdo)));
 ```
 
 Commands are then run through your application's own console entry point
@@ -25,7 +26,10 @@ first daily partitions and no default partition), `message_deduplication`,
 and `dead_letters` (or prints the DDL without executing it). A second run
 skips the partitions that are already attached.
 
-**Constructor:** `new SetupSchemaCommand(PDO $pdo, Platform $platform)`
+**Constructor:** `new SetupSchemaCommand(SchemaInstaller $installer)`, for example
+`new SetupSchemaCommand(new PostgreSqlSchemaInstaller($pdo))`. The `SchemaInstaller` port
+has `sql(int $daysAhead)` (the DDL of a new database) and `install(int $daysAhead)`
+(creates what is missing; safe to repeat).
 
 | Option | Description |
 | --- | --- |
@@ -37,8 +41,8 @@ skips the partitions that are already attached.
 Outbox retention. Creates the upcoming daily partitions and drops the expired
 ones. Run it daily (cron). It must run outside a transaction.
 
-**Constructor:** `new OutboxMaintainCommand(OutboxPartitionManager $partitions)`,
-for example `new OutboxMaintainCommand(new OutboxPartitionManager($pdo))`.
+**Constructor:** `new OutboxMaintainCommand(OutboxRetention $retention)`,
+for example `new OutboxMaintainCommand(new PostgreSqlOutboxRetention($pdo))`.
 
 | Option | Description |
 | --- | --- |
@@ -162,7 +166,7 @@ Deletes dead letters.
 ## `message-broker:dedup:cleanup`
 
 Prunes `message_deduplication` entries older than a given age. It deletes in
-chunks of 10,000 rows (`PdoDeduplicationStore` constructor argument
+chunks of 10,000 rows (`PostgreSqlDeduplicationStore` constructor argument
 `deleteChunkSize`); each chunk is a short statement that the index on
 `created_at` serves, so the cleanup holds no long transaction. Keep the
 threshold longer than the time in which a duplicate can arrive.

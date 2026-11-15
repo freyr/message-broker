@@ -4,81 +4,46 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Storage;
 
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxRetention;
 use PDO;
-use PDOStatement;
 
 /**
- * PostgreSQL dialect (the only supported database, 14+):
+ * PostgreSQL schema (14+):
  *   - outbox_messages          → range-partitioned by created_at (one partition
  *                                per UTC day, no DEFAULT partition); managed
- *                                by OutboxPartitionManager or pg_partman
+ *                                by PostgreSqlOutboxRetention or pg_partman
  *   - ids                      → native UUID
  *   - deduplication insert     → INSERT ... ON CONFLICT DO NOTHING
  *   - headers                  → JSONB
  *   - timestamps               → TIMESTAMP(3), UTC by convention
  *   - body column              → BYTEA (opaque wire bytes)
  */
-final readonly class PostgreSqlPlatform implements Platform
+final readonly class PostgreSqlSchemaInstaller implements SchemaInstaller
 {
-    public function insertOutboxSql(): string
-    {
-        return <<<'SQL'
-            INSERT INTO outbox_messages
-                (id, lane, message_name, body, headers, created_at, available_at, attempts)
-            VALUES
-                (:id, :lane, :message_name, :body, :headers, :created_at, :available_at, 0)
-            SQL;
+    private PostgreSqlOutboxRetention $retention;
+
+    public function __construct(
+        private PDO $pdo,
+    ) {
+        $this->retention = new PostgreSqlOutboxRetention($pdo);
     }
 
-    public function selectClaimBatchSql(): string
+    public function sql(int $daysAhead): array
     {
-        // Oldest-due first is a fairness bias, not an ordering contract. The
-        // partial index idx_outbox_pending serves this query; published rows
-        // are outside it.
-        return <<<'SQL'
-            SELECT id, lane, message_name, body, headers, created_at, available_at, attempts
-            FROM outbox_messages
-            WHERE lane = :lane AND published_at IS NULL AND available_at <= :now
-            ORDER BY available_at
-            LIMIT :limit
-            FOR UPDATE SKIP LOCKED
-            SQL;
+        // For a new database: the partition DDL is not idempotent (ATTACH).
+        return [...self::tableSql(), ...$this->retention->partitionDdl($daysAhead)];
     }
 
-    public function insertDeduplicationSql(): string
+    public function install(int $daysAhead): void
     {
-        // rowCount() = 0 on conflict — same duplicate signal as INSERT IGNORE.
-        return <<<'SQL'
-            INSERT INTO message_deduplication (message_id, consumer, message_name, created_at)
-            VALUES (:message_id, :consumer, :message_name, :created_at)
-            ON CONFLICT (message_id, consumer) DO NOTHING
-            SQL;
-    }
-
-    public function bindBody(PDOStatement $statement, string $name, string $body): void
-    {
-        // BYTEA requires a binary bind; PARAM_LOB makes pdo_pgsql send binary
-        // format. JSON text bound this way round-trips through BYTEA unchanged.
-        $statement->bindValue($name, $body, PDO::PARAM_LOB);
-    }
-
-    public function readBody(mixed $value): string
-    {
-        // pdo_pgsql returns BYTEA as a stream resource.
-        if (is_resource($value)) {
-            $contents = stream_get_contents($value);
-
-            return $contents === false ? '' : $contents;
+        foreach (self::tableSql() as $statement) {
+            $this->pdo->exec($statement);
         }
-
-        if (!is_string($value)) {
-            throw new \RuntimeException('Body column is not a string or stream');
-        }
-
-        return $value;
+        $this->retention->ensureCapacity($daysAhead); // skips partitions that are already attached
     }
 
-    public function schemaSql(): array
+    /** @return list<string> */
+    private static function tableSql(): array
     {
         // The body is opaque wire bytes (the relay byte-pumps it). It is
         // BYTEA: JSON text round-trips through BYTEA unchanged.
@@ -86,7 +51,7 @@ final readonly class PostgreSqlPlatform implements Platform
         // outbox_messages is partitioned by created_at: the partition key is
         // known at insert (published_at is not), and the primary key of a
         // partitioned table must include it. The daily partitions come from
-        // OutboxPartitionManager (or pg_partman). There is no DEFAULT
+        // PostgreSqlOutboxRetention (or pg_partman). There is no DEFAULT
         // partition, so retention can DETACH ... CONCURRENTLY; an insert for
         // a day with no partition fails, so partitions are created ahead.
         return [

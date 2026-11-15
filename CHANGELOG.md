@@ -6,12 +6,19 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- **Breaking:** `message-broker:outbox:maintain` and `OutboxPartitionManager::purge()` no longer drop an expired partition that holds unpublished rows (`published_at IS NULL`). The partition is kept and reported, and the command exits with code 1; it is dropped on a later run once its rows are published. A table that the run detached and then found to hold unpublished rows, an expired detached table, and a partition with a pending detach are attached again, so the relay can publish their rows
-- `PartitionPurgeReport` has a new `kept` list (partition name to unpublished row count), `unpublishedRowsKept()` and `hasKept()`
+- **Breaking:** `message-broker:outbox:maintain` and `PostgreSqlOutboxRetention::purge()` no longer drop an expired partition that holds unpublished rows (`published_at IS NULL`). The partition is kept and reported, and the command exits with code 1; it is dropped on a later run once its rows are published. A table that the run detached and then found to hold unpublished rows, an expired detached table, and a partition with a pending detach are attached again, so the relay can publish their rows
+- `RetentionReport` (was `PartitionPurgeReport`) has a new `kept` list (partition name to unpublished row count), `unpublishedRowsKept()` and `hasKept()`
+
+- **Breaking:** the SQL dialect seam `Storage\Platform` and `Storage\PostgreSqlPlatform` are removed. Each PostgreSQL class holds its own SQL, and the core talks to storage through ports only
+- **Breaking:** renamed classes, same namespaces, no aliases: `Outbox\PdoOutboxStore` -> `Outbox\PostgreSqlOutboxStore`, `Transport\PdoDeduplicationStore` -> `Transport\PostgreSqlDeduplicationStore`, `DeadLetter\PdoDeadLetterStore` -> `DeadLetter\PostgreSqlDeadLetterStore`, `Outbox\OutboxPartitionManager` -> `Outbox\PostgreSqlOutboxRetention`, `Outbox\PartitionPurgeReport` -> `Outbox\RetentionReport`. The three stores take no `Platform` argument any more: `new PostgreSqlOutboxStore($pdo)`, `new PostgreSqlDeduplicationStore($pdo, deleteChunkSize: ...)`, `new PostgreSqlDeadLetterStore($pdo)`
+- **Breaking:** `PostgreSqlOutboxRetention::ensurePartitions($daysAhead = 3, $today = null)` is now `ensureCapacity($daysAhead, $today = null)` (no default for `$daysAhead`). `purge()` takes `(retentionDays, dryRun, dropUnpublished, today)`; `$dropUnpublished` moved before `$today`. `$today` is a test parameter of the PostgreSQL class and is not part of the port
+- **Breaking:** `SetupSchemaCommand` takes a `SchemaInstaller` (was `PDO` and `Platform`). `OutboxMaintainCommand` takes an `OutboxRetention` (was the concrete partition manager). Options, output and exit codes do not change
 
 ### Added
 
-- Option `--drop-unpublished` of `message-broker:outbox:maintain` and parameter `$dropUnpublished` of `purge()`: the previous behavior, a hard age limit that drops the partition with its unpublished rows
+- Port `Outbox\OutboxRetention` (`ensureCapacity()`, `purge()`) with the implementation `PostgreSqlOutboxRetention`
+- Port `Storage\SchemaInstaller` (`sql()` for the DDL of a new database, `install()` to create what is missing) with the implementation `Storage\PostgreSqlSchemaInstaller`. One operation covers the tables and the first partitions
+- Option `--drop-unpublished` of `message-broker:outbox:maintain` and parameter `$dropUnpublished` of `OutboxRetention::purge()`: the previous behavior, a hard age limit that drops the partition with its unpublished rows
 
 ## [0.5.0] - 2026-11-15
 
