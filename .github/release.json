@@ -5,7 +5,7 @@
       "path": ".",
       "tag": "v{version}",
       "ignore": ["tests/**", "*.md", "docs/**", ".idea/**"],
-      "initial": "0.1.0"
+      "initial": "0.3.0"
     }
   ]
 }

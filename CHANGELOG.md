@@ -4,13 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Removed
-
-- **BREAKING:** the Avro wire format: `AvroWireFormat`, `AvroDeserializer`, the file schema registry and store, `schema:validate`, and the offline CI compatibility gate. Messages are JSON only.
-- **BREAKING:** the `Format` enum; `Platform::schemaSql()` takes no argument, and `setup:schema` has no `--format` option.
-- The `apache/avro` suggestion in `composer.json`.
-
-## [0.1.0] - 2026-11-15
+The first release of the standalone library (PostgreSQL and AMQP, no framework) will be 0.3.0. The versions 0.1.0 to 0.2.3 belong to the earlier Symfony Messenger bundle of the same package name; their tags point to that separate history.
 
 ### Added
 
@@ -22,8 +16,7 @@ All notable changes to this project will be documented in this file.
 - Consumer failure handling: the retry republish is confirmed before the ack; a database failure stops the consumer with the real error and uses no retry attempt; the dedup insert is prepared once per connection; `message-broker:dedup:cleanup` deletes in chunks with an index on `created_at`
 - Relay failure handling: a broker nack backs off only the nacked rows; a channel, connection or confirm-timeout failure backs off the failed rows and stops the worker (crash-only); a retried row is published alone, so a refused message fails alone; an unroutable message is dropped by design
 - PostgreSQL storage backend
-- JSON and Avro wire formats; Avro uses registry-free committed-schema governance (derived ids + reader/writer resolution)
-- Schema validation tooling (`schema:validate`) and an offline CI compatibility gate
+- JSON wire format (`JsonWireFormat`, `JsonDeserializer`), encoded at produce time
 - PSR-3 logging, BrokerEvents instrumentation events, and an ErrorHandler hook for operational observability
 - Dead-letter queue and deduplication CLI with dry-run and force-execute guardrails
 - Storage interfaces (OutboxStore, DeadLetterStore, DeduplicationStore) with PDO default implementations
