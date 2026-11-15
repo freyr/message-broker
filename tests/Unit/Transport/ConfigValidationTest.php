@@ -25,6 +25,16 @@ final class ConfigValidationTest extends TestCase
         new AmqpQueueConfig(queue: '');
     }
 
+    public function testAmqpQueueConfigDefaultsToAPrefetchOf32(): void
+    {
+        self::assertSame(32, (new AmqpQueueConfig(queue: 'q'))->prefetch);
+    }
+
+    public function testAmqpQueueConfigAcceptsZeroPrefetchAsUnlimited(): void
+    {
+        self::assertSame(0, (new AmqpQueueConfig(queue: 'q', prefetch: 0))->prefetch);
+    }
+
     public function testAmqpQueueConfigRejectsNegativePrefetch(): void
     {
         $this->expectException(InvalidArgumentException::class);

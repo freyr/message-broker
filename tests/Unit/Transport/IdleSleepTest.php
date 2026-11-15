@@ -18,6 +18,21 @@ final class IdleSleepTest extends TestCase
         }
     }
 
+    public function testJitterCoversTheWholeRangeFromZeroToJitter(): void
+    {
+        $seen = [];
+        for ($i = 0; $i < 30_000; ++$i) {
+            $micros = IdleSleep::micros(0, 1);
+            self::assertGreaterThanOrEqual(0, $micros);
+            self::assertLessThanOrEqual(1_000, $micros);
+            $seen[$micros] = true;
+        }
+
+        self::assertArrayHasKey(0, $seen, 'no jitter is possible');
+        self::assertArrayHasKey(1_000, $seen, 'the full jitter is possible');
+        self::assertGreaterThan(900, count($seen), 'the sleep is randomized');
+    }
+
     public function testZeroJitterReturnsBaseExactly(): void
     {
         self::assertSame(200_000, IdleSleep::micros(200, 0));
