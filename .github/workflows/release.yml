@@ -1,9 +1,20 @@
 # The release App pushes the tags; Packagist reads versions from them.
+#
+# A push to main releases from the PR title (freyr/.github release action).
+# A manual run (Actions → Release → Run workflow, on main) tags the head of
+# main with any version that does not exist yet, for example the first release
+# of a line: gh workflow run release.yml --ref main -f version=0.3.0
 name: Release
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release from the head of main, without the v (X.Y.Z)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -14,6 +25,7 @@ concurrency:
 
 jobs:
   release:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       releases: ${{ steps.release.outputs.releases }}
@@ -23,3 +35,74 @@ jobs:
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+  manual-release:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the input
+        env:
+          REF: ${{ github.ref }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::Run the manual release on main (got $REF)."
+            exit 1
+          fi
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::The version must be X.Y.Z without a v (got '$VERSION')."
+            exit 1
+          fi
+
+      - name: Get the release App token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Create the tag and the release
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v${VERSION}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "::error::The tag ${tag} already exists."
+            exit 1
+          fi
+
+          previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$GITHUB_SHA" 2>/dev/null || true)
+          range="${previous:+${previous}..}${GITHUB_SHA}"
+          notes=$(mktemp)
+          {
+            echo "## Changes"
+            echo
+            git log --format='- %s (%h)' "$range"
+          } > "$notes"
+
+          basic=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')
+          export GIT_CONFIG_COUNT=3
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${basic}"
+          export GIT_CONFIG_KEY_1="user.name" GIT_CONFIG_VALUE_1="freyr-release"
+          export GIT_CONFIG_KEY_2="user.email" GIT_CONFIG_VALUE_2="release@freyr.invalid"
+
+          message=$(mktemp)
+          { printf '%s\n\n' "$tag"; cat "$notes"; } > "$message"
+          git tag -a "$tag" -F "$message" --cleanup=verbatim "$GITHUB_SHA"
+          git push origin "refs/tags/${tag}"
+          gh release create "$tag" --title "$tag" --notes-file "$notes" --verify-tag
+          echo "Released ${tag} at ${GITHUB_SHA} (previous tag: ${previous:-none})." >> "$GITHUB_STEP_SUMMARY"
