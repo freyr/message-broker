@@ -3,7 +3,7 @@
     "source": {
         "directories": ["src"]
     },
-    // One process: the functional tests share one database and fixed queue names.
+    // Parallel workers are isolated: each TEST_TOKEN gets its own database and queue names.
     "timeout": 20,
     "logs": {
         "text": "var/infection/infection.log",

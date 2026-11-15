@@ -63,8 +63,8 @@ final class ParallelConsumptionTest extends FunctionalTestCase
     public static function tearDownAfterClass(): void
     {
         $channel = self::$amqp->channel();
-        $channel->queue_delete(self::QUEUE);
-        $channel->exchange_delete(self::EXCHANGE);
+        $channel->queue_delete(self::isolated(self::QUEUE));
+        $channel->exchange_delete(self::isolated(self::EXCHANGE));
         $channel->close();
         self::$amqp->close();
     }
@@ -77,17 +77,17 @@ final class ParallelConsumptionTest extends FunctionalTestCase
 
         $this->channel = self::$amqp->channel();
         $this->relayChannel = self::$amqp->channel();
-        $this->channel->exchange_declare(self::EXCHANGE, 'topic', false, true, false);
-        $this->channel->queue_declare(self::QUEUE, false, true, false, false);
-        $this->channel->queue_bind(self::QUEUE, self::EXCHANGE, 'order.*');
-        $this->channel->queue_purge(self::QUEUE);
+        $this->channel->exchange_declare(self::isolated(self::EXCHANGE), 'topic', false, true, false);
+        $this->channel->queue_declare(self::isolated(self::QUEUE), false, true, false, false);
+        $this->channel->queue_bind(self::isolated(self::QUEUE), self::isolated(self::EXCHANGE), 'order.*');
+        $this->channel->queue_purge(self::isolated(self::QUEUE));
 
         $this->outbox = new PdoOutboxStore(self::$pdo, static::platform());
         $this->producer = new OutboxProducer($this->outbox, new JsonWireFormat(), lane: self::LANE);
         $this->relay = new AmqpRelay(
             outbox: $this->outbox,
             amqp: $this->relayChannel,
-            publish: new AmqpPublishConfig(exchange: self::EXCHANGE),
+            publish: new AmqpPublishConfig(exchange: self::isolated(self::EXCHANGE)),
             contentType: JsonWireFormat::CONTENT_TYPE,
             lane: self::LANE,
         );
@@ -118,7 +118,7 @@ final class ParallelConsumptionTest extends FunctionalTestCase
 
         return new AmqpConsumer(
             channel: $this->workerChannel,
-            queue: new AmqpQueueConfig(queue: self::QUEUE, prefetch: 1),
+            queue: new AmqpQueueConfig(queue: self::isolated(self::QUEUE), prefetch: 1),
             deserializer: new JsonDeserializer(),
             dispatcher: new CallableDispatcher(function (IncomingMessage $incoming): void {
                 $this->dispatched[] = $incoming;

@@ -76,9 +76,9 @@ final class EndToEndTest extends FunctionalTestCase
     public static function tearDownAfterClass(): void
     {
         $channel = self::$amqp->channel();
-        $channel->queue_delete(self::QUEUE);
-        $channel->queue_delete(self::QUEUE.'.wait.100');
-        $channel->exchange_delete(self::EXCHANGE);
+        $channel->queue_delete(self::isolated(self::QUEUE));
+        $channel->queue_delete(self::isolated(self::QUEUE).'.wait.100');
+        $channel->exchange_delete(self::isolated(self::EXCHANGE));
         $channel->close();
         self::$amqp->close();
     }
@@ -92,10 +92,10 @@ final class EndToEndTest extends FunctionalTestCase
 
         $this->channel = self::$amqp->channel();
         $this->relayChannel = self::$amqp->channel();
-        $this->channel->exchange_declare(self::EXCHANGE, 'topic', false, true, false);
-        $this->channel->queue_declare(self::QUEUE, false, true, false, false);
-        $this->channel->queue_bind(self::QUEUE, self::EXCHANGE, 'order.*');
-        $this->channel->queue_purge(self::QUEUE);
+        $this->channel->exchange_declare(self::isolated(self::EXCHANGE), 'topic', false, true, false);
+        $this->channel->queue_declare(self::isolated(self::QUEUE), false, true, false, false);
+        $this->channel->queue_bind(self::isolated(self::QUEUE), self::isolated(self::EXCHANGE), 'order.*');
+        $this->channel->queue_purge(self::isolated(self::QUEUE));
 
         $this->platform = static::platform();
         $this->outbox = new PdoOutboxStore(self::$pdo, $this->platform);
@@ -104,7 +104,7 @@ final class EndToEndTest extends FunctionalTestCase
         $this->relay = new AmqpRelay(
             outbox: $this->outbox,
             amqp: $this->relayChannel,
-            publish: new AmqpPublishConfig(exchange: self::EXCHANGE),
+            publish: new AmqpPublishConfig(exchange: self::isolated(self::EXCHANGE)),
             contentType: JsonWireFormat::CONTENT_TYPE,
             lane: self::LANE,
         );
@@ -128,7 +128,7 @@ final class EndToEndTest extends FunctionalTestCase
 
         return new AmqpConsumer(
             channel: $this->channel,
-            queue: new AmqpQueueConfig(self::QUEUE),
+            queue: new AmqpQueueConfig(self::isolated(self::QUEUE)),
             deserializer: new JsonDeserializer(),
             dispatcher: new CallableDispatcher($dispatch),
             pdo: self::$pdo,

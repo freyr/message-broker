@@ -30,8 +30,8 @@ cs-check: ## Check code style with ECS
 cs-fix: ## Fix code style with ECS
 	docker compose run --rm php vendor/bin/ecs check --fix
 
-infection: ## Mutation testing with Infection and pcov (full run, one thread, about 10 min); ARGS for extra options
-	docker compose run --rm php vendor/bin/infection --threads=1 $(ARGS)
+infection: ## Mutation testing with Infection and pcov (full run, all CPU cores); ARGS for extra options
+	docker compose run --rm php vendor/bin/infection --threads=max $(ARGS)
 
 bench: ## Relay throughput benchmark; ARGS="<rows> <workers> <batch> [full|db-only|amqp-only]"
 	docker compose run --rm php php tests/Functional/Scripts/amqp-relay-bench.php $(ARGS)

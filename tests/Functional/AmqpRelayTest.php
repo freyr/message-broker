@@ -50,10 +50,10 @@ final class AmqpRelayTest extends FunctionalTestCase
     public static function tearDownAfterClass(): void
     {
         $channel = self::$amqp->channel();
-        $channel->queue_delete(self::QUEUE);
-        $channel->queue_delete(self::NACK_QUEUE);
-        $channel->exchange_delete(self::EXCHANGE);
-        $channel->exchange_delete(self::NACK_EXCHANGE);
+        $channel->queue_delete(self::isolated(self::QUEUE));
+        $channel->queue_delete(self::isolated(self::NACK_QUEUE));
+        $channel->exchange_delete(self::isolated(self::EXCHANGE));
+        $channel->exchange_delete(self::isolated(self::NACK_EXCHANGE));
         $channel->close();
         self::$amqp->close();
     }
@@ -63,10 +63,10 @@ final class AmqpRelayTest extends FunctionalTestCase
         parent::setUp();
 
         $this->channel = self::$amqp->channel();
-        $this->channel->exchange_declare(self::EXCHANGE, 'topic', false, true, false);
-        $this->channel->queue_declare(self::QUEUE, false, true, false, false);
-        $this->channel->queue_bind(self::QUEUE, self::EXCHANGE, '#');
-        $this->channel->queue_purge(self::QUEUE);
+        $this->channel->exchange_declare(self::isolated(self::EXCHANGE), 'topic', false, true, false);
+        $this->channel->queue_declare(self::isolated(self::QUEUE), false, true, false, false);
+        $this->channel->queue_bind(self::isolated(self::QUEUE), self::isolated(self::EXCHANGE), '#');
+        $this->channel->queue_purge(self::isolated(self::QUEUE));
 
         $this->producer = new OutboxProducer(
             new PdoOutboxStore(self::$pdo, static::platform()),
@@ -83,7 +83,7 @@ final class AmqpRelayTest extends FunctionalTestCase
     /** A worker with its OWN PDO connection and OWN channel, as in production. */
     private function worker(
         int $batchSize = 2,
-        string $exchange = self::EXCHANGE,
+        ?string $exchange = null,
         ?RecordingEvents $events = null,
         ?RecordingLogger $logger = null,
         ?AMQPChannel $channel = null,
@@ -91,7 +91,7 @@ final class AmqpRelayTest extends FunctionalTestCase
         return new AmqpRelay(
             outbox: new PdoOutboxStore(self::newConnection(), static::platform()),
             amqp: $channel ?? self::$amqp->channel(),
-            publish: new AmqpPublishConfig(exchange: $exchange),
+            publish: new AmqpPublishConfig(exchange: $exchange ?? self::isolated(self::EXCHANGE)),
             contentType: JsonWireFormat::CONTENT_TYPE,
             lane: self::LANE,
             batchSize: $batchSize,
@@ -105,7 +105,7 @@ final class AmqpRelayTest extends FunctionalTestCase
     private function drainQueue(): array
     {
         $ids = [];
-        while (($delivery = $this->channel->basic_get(self::QUEUE, no_ack: true)) !== null) {
+        while (($delivery = $this->channel->basic_get(self::isolated(self::QUEUE), no_ack: true)) !== null) {
             $ids[] = (string) $delivery->get_properties()['message_id'];
         }
 
@@ -223,17 +223,17 @@ final class AmqpRelayTest extends FunctionalTestCase
     public function testNackedMessagesBackOffAndTheWorkerKeepsRunning(): void
     {
         // A queue that rejects every publish: the broker nacks each message.
-        $this->channel->exchange_declare(self::NACK_EXCHANGE, 'topic', false, false, false);
-        $this->channel->queue_declare(self::NACK_QUEUE, false, true, false, false, false, new AMQPTable([
+        $this->channel->exchange_declare(self::isolated(self::NACK_EXCHANGE), 'topic', false, false, false);
+        $this->channel->queue_declare(self::isolated(self::NACK_QUEUE), false, true, false, false, false, new AMQPTable([
             'x-max-length' => 0,
             'x-overflow' => 'reject-publish',
         ]));
-        $this->channel->queue_bind(self::NACK_QUEUE, self::NACK_EXCHANGE, '#');
+        $this->channel->queue_bind(self::isolated(self::NACK_QUEUE), self::isolated(self::NACK_EXCHANGE), '#');
         $this->producer->produce(OrderPlaced::create('o-1', 100));
         $this->producer->produce(OrderPlaced::create('o-2', 200));
 
         $logger = new RecordingLogger();
-        $relay = $this->worker(batchSize: 100, exchange: self::NACK_EXCHANGE, logger: $logger);
+        $relay = $this->worker(batchSize: 100, exchange: self::isolated(self::NACK_EXCHANGE), logger: $logger);
 
         self::assertSame(0, $relay->drainOnce(), 'a nacked message is not marked published');
         self::assertSame(2, self::fetchInt('SELECT COUNT(*) FROM outbox_messages WHERE attempts = 1 AND published_at IS NULL'));
@@ -243,19 +243,19 @@ final class AmqpRelayTest extends FunctionalTestCase
         ));
 
         // The channel stays usable: the same worker publishes a new row elsewhere routed.
-        $this->channel->queue_delete(self::NACK_QUEUE);
+        $this->channel->queue_delete(self::isolated(self::NACK_QUEUE));
         $this->producer->produce(OrderPlaced::create('o-3', 300));
         self::assertSame(1, $relay->drainOnce(), 'unroutable now, so dropped by the broker and confirmed');
     }
 
     public function testAnUnroutableMessageIsDroppedByDesignAndMarkedPublished(): void
     {
-        $this->channel->exchange_declare(self::UNBOUND_EXCHANGE, 'topic', false, false, true);
+        $this->channel->exchange_declare(self::isolated(self::UNBOUND_EXCHANGE), 'topic', false, false, true);
         $this->producer->produce(OrderPlaced::create('o-1', 100));
 
-        self::assertSame(1, $this->worker(exchange: self::UNBOUND_EXCHANGE)->drainOnce());
+        self::assertSame(1, $this->worker(exchange: self::isolated(self::UNBOUND_EXCHANGE))->drainOnce());
         self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages WHERE published_at IS NULL'));
-        $this->channel->exchange_delete(self::UNBOUND_EXCHANGE);
+        $this->channel->exchange_delete(self::isolated(self::UNBOUND_EXCHANGE));
     }
 
     private static function connect(): AMQPStreamConnection
