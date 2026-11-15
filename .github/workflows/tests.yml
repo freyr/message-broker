@@ -237,6 +237,6 @@ jobs:
     needs: [ecs, phpstan, functional-tests, mutation]
     runs-on: ubuntu-latest
     steps:
-      - uses: freyr/.github/actions/ci-gate@631e66e10bce4839aec46f7e71ed36f6c8017b16 # v1.0.1
+      - uses: freyr/.github/actions/ci-gate@b0c5431e29887b95f0031751c6d92506a2b2fc81 # v2.0.0
         with:
           results: ${{ join(needs.*.result, ' ') }}
