@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
-use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
+use Freyr\MessageBroker\DeadLetter\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Message;
 use Freyr\MessageBroker\Observability\BrokerEvents;
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
@@ -19,17 +19,15 @@ use RuntimeException;
 
 final class ReplayServiceTest extends FunctionalTestCase
 {
-    private PdoDeadLetterStore $deadLetters;
+    private PostgreSqlDeadLetterStore $deadLetters;
     private ReplayService $replay;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $platform = static::platform();
-        $this->deadLetters = new PdoDeadLetterStore(self::$pdo, $platform);
-        $this->replay = new ReplayService($this->deadLetters, new PdoOutboxStore(
+        $this->deadLetters = new PostgreSqlDeadLetterStore(self::$pdo);
+        $this->replay = new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
             self::$pdo,
-            $platform
         ), new JsonWireFormat());
     }
 
@@ -61,7 +59,7 @@ final class ReplayServiceTest extends FunctionalTestCase
 
         self::assertSame(
             $message->payload(),
-            json_decode(static::platform()->readBody($row['body']), true),
+            json_decode(self::bodyOf($row['body']), true),
             'payload is re-encoded into the outbox body',
         );
 
@@ -126,7 +124,7 @@ final class ReplayServiceTest extends FunctionalTestCase
         $events = new RecordingEvents();
         $replay = new ReplayService(
             $this->deadLetters,
-            new PdoOutboxStore(self::$pdo, static::platform()),
+            new PostgreSqlOutboxStore(self::$pdo),
             new JsonWireFormat(),
             $events,
         );

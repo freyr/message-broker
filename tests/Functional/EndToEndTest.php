@@ -6,17 +6,16 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
-use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
+use Freyr\MessageBroker\DeadLetter\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\OutboxStore;
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Outbox\Relay;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
-use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingEvents;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
@@ -24,7 +23,7 @@ use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpRetryPolicy;
-use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
+use Freyr\MessageBroker\Transport\PostgreSqlDeduplicationStore;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use RuntimeException;
@@ -49,10 +48,9 @@ final class EndToEndTest extends FunctionalTestCase
     private static AMQPStreamConnection $amqp;
     private AMQPChannel $channel;        // consumer + topology
     private AMQPChannel $relayChannel;   // confirms are channel-global: the relay owns its channel
-    private Platform $platform;
     private OutboxStore $outbox;
     private OutboxProducer $producer;
-    private PdoDeadLetterStore $deadLetters;
+    private PostgreSqlDeadLetterStore $deadLetters;
     private Relay $relay; // one long-lived relay per channel, as in production
 
     private bool $handlerFails = false;
@@ -98,10 +96,9 @@ final class EndToEndTest extends FunctionalTestCase
         $this->channel->queue_bind(self::isolated(self::QUEUE), self::isolated(self::EXCHANGE), 'order.*');
         $this->channel->queue_purge(self::isolated(self::QUEUE));
 
-        $this->platform = static::platform();
-        $this->outbox = new PdoOutboxStore(self::$pdo, $this->platform);
+        $this->outbox = new PostgreSqlOutboxStore(self::$pdo);
         $this->producer = new OutboxProducer($this->outbox, new JsonWireFormat(), lane: self::LANE);
-        $this->deadLetters = new PdoDeadLetterStore(self::$pdo, $this->platform);
+        $this->deadLetters = new PostgreSqlDeadLetterStore(self::$pdo);
         $this->relay = new Relay(
             outbox: $this->outbox,
             publisher: new AmqpMessagePublisher(
@@ -135,7 +132,7 @@ final class EndToEndTest extends FunctionalTestCase
             deserializer: new JsonDeserializer(),
             dispatcher: new CallableDispatcher($dispatch),
             pdo: self::$pdo,
-            deduplication: new PdoDeduplicationStore(self::$pdo, $this->platform),
+            deduplication: new PostgreSqlDeduplicationStore(self::$pdo),
             retryPolicy: new AmqpRetryPolicy(
                 maxAttempts: 2,
                 backoff: Backoff::exponential(initialDelayMs: 100, maxDelayMs: 100),
@@ -221,7 +218,7 @@ final class EndToEndTest extends FunctionalTestCase
         $message = OrderPlaced::create('o-dup', 100);
 
         // Pre-seed dedup as if this consumer already processed the message.
-        (new PdoDeduplicationStore(self::$pdo, $this->platform))->acquire(
+        (new PostgreSqlDeduplicationStore(self::$pdo))->acquire(
             new IncomingMessage($message->id, $message->name, $message->createdAt, []),
             'e2e_consumer',
         );

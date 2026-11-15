@@ -8,26 +8,26 @@ use DateTimeImmutable;
 use DateTimeZone;
 use Freyr\MessageBroker\Console\OutboxMaintainCommand;
 use Freyr\MessageBroker\Console\SetupSchemaCommand;
-use Freyr\MessageBroker\Outbox\OutboxPartitionManager;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxRetention;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
 final class SchemaAndMaintainCommandsTest extends FunctionalTestCase
 {
-    private OutboxPartitionManager $partitions;
+    private PostgreSqlOutboxRetention $partitions;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->partitions = new OutboxPartitionManager(self::$pdo);
+        $this->partitions = new PostgreSqlOutboxRetention(self::$pdo);
     }
 
     public function testSetupSchemaDumpPrintsEveryStatementTerminatedWithASemicolon(): void
     {
-        $tester = new CommandTester(new SetupSchemaCommand(self::$pdo, static::platform()));
+        $tester = new CommandTester(new SetupSchemaCommand(self::schemaInstaller()));
 
         $status = $tester->execute([
             '--dump-sql' => true,
@@ -35,7 +35,7 @@ final class SchemaAndMaintainCommandsTest extends FunctionalTestCase
         ]);
 
         $expected = '';
-        foreach ([...static::platform()->schemaSql(), ...$this->partitions->partitionDdl(2)] as $statement) {
+        foreach (self::schemaInstaller()->sql(2) as $statement) {
             $expected .= $statement.";\n";
         }
         self::assertSame(Command::SUCCESS, $status);
@@ -46,7 +46,7 @@ final class SchemaAndMaintainCommandsTest extends FunctionalTestCase
     public function testSetupSchemaDumpDoesNotTouchTheDatabase(): void
     {
         self::$pdo->exec('DROP TABLE dead_letters');
-        $tester = new CommandTester(new SetupSchemaCommand(self::$pdo, static::platform()));
+        $tester = new CommandTester(new SetupSchemaCommand(self::schemaInstaller()));
 
         $tester->execute([
             '--dump-sql' => true,
@@ -56,13 +56,13 @@ final class SchemaAndMaintainCommandsTest extends FunctionalTestCase
         self::assertSame(0, self::fetchInt("SELECT COUNT(*) FROM pg_class WHERE relname = 'dead_letters'"));
 
         // Restore the table dropped above for the tests that follow.
-        (new CommandTester(new SetupSchemaCommand(self::$pdo, static::platform())))->execute([]);
+        (new CommandTester(new SetupSchemaCommand(self::schemaInstaller())))->execute([]);
     }
 
     public function testSetupSchemaRecreatesMissingTablesAndPremakesPartitions(): void
     {
         self::$pdo->exec('DROP TABLE dead_letters');
-        $tester = new CommandTester(new SetupSchemaCommand(self::$pdo, static::platform()));
+        $tester = new CommandTester(new SetupSchemaCommand(self::schemaInstaller()));
 
         $status = $tester->execute([
             '--premake-days' => '5',
@@ -92,7 +92,7 @@ final class SchemaAndMaintainCommandsTest extends FunctionalTestCase
     #[DataProvider('invalidPremakeDays')]
     public function testSetupSchemaRejectsInvalidPremakeDays(string $value): void
     {
-        $tester = new CommandTester(new SetupSchemaCommand(self::$pdo, static::platform()));
+        $tester = new CommandTester(new SetupSchemaCommand(self::schemaInstaller()));
 
         $status = $tester->execute([
             '--premake-days' => $value,
@@ -105,7 +105,7 @@ final class SchemaAndMaintainCommandsTest extends FunctionalTestCase
 
     public function testSetupSchemaAcceptsZeroPremakeDays(): void
     {
-        $tester = new CommandTester(new SetupSchemaCommand(self::$pdo, static::platform()));
+        $tester = new CommandTester(new SetupSchemaCommand(self::schemaInstaller()));
 
         $status = $tester->execute([
             '--premake-days' => '0',
@@ -234,8 +234,8 @@ final class SchemaAndMaintainCommandsTest extends FunctionalTestCase
     private function createExpiredPartitionWithUnpublishedRow(): DateTimeImmutable
     {
         $old = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->modify('-10 day')->setTime(0, 0);
-        $this->partitions->ensurePartitions(0, $old);
-        (new PdoOutboxStore(self::$pdo, static::platform()))->insert(new OutboxRecord(
+        $this->partitions->ensureCapacity(0, $old);
+        (new PostgreSqlOutboxStore(self::$pdo))->insert(new OutboxRecord(
             id: '01900000-0000-7000-8000-0000000000f1',
             lane: 'retention',
             messageName: 'order.placed',

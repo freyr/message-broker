@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Console;
 
-use Freyr\MessageBroker\Outbox\OutboxPartitionManager;
+use Freyr\MessageBroker\Outbox\OutboxRetention;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -27,7 +27,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 final class OutboxMaintainCommand extends Command
 {
     public function __construct(
-        private readonly OutboxPartitionManager $partitions,
+        private readonly OutboxRetention $retention,
     ) {
         parent::__construct();
     }
@@ -56,11 +56,11 @@ final class OutboxMaintainCommand extends Command
         if ($dryRun) {
             $output->writeln("<info>[dry-run] would ensure daily partitions for today + {$premakeDays} days.</info>");
         } else {
-            $created = $this->partitions->ensurePartitions($premakeDays);
+            $created = $this->retention->ensureCapacity($premakeDays);
             $output->writeln(sprintf('<info>Daily partitions present: %s.</info>', implode(', ', $created)));
         }
 
-        $report = $this->partitions->purge($retentionDays, $dryRun, dropUnpublished: $input->getOption('drop-unpublished') === true);
+        $report = $this->retention->purge($retentionDays, $dryRun, dropUnpublished: $input->getOption('drop-unpublished') === true);
         $output->writeln(sprintf('<info>%sRetention cutoff: %s UTC.</info>', $prefix, $report->cutoff->format('Y-m-d H:i')));
         foreach ($report->dropped as $name) {
             $output->writeln("<info>{$prefix}Dropped {$name}.</info>");

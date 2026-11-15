@@ -38,9 +38,8 @@ final class OrderPlaced extends Message
 the outbox row commits or rolls back atomically with your own state change.
 The producer opens no transaction itself: atomicity holds only inside the
 transaction that your application opens.
-`OutboxStore` is the storage interface; `PdoOutboxStore` is the shipped PDO
-implementation — construct it with your connection and a `Platform`
-(`PostgreSqlPlatform`).
+`OutboxStore` is the storage interface; `PostgreSqlOutboxStore` is the shipped PDO
+implementation — construct it with your connection.
 
 The payload is encoded at produce time: `JsonWireFormat` turns it into the
 exact bytes stored in the outbox `body` column, and a payload that cannot be
@@ -48,12 +47,11 @@ encoded throws inside your transaction — nothing commits.
 
 ```php
 use Freyr\MessageBroker\Outbox\OutboxProducer;
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
-use Freyr\MessageBroker\Storage\PostgreSqlPlatform;
 
 $pdo = new PDO($dsn, $user, $password, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-$outbox = new PdoOutboxStore($pdo, new PostgreSqlPlatform());
+$outbox = new PostgreSqlOutboxStore($pdo);
 $producer = new OutboxProducer($outbox, new JsonWireFormat(), lane: 'orders');
 
 $pdo->beginTransaction();
@@ -120,9 +118,9 @@ and drop the expired ones:
 
 ```php
 use Freyr\MessageBroker\Console\OutboxMaintainCommand;
-use Freyr\MessageBroker\Outbox\OutboxPartitionManager;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxRetention;
 
-$application->add(new OutboxMaintainCommand(new OutboxPartitionManager($pdo)));
+$application->add(new OutboxMaintainCommand(new PostgreSqlOutboxRetention($pdo)));
 ```
 
 ```bash
@@ -144,13 +142,13 @@ budget is exhausted.
 ```php
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
-use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
+use Freyr\MessageBroker\DeadLetter\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpRetryPolicy;
-use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
+use Freyr\MessageBroker\Transport\PostgreSqlDeduplicationStore;
 
 $consumer = new AmqpConsumer(
     channel: $channel,
@@ -160,9 +158,9 @@ $consumer = new AmqpConsumer(
         // your handler — denormalize $m->payload and act
     }),
     pdo: $pdo,
-    deduplication: new PdoDeduplicationStore($pdo, new PostgreSqlPlatform()),
+    deduplication: new PostgreSqlDeduplicationStore($pdo),
     retryPolicy: new AmqpRetryPolicy(maxAttempts: 5, backoff: Backoff::exponential(initialDelayMs: 1_000, maxDelayMs: 300_000)),
-    deadLetters: new PdoDeadLetterStore($pdo, new PostgreSqlPlatform()),
+    deadLetters: new PostgreSqlDeadLetterStore($pdo),
     name: 'orders_consumer',
 );
 $consumer->run(); // blocks

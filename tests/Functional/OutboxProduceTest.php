@@ -6,7 +6,7 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingEvents;
@@ -23,7 +23,7 @@ final class OutboxProduceTest extends FunctionalTestCase
     {
         parent::setUp();
         $this->producer = new OutboxProducer(
-            store: new PdoOutboxStore(self::$pdo, static::platform()),
+            store: new PostgreSqlOutboxStore(self::$pdo),
             wireFormat: new JsonWireFormat(),
             lane: 'orders',
         );
@@ -53,7 +53,7 @@ final class OutboxProduceTest extends FunctionalTestCase
         self::assertSame([
             'order_id' => 'o-123',
             'total_cents' => 4999,
-        ], json_decode(static::platform()->readBody($row['body']), true, flags: JSON_THROW_ON_ERROR));
+        ], json_decode(self::bodyOf($row['body']), true, flags: JSON_THROW_ON_ERROR));
 
         self::assertSame([
             'correlation_id' => 'c-1',
@@ -63,7 +63,7 @@ final class OutboxProduceTest extends FunctionalTestCase
     public function testProducerRejectsAnOverLongLaneWithAClearError(): void
     {
         $producer = new OutboxProducer(
-            store: new PdoOutboxStore(self::$pdo, static::platform()),
+            store: new PostgreSqlOutboxStore(self::$pdo),
             wireFormat: new JsonWireFormat(),
             lane: str_repeat('l', 65),
         );
@@ -99,7 +99,7 @@ final class OutboxProduceTest extends FunctionalTestCase
     {
         $events = new RecordingEvents();
         $producer = new OutboxProducer(
-            store: new PdoOutboxStore(self::$pdo, static::platform()),
+            store: new PostgreSqlOutboxStore(self::$pdo),
             wireFormat: new JsonWireFormat(),
             lane: 'orders',
             events: $events,
