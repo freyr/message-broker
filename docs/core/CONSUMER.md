@@ -1,0 +1,75 @@
+# Delivery processor and retry
+
+`DeliveryProcessor` holds the transport-neutral exactly-once algorithm for one
+delivery. It imports no transport class. A transport loop gives it a `Delivery`
+and a `DeliveryControl`. The AMQP loop is in
+[../amqp/CONSUMER.md](../amqp/CONSUMER.md). The PostgreSQL stores that the
+processor uses are in [../postgresql/STORAGE.md](../postgresql/STORAGE.md).
+
+## The algorithm
+
+For each delivery, the processor does these steps:
+
+1. It deserializes the body. A `MalformedMessage` never improves, so the
+   processor writes a dead letter at once and acks. Any other failure (for
+   example, a dependency that is not available yet) propagates. The delivery
+   stays unacked, is redelivered, and the process restarts.
+2. It begins a transaction. When `BEGIN` fails, the error propagates, the
+   process stops, and no retry attempt is used.
+3. It acquires the deduplication entry of the message for the consumer `name`.
+   For a duplicate, it commits, acks and skips the handler.
+4. It calls the dispatcher inside the same transaction, commits, and acks.
+5. When the dispatcher throws, it rolls back. When the rollback fails (a dead
+   connection), the error propagates and the delivery is redelivered. Otherwise
+   the retry policy decides: `Retry` (a delayed, confirmed redelivery, then
+   ack), `DeadLetter` (a row in `dead_letters`, then ack) or `Discard` (ack).
+
+Every path that returns normally has acked the delivery. A dead letter of a
+malformed message keeps the raw bytes and is not replayable. A dead letter of
+a failed handler keeps the decoded message and is replayable (see
+[DLQ_OPERATIONS.md](DLQ_OPERATIONS.md)).
+
+## Retry policy
+
+The retry delay is applied by the transport. For AMQP, it is a TTL wait queue
+(see [../amqp/CONSUMER.md](../amqp/CONSUMER.md)).
+
+```php
+use Freyr\MessageBroker\Retry\Backoff;
+use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
+
+$retryPolicy = new ExponentialRetryPolicy(
+    maxAttempts: 5,
+    backoff: Backoff::exponential(initialDelayMs: 1_000, maxDelayMs: 300_000),
+);
+```
+
+`ExponentialRetryPolicy::decide()` returns `retry` (republish to the TTL wait
+queue, `x-attempt` incremented) while `$attempt < maxAttempts`, otherwise
+`deadLetter`. Any class that implements `Freyr\MessageBroker\Retry\RetryPolicy`
+(`decide(int $attempt, Throwable $error, IncomingMessage $message)`) replaces
+it; the message parameter lets a policy decide per message name.
+
+`$attempt` is the number of the attempt that failed, starting at 1. The
+delay is `Backoff::delayForAttempt($attempt)`. The default `backoff` and the
+`Backoff::exponential()` multiplier (`4.0`) are the same as for the relay (see
+[RELAY.md](RELAY.md), *Backoff*). With `maxAttempts: 5` and the defaults, the
+failures of attempts 1 to 4 retry after 1 s, 4 s, 16 s and 64 s. The failure of
+attempt 5 goes to the dead letters.
+
+## Database failures
+
+A database failure is not a handler failure. When `BEGIN` fails, or the
+rollback fails on a dead connection, the consumer reports the error and stops.
+The delivery is redelivered, and no retry attempt is used.
+
+**Do not catch a database error in a handler and continue.** The handler runs
+inside the consumer transaction. In PostgreSQL, one failed statement aborts
+the whole transaction. A `COMMIT` of an aborted transaction does a `ROLLBACK`
+and returns no error, so `PDO::commit()` returns `true`. When the handler
+catches the exception and returns, the consumer commits and acks the message,
+but the handler work and the dedup row are not in the database. The message
+is lost, and nothing is logged. The consumer does not detect this. Let
+database errors propagate; the consumer then rolls back and uses the retry
+path. For a statement that is allowed to fail, use `INSERT ... ON CONFLICT`,
+or run it in a savepoint (for example a nested Doctrine DBAL transaction).

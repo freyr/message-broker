@@ -16,7 +16,7 @@ Three folders, three PSR-4 roots (the package is one Composer package for now; a
 - `src/adapter/postgresql/` is the PostgreSQL adapter, flat namespace `Freyr\MessageBroker\Adapter\PostgreSql\` (stores, retention, schema installer, `PdoTransaction`).
 - `src/adapter/amqp/` is the AMQP adapter, flat namespace `Freyr\MessageBroker\Adapter\Amqp\` (consumer, publisher, wait queue, configs).
 
-An adapter imports the core and its own package only, never the other adapter. Deptrac enforces these rules (`deptrac.yaml`): the core uses no adapter, no `PDO` and no `PhpAmqpLib`; the PostgreSQL adapter uses no `PhpAmqpLib`; the AMQP adapter uses no `PDO`. Tests follow the same split: `tests/broker/` (no database, no broker), `tests/adapter/postgresql/` (needs PostgreSQL) and `tests/adapter/amqp/` (needs RabbitMQ and PostgreSQL), run as the PHPUnit suites `broker`, `postgresql` and `amqp`. A test under `tests/adapter/` never imports the test namespace of the core (`Freyr\MessageBroker\Tests\`) or of the other adapter; what adapter tests share comes from the test kit (below). The upgrade table from 0.6.x is in `UPGRADE.md`.
+An adapter imports the core and its own package only, never the other adapter. Deptrac enforces these rules (`deptrac.yaml`): the core uses no adapter, no `PDO` and no `PhpAmqpLib`; the PostgreSQL adapter uses no `PhpAmqpLib`; the AMQP adapter uses no `PDO`. Tests follow the same split: `tests/broker/` (no database, no broker), `tests/adapter/postgresql/` (needs PostgreSQL) and `tests/adapter/amqp/` (needs RabbitMQ and PostgreSQL), run as the PHPUnit suites `broker`, `postgresql` and `amqp`. A test under `tests/adapter/` never imports the test namespace of the core (`Freyr\MessageBroker\Tests\`) or of the other adapter; what adapter tests share comes from the test kit (below). The upgrade table from 0.6.x is in `UPGRADE.md`. The documents follow the same split: `docs/core/` (relay, delivery processor, ports, CLI, DLQ, production, test kit), `docs/postgresql/` (tables, retention, pooling) and `docs/amqp/` (transport, consumer), plus `docs/QUICKSTART.md` (uses all three; it belongs to the core). A document links to a document of another package and never repeats it. The README of each future package is in `packages/<name>/README.md`.
 
 ### Test kit
 
@@ -26,11 +26,11 @@ An adapter imports the core and its own package only, never the other adapter. D
 - The in-memory fakes `InMemoryOutboxStore`, `InMemoryDeduplicationStore`, `InMemoryDeadLetterStore`, `InMemoryTransaction` (the in-memory stores join it and roll back with it), `FakeOutboxPublisher` and `RecordingDeliveryControl`. Each fake passes the same contract test case as the real implementation (`tests/broker/Testing/`).
 - Small helpers: `OrderPlaced`, `Unserializable`, `Recording*`, `StubDeduplicationStore` and the trait `TestIsolation` (`isolated()` names for parallel workers).
 
-`src/adapter/postgresql/Testing/PostgreSqlTestSupport` is the PostgreSQL part (connection, schema, `TEST_TOKEN` database); the AMQP adapter tests use it too. Test code in `Testing/` is not mutated (Infection) and not counted as coverage. See `docs/TESTING.md`.
+`src/adapter/postgresql/Testing/PostgreSqlTestSupport` is the PostgreSQL part (connection, schema, `TEST_TOKEN` database); the AMQP adapter tests use it too. Test code in `Testing/` is not mutated (Infection) and not counted as coverage. See `docs/core/TESTING.md`.
 
 ## Connection pooling
 
-No component holds a session-scoped lock. The relay and the consumer use only transaction-scoped locks, so every pool mode works, including a transaction-mode pooler. See `docs/PRODUCTION.md` → *Connection pooling*.
+No component holds a session-scoped lock. The relay and the consumer use only transaction-scoped locks, so every pool mode works, including a transaction-mode pooler. See `docs/postgresql/CONNECTION_POOLING.md`.
 
 ## After every code change
 

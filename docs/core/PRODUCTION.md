@@ -1,7 +1,10 @@
 # Production
 
 Operational guidance for running relays and consumers in production: the
-deployment model, graceful shutdown, observability, scaling, and outbox retention.
+deployment model, graceful shutdown, observability and scaling. Outbox
+retention and connection pooling are in the documents of the PostgreSQL
+adapter: [../postgresql/RETENTION.md](../postgresql/RETENTION.md) and
+[../postgresql/CONNECTION_POOLING.md](../postgresql/CONNECTION_POOLING.md).
 
 ## Deployment model — crash-only under a supervisor
 
@@ -26,29 +29,14 @@ This is safe because:
 - **Retention does not drop unpublished rows by default.** The produce/relay
   path never dead-letters — a stuck lane retries with backoff. When a row
   passes the retention period (default 7 days) while it is still unpublished,
-  retention keeps its partition, reports it, and exits with a non-zero code.
+  retention keeps its partition, reports it, and exits with a non-zero code
+  (see [../postgresql/RETENTION.md](../postgresql/RETENTION.md)).
   The partition grows until the relay publishes the rows. Only the opt-in
   `--drop-unpublished` drops such a row. Alert on relay backlog and on the
   exit code of the maintain command.
 
 Tune restart backoff (how fast the supervisor retries a crashed process),
 not reconnect logic — there is none to tune.
-
-**Running `AmqpConsumer` sequentially over one connection.** `run()` accepts
-`messageLimit`/`idleTimeoutSec` — these exist for tests and batch-style
-operation; production workers normally run with neither, blocking forever.
-If you do run several consumers sequentially over one shared AMQP
-connection (e.g. a batch job draining multiple queues in turn), close the
-previous consumer's channel before starting the next one: prefetched-but-
-unacked deliveries are requeued only on channel close, not automatically
-between successive `run()` calls.
-
-## Connection pooling (pgbouncer)
-
-All components are safe behind a transaction-mode pooler. No component holds
-a session-scoped lock: the relay claim and the consumer deduplication each run
-inside one transaction, and the producer joins your own transaction. Any pool
-mode works, including `pool_mode = transaction`.
 
 ## Graceful shutdown needs ext-pcntl
 
@@ -68,9 +56,9 @@ php bin/console message-broker:consume orders --require-signals
 
 ## Observability
 
-There is no built-in metrics interface in 1.0. Instead, inject:
+There is no built-in metrics interface. Instead, inject:
 
-- **A PSR-3 `LoggerInterface`** on relays and consumers — failures and
+- **A PSR-3 `LoggerInterface`** on `Relay` and `DeliveryProcessor` — failures and
   backoff decisions are logged (`warning`/`error`); the default
   `NullLogger` is silent.
 - **A `BrokerEvents` listener** — an optional lifecycle hook fired on the
@@ -108,7 +96,7 @@ and `dead_letters` tables plus these events:
 
 **There is no ordering.** Rows publish in any order, and consumers must be
 order-insensitive. AMQP routes by message name. See
-[TRANSPORTS.md](TRANSPORTS.md).
+[../amqp/TRANSPORT.md](../amqp/TRANSPORT.md).
 
 **Consumers: one commit per message.** Each delivery is one transaction (the
 dedup insert and your handler), one commit and one ack. The disk flush of the
@@ -153,7 +141,7 @@ publishes the batch with publisher confirms, and marks the rows published.
 Workers never block each other, and a crashed worker's claimed rows are
 instantly reclaimable. A broker failure backs off the rows of the failed
 publish and stops the worker; a nack backs off only the nacked rows (see
-[TRANSPORTS.md](TRANSPORTS.md)).
+[RELAY.md](RELAY.md)).
 
 **Batch size and worker count.** The default batch is 500 rows: one claim, one
 confirm wait and one update for each batch. A local benchmark (one machine,
@@ -179,85 +167,3 @@ separate lanes so that a slow or failing workload does not delay another one.
 **Watch row age.** A single stuck row does not stall a lane, because other
 rows overtake it. Watch the age of the oldest unpublished row
 (`published_at IS NULL`) per lane.
-
-## Outbox retention
-
-The relay never deletes rows. It sets `published_at`, and the rows stay until
-retention drops their partition, once every row of it is published. `outbox_messages` is partitioned by
-`created_at`, with one partition per UTC day (`outbox_messages_pYYYYMMDD`) and
-no default partition. An insert for a day with no partition fails, and the
-producer's transaction fails with it, so create partitions ahead of time.
-
-Run `message-broker:outbox:maintain` once a day (cron):
-
-```bash
-php bin/console message-broker:outbox:maintain --retention-days=7 --premake-days=3
-```
-
-The command:
-
-- creates the missing daily partitions from today to today plus
-  `--premake-days` (`CREATE TABLE`, then `ATTACH PARTITION`);
-- drops each daily partition that lies wholly before the cutoff (today
-  midnight UTC minus `--retention-days`): `DETACH PARTITION ... CONCURRENTLY`,
-  then `DROP TABLE` on the detached table;
-- finishes a detach that an earlier run did not complete
-  (`DETACH PARTITION ... FINALIZE`), and drops an expired table that an earlier
-  run detached.
-
-**Unpublished rows.** By default, an expired partition that still holds a row
-with `published_at IS NULL` is kept. The command prints the partition and the
-number of unpublished rows and exits with code 1, so that a scheduler or a
-monitor alerts. A later run drops the partition once its rows are published.
-The same rule covers a partition with a pending detach and an expired table
-that an earlier run detached. A partition that is kept grows, so fix the relay
-or alert on the exit code well before the disk fills.
-
-The check and the detach are not one atomic step. The command counts the
-unpublished rows before the detach and again on the detached table, before
-`DROP TABLE`. No row can reach the table after the detach, so the second count
-catches a row that arrived in between. The command then attaches the table
-again (`ATTACH PARTITION`, which takes only `SHARE UPDATE EXCLUSIVE`), so the
-relay claims and publishes its rows, and a later run drops it. The same
-applies to an expired table that an earlier run detached, and to a partition
-with a pending detach (the command finishes the detach first, then attaches
-it). If the attach fails, the command stops with the error, drops nothing, and
-the table stays detached; fix the cause and run it again. Nothing is locked.
-
-**Hard age limit.** The option `--drop-unpublished` restores the hard age
-limit: the retention period is then also the age limit of an unpublished row.
-The command drops an expired partition with its unpublished rows, prints a
-warning with the number of rows, and exits with code 0. A relay that stays
-broken for longer than the retention period loses those messages.
-
-**Locks.** No step takes an `ACCESS EXCLUSIVE` lock on `outbox_messages`.
-`ATTACH PARTITION` and `DETACH PARTITION ... CONCURRENTLY` take only
-`SHARE UPDATE EXCLUSIVE`, which does not block inserts, claims or updates. The
-detach waits until the transactions that use `outbox_messages` end, so a long
-business transaction delays the command but blocks nobody. The command must
-run outside a transaction. A plain `DROP TABLE` or `DETACH PARTITION` of a
-partition takes `ACCESS EXCLUSIVE` on the parent and queues every producer
-behind it; do not run them on this table by hand.
-
-It exits with code 0 on success (also when it dropped unpublished rows with
-`--drop-unpublished`), with code 1 when it kept at least one expired partition
-because of unpublished rows, and with code 2 on invalid options. Use
-`--dry-run` to preview the changes; a dry run always exits with code 0.
-
-### With pg_partman
-
-pg_partman can create the partitions. Its default name for a daily partition,
-`outbox_messages_pYYYYMMDD`, is the name this library uses, so
-`outbox:maintain` skips the partitions that pg_partman made and drops them when
-they expire. Configure pg_partman like this:
-
-- **No default partition:** `create_parent(..., p_default_table := false)`.
-  With a default partition, `DETACH PARTITION ... CONCURRENTLY` fails.
-- **No retention:** keep `retention` NULL in `part_config`. pg_partman retention
-  runs a plain `DETACH PARTITION`, which takes `ACCESS EXCLUSIVE` on the parent.
-  Let `outbox:maintain` drop the partitions.
-- **UTC:** run the database in UTC, so pg_partman's day boundaries agree with
-  the UTC days of this library.
-
-Monitor three signals: the age of the oldest unpublished row per lane, the
-exit code of the maintain command, and the partition of tomorrow.

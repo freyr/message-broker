@@ -6,9 +6,15 @@ AMQP, consume it with deduplication and retry, and register the two
 long-running processes as CLI commands.
 
 It assumes a PostgreSQL database and a RabbitMQ broker reachable
-from your application. See [TRANSPORTS.md](TRANSPORTS.md) for the AMQP
-relay, and
-[CLI_REFERENCE.md](CLI_REFERENCE.md) for every command's full option list.
+from your application. See [core/RELAY.md](core/RELAY.md) for the relay,
+[amqp/TRANSPORT.md](amqp/TRANSPORT.md) for the AMQP publisher, and
+[core/CLI_REFERENCE.md](core/CLI_REFERENCE.md) for every command's full option list.
+
+The example uses the three packages: the core (`Freyr\MessageBroker\`), the
+PostgreSQL adapter (`Freyr\MessageBroker\Adapter\PostgreSql\`) and the AMQP
+adapter (`Freyr\MessageBroker\Adapter\Amqp\`). Today one Composer package
+holds all three. The documents of each package are in `docs/core/`,
+`docs/postgresql/` and `docs/amqp/`.
 
 ## Define a message
 
@@ -77,7 +83,7 @@ php bin/console message-broker:setup:schema
 
 The `body` column is `BYTEA`. `--premake-days` (default `3`) sets how many
 days of partitions
-the command creates ahead. See [CLI_REFERENCE.md](CLI_REFERENCE.md) for
+the command creates ahead. See [core/CLI_REFERENCE.md](core/CLI_REFERENCE.md) for
 `--dump-sql` and every other command's options.
 
 ## Run a relay
@@ -107,7 +113,7 @@ $relay->run(); // blocks; SIGTERM/SIGINT to stop
 
 Run more workers on the same lane to scale throughput; each worker has its
 own database connection and its own channel. See
-[TRANSPORTS.md](TRANSPORTS.md) for the details.
+[core/RELAY.md](core/RELAY.md) and [amqp/TRANSPORT.md](amqp/TRANSPORT.md) for the details.
 
 ## Schedule the outbox maintenance
 
@@ -129,8 +135,8 @@ php bin/console message-broker:outbox:maintain --retention-days=7 --premake-days
 
 An expired partition that still holds unpublished rows is kept, and the
 command exits with code 1; `--drop-unpublished` drops it with those rows. See
-[CLI_REFERENCE.md](CLI_REFERENCE.md) for the options and the exit codes, and
-[PRODUCTION.md](PRODUCTION.md) for pg_partman.
+[core/CLI_REFERENCE.md](core/CLI_REFERENCE.md) for the options and the exit codes, and
+[postgresql/RETENTION.md](postgresql/RETENTION.md) for the retention rules and pg_partman.
 
 ## Run a consumer
 
@@ -193,14 +199,18 @@ $application->add(new ConsumeCommand(['orders' => static fn () => $consumer->run
 
 Run them with `php bin/console message-broker:relay:run orders` and
 `php bin/console message-broker:consume orders`. Deploy both under a process
-supervisor with restart-always — see [PRODUCTION.md](PRODUCTION.md) for the
+supervisor with restart-always — see [core/PRODUCTION.md](core/PRODUCTION.md) for the
 crash-only deployment model and why it is safe.
 
 ## Next steps
 
-- [TRANSPORTS.md](TRANSPORTS.md) — AMQP configuration in full (relay,
-  consumer, retry).
-- [CLI_REFERENCE.md](CLI_REFERENCE.md) — every command and option.
-- [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md) — inspecting, replaying, and
+- [core/RELAY.md](core/RELAY.md) — lanes, the relay loop, failure handling and backoff.
+- [core/CONSUMER.md](core/CONSUMER.md) — the delivery processor and the retry policy.
+- [amqp/TRANSPORT.md](amqp/TRANSPORT.md) and [amqp/CONSUMER.md](amqp/CONSUMER.md) —
+  AMQP configuration in full (publisher, consumer, retry).
+- [postgresql/STORAGE.md](postgresql/STORAGE.md) — the tables, the schema setup and the PostgreSQL classes.
+- [core/CLI_REFERENCE.md](core/CLI_REFERENCE.md) — every command and option.
+- [core/DLQ_OPERATIONS.md](core/DLQ_OPERATIONS.md) — inspecting, replaying, and
   purging dead letters.
-- [PRODUCTION.md](PRODUCTION.md) — deployment, retention, observability, and scaling.
+- [core/PRODUCTION.md](core/PRODUCTION.md) — deployment, observability, and scaling;
+  [postgresql/RETENTION.md](postgresql/RETENTION.md) — outbox retention.

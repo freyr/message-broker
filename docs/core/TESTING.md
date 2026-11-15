@@ -1,6 +1,6 @@
 # Testing
 
-The package has a test kit in the namespace `Freyr\MessageBroker\Testing\`. It is part of `src`, so it is available to every package that requires the core. The kit needs PHPUnit. Add `phpunit/phpunit` to `require-dev`.
+The core has a test kit in the namespace `Freyr\MessageBroker\Testing\`. It is part of `src`, so it is available to every package that requires the core. The kit needs PHPUnit. Add `phpunit/phpunit` to `require-dev`.
 
 The kit has two parts:
 
@@ -73,4 +73,4 @@ The fakes read time from `symfony/clock`. Use `Clock::set(new MockClock(...))` t
 
 ## Parallel test workers
 
-The trait `Freyr\MessageBroker\Testing\TestIsolation` gives `isolated(string $name)`. Use it for each queue, exchange or topic name of a test. Infection sets `TEST_TOKEN` for each worker, and the trait adds `_t<token>` to the name, so two workers never share a name. `Freyr\MessageBroker\Adapter\PostgreSql\Testing\PostgreSqlTestSupport` adds a database for each worker.
+The trait `Freyr\MessageBroker\Testing\TestIsolation` gives `isolated(string $name)`. Use it for each queue, exchange or topic name of a test. Infection sets `TEST_TOKEN` for each worker, and the trait adds `_t<token>` to the name, so two workers never share a name. The PostgreSQL test set-up adds a database for each worker (see [../postgresql/STORAGE.md](../postgresql/STORAGE.md), *Test support*).
