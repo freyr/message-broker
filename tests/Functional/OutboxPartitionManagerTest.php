@@ -52,6 +52,76 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
         self::assertSame($names, $this->dailyPartitionNames());
     }
 
+    public function testPartitionDdlCreatesAndAttachesEachDayFromTodayThroughDaysAhead(): void
+    {
+        // A mid-day, non-UTC "today": the partitions still start at 00:00 UTC of that day.
+        $today = new DateTimeImmutable('2026-03-10 13:45:30', new DateTimeZone('Europe/Warsaw'));
+
+        $ddl = $this->partitions->partitionDdl(1, $today);
+
+        self::assertSame([
+            'CREATE TABLE IF NOT EXISTS "outbox_messages_p20260310" (LIKE outbox_messages INCLUDING DEFAULTS INCLUDING CONSTRAINTS)',
+            "ALTER TABLE outbox_messages ATTACH PARTITION \"outbox_messages_p20260310\" FOR VALUES FROM ('2026-03-10 00:00:00') TO ('2026-03-11 00:00:00')",
+            'CREATE TABLE IF NOT EXISTS "outbox_messages_p20260311" (LIKE outbox_messages INCLUDING DEFAULTS INCLUDING CONSTRAINTS)',
+            "ALTER TABLE outbox_messages ATTACH PARTITION \"outbox_messages_p20260311\" FOR VALUES FROM ('2026-03-11 00:00:00') TO ('2026-03-12 00:00:00')",
+        ], $ddl);
+    }
+
+    public function testPartitionDdlForZeroDaysAheadCoversOnlyToday(): void
+    {
+        self::assertCount(2, $this->partitions->partitionDdl(0, self::day('2026-03-10')));
+    }
+
+    public function testNegativeDaysAheadIsRejected(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('daysAhead must be 0 or more, got -1');
+
+        $this->partitions->partitionDdl(-1, self::day('2026-03-10'));
+    }
+
+    public function testEnsurePartitionsRejectsNegativeDaysAheadAndCreatesNothing(): void
+    {
+        try {
+            $this->partitions->ensurePartitions(-1, self::day('2026-03-10'));
+            self::fail('a negative daysAhead must be rejected');
+        } catch (\InvalidArgumentException $error) {
+            self::assertSame('daysAhead must be 0 or more, got -1', $error->getMessage());
+        }
+
+        self::assertSame([], $this->dailyPartitionNames());
+    }
+
+    public function testEnsurePartitionsCreatesThreeDaysAheadByDefault(): void
+    {
+        $names = $this->partitions->ensurePartitions(today: self::day('2026-03-10'));
+
+        self::assertSame(
+            ['outbox_messages_p20260310', 'outbox_messages_p20260311', 'outbox_messages_p20260312', 'outbox_messages_p20260313'],
+            $names,
+        );
+        self::assertSame($names, $this->dailyPartitionNames());
+    }
+
+    public function testEnsureAttachesAStandaloneDailyTableThatIsNotAttachedYet(): void
+    {
+        self::$pdo->exec('CREATE TABLE outbox_messages_p20260310 (LIKE outbox_messages INCLUDING DEFAULTS INCLUDING CONSTRAINTS)');
+
+        $names = $this->partitions->ensurePartitions(0, self::day('2026-03-10'));
+
+        self::assertSame(['outbox_messages_p20260310'], $names);
+        self::assertSame(['outbox_messages_p20260310'], $this->dailyPartitionNames(), 'the leftover table is now a partition');
+        self::assertSame(0, $this->standaloneDailyTableCount());
+    }
+
+    public function testPurgeReportsTheCutoffAsMidnightUtcOfTodayMinusRetention(): void
+    {
+        $report = $this->partitions->purge(2, today: new DateTimeImmutable('2026-03-05 13:45:30', new DateTimeZone('UTC')));
+
+        self::assertSame('2026-03-03 00:00:00', $report->cutoff->format('Y-m-d H:i:s'));
+        self::assertSame([], $report->dropped);
+    }
+
     public function testRowsLandInTheirDailyPartition(): void
     {
         $this->partitions->ensurePartitions(0, self::day('2026-03-10'));
