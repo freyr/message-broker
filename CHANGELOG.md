@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-15
+
+### Added
+
+- Test kit in the core, namespace `Freyr\MessageBroker\Testing\` (`src/broker/Testing/`): the abstract contract test cases `OutboxStoreContractTestCase`, `DeduplicationStoreContractTestCase`, `DeadLetterStoreContractTestCase`, `TransactionContractTestCase` and `OutboxPublisherContractTestCase` for the authors of adapters, and the in-memory fakes `InMemoryOutboxStore`, `InMemoryDeduplicationStore`, `InMemoryDeadLetterStore`, `InMemoryTransaction` and `FakeOutboxPublisher` (and `RecordingDeliveryControl`). The test cases extend the PHPUnit `TestCase`, so `phpunit/phpunit` is now in `suggest`. `Adapter\PostgreSql\Testing\PostgreSqlTestSupport` is the PostgreSQL test set-up for the adapter tests. See `docs/TESTING.md`
+
 ## [0.7.0] - 2026-11-15
 
 The code is split into a core and two adapters inside this package. `UPGRADE.md` has the full table of old and new class names.

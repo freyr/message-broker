@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Console;
 
 use Freyr\MessageBroker\Console\DlqShowCommand;
+use Freyr\MessageBroker\Testing\InMemoryDeadLetterStore;
 use Freyr\MessageBroker\Tests\Fixtures\DeadLetterFactory;
-use Freyr\MessageBroker\Tests\Fixtures\InMemoryDeadLetterStore;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Tester\CommandTester;
 

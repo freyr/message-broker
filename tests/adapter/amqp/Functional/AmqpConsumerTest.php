@@ -16,7 +16,7 @@ use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
-use Freyr\MessageBroker\Tests\Fixtures\RecordingLogger;
+use Freyr\MessageBroker\Testing\RecordingLogger;
 use Freyr\MessageBroker\Time\EpochMillis;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;

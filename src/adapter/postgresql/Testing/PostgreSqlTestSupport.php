@@ -2,11 +2,13 @@
 
 declare(strict_types=1);
 
-namespace Freyr\MessageBroker\Tests\Fixtures;
+namespace Freyr\MessageBroker\Adapter\PostgreSql\Testing;
 
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxRetention;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlSchemaInstaller;
+use Freyr\MessageBroker\Testing\TestIsolation;
 use PDO;
+use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
 /**
@@ -15,10 +17,15 @@ use RuntimeException;
  * parallel Infection workers (database <name>_t<token>, names via isolated()).
  *
  * Used by the base class of each adapter test group, so that neither group imports a class
- * from the other. It needs the PostgreSQL adapter classes of src/ only.
+ * from the other. It needs the PostgreSQL adapter classes of src/ only. The transport-neutral
+ * part (isolated(), the worker token) is {@see TestIsolation} of the core test kit.
+ *
+ * @phpstan-require-extends TestCase
  */
 trait PostgreSqlTestSupport
 {
+    use TestIsolation;
+
     protected static PDO $pdo;
 
     /** @var array<string, true> */
@@ -95,17 +102,6 @@ trait PostgreSqlTestSupport
     }
 
     /**
-     * The worker index of a parallel run: Infection sets TEST_TOKEN for each
-     * mutant process. Null in a plain PHPUnit run.
-     */
-    private static function workerToken(): ?string
-    {
-        $token = getenv('TEST_TOKEN');
-
-        return is_string($token) && preg_match('/^\d+$/', $token) === 1 ? $token : null;
-    }
-
-    /**
      * Each parallel worker gets its own database (<name>_t<token>), created
      * on first use, so that workers never see each other's rows.
      */
@@ -130,18 +126,6 @@ trait PostgreSqlTestSupport
         return str_replace("dbname={$match[1]}", "dbname={$database}", $dsn);
     }
 
-    /**
-     * A queue or exchange name of this worker: the shared name in a plain
-     * PHPUnit run, <name>_t<token> in a parallel run.
-     */
-    protected static function isolated(string $name): string
-    {
-        $token = self::workerToken();
-
-        return $token === null ? $name : "{$name}_t{$token}";
-    }
-
-    /** A fresh, independent PDO connection (for cross-session lock tests). */
     /** @return array{string, string, string} DSN, user and password of this worker's test database */
     protected static function credentials(): array
     {

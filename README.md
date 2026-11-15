@@ -50,6 +50,7 @@ after the retention period (default 7 days). A partition with unpublished rows i
 - [CLI Reference](docs/CLI_REFERENCE.md) — every shipped console command
 - [DLQ Operations](docs/DLQ_OPERATIONS.md) — inspecting, replaying, and purging dead letters
 - [Production](docs/PRODUCTION.md) — observability, graceful shutdown, operational guidance
+- [Testing](docs/TESTING.md) — contract test cases for adapter authors, in-memory fakes for applications
 
 ## License
 
