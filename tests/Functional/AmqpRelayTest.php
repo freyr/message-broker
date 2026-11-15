@@ -5,14 +5,15 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Outbox\OutboxProducer;
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
+use Freyr\MessageBroker\Outbox\Relay;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingEvents;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingLogger;
+use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
-use Freyr\MessageBroker\Transport\Amqp\AmqpRelay;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Exception\AMQPProtocolChannelException;
@@ -69,7 +70,7 @@ final class AmqpRelayTest extends FunctionalTestCase
         $this->channel->queue_purge(self::isolated(self::QUEUE));
 
         $this->producer = new OutboxProducer(
-            new PdoOutboxStore(self::$pdo, static::platform()),
+            new PostgreSqlOutboxStore(self::$pdo),
             new JsonWireFormat(),
             lane: self::LANE,
         );
@@ -87,12 +88,14 @@ final class AmqpRelayTest extends FunctionalTestCase
         ?RecordingEvents $events = null,
         ?RecordingLogger $logger = null,
         ?AMQPChannel $channel = null,
-    ): AmqpRelay {
-        return new AmqpRelay(
-            outbox: new PdoOutboxStore(self::newConnection(), static::platform()),
-            amqp: $channel ?? self::$amqp->channel(),
-            publish: new AmqpPublishConfig(exchange: $exchange ?? self::isolated(self::EXCHANGE)),
-            contentType: JsonWireFormat::CONTENT_TYPE,
+    ): Relay {
+        return new Relay(
+            outbox: new PostgreSqlOutboxStore(self::newConnection()),
+            publisher: new AmqpMessagePublisher(
+                $channel ?? self::$amqp->channel(),
+                new AmqpPublishConfig(exchange: $exchange ?? self::isolated(self::EXCHANGE)),
+                JsonWireFormat::CONTENT_TYPE,
+            ),
             lane: self::LANE,
             batchSize: $batchSize,
             backoff: Backoff::exponential(initialDelayMs: 60_000, maxDelayMs: 600_000),

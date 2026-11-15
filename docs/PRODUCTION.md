@@ -146,7 +146,7 @@ Prefetch 1 and prefetch 32 give the same result within 3%. To get more
 throughput with slow handlers, add consumer processes. Run the benchmark with
 `make bench-consumer ARGS="<messages> <processes> <prefetch> <handler-ms>"`.
 
-**Scale by adding workers to a lane.** Run N identical `AmqpRelay` worker
+**Scale by adding workers to a lane.** Run N identical `Relay` worker
 processes against one lane. Each claims a batch of eligible rows via
 `FOR UPDATE SKIP LOCKED` inside a transaction owned by the outbox store,
 publishes the batch with publisher confirms, and marks the rows published.

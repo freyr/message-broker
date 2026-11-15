@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Console;
 
-use Freyr\MessageBroker\Outbox\OutboxPartitionManager;
-use Freyr\MessageBroker\Storage\Platform;
-use PDO;
+use Freyr\MessageBroker\Storage\SchemaInstaller;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -20,8 +18,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 final class SetupSchemaCommand extends Command
 {
     public function __construct(
-        private readonly PDO $pdo,
-        private readonly Platform $platform,
+        private readonly SchemaInstaller $installer,
     ) {
         parent::__construct();
     }
@@ -42,22 +39,17 @@ final class SetupSchemaCommand extends Command
             return Command::INVALID;
         }
 
-        $partitions = new OutboxPartitionManager($this->pdo);
         $premakeDays = (int) $premakeOption;
 
         if ($input->getOption('dump-sql') === true) {
-            // For a new database: the partition DDL is not idempotent (ATTACH).
-            foreach ([...$this->platform->schemaSql(), ...$partitions->partitionDdl($premakeDays)] as $statement) {
+            foreach ($this->installer->sql($premakeDays) as $statement) {
                 $output->writeln($statement.';');
             }
 
             return Command::SUCCESS;
         }
 
-        foreach ($this->platform->schemaSql() as $statement) {
-            $this->pdo->exec($statement);
-        }
-        $partitions->ensurePartitions($premakeDays); // skips partitions that are already attached
+        $this->installer->install($premakeDays);
         $output->writeln('<info>Schema is up to date.</info>');
 
         return Command::SUCCESS;

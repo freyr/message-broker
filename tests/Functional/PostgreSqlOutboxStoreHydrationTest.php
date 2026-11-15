@@ -6,10 +6,9 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Outbox\ClaimOutcome;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
-use Freyr\MessageBroker\Storage\Platform;
-use Freyr\MessageBroker\Storage\PostgreSqlPlatform;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Time\EpochMillis;
+use PDO;
 use PDOStatement;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
@@ -19,7 +18,7 @@ use RuntimeException;
  * or a numeric string, and anything else fails the claim with a clear error
  * and rolls the claim back.
  */
-final class PdoOutboxStoreHydrationTest extends FunctionalTestCase
+final class PostgreSqlOutboxStoreHydrationTest extends FunctionalTestCase
 {
     /** @return iterable<string, array{string, int}> */
     public static function acceptedAttempts(): iterable
@@ -71,7 +70,7 @@ final class PdoOutboxStoreHydrationTest extends FunctionalTestCase
 
     private function insertRow(): void
     {
-        (new PdoOutboxStore(self::$pdo, static::platform()))->insert(new OutboxRecord(
+        (new PostgreSqlOutboxStore(self::$pdo))->insert(new OutboxRecord(
             id: '01900000-0000-7000-8000-000000000001',
             lane: 'hydration',
             messageName: 'order.placed',
@@ -81,45 +80,29 @@ final class PdoOutboxStoreHydrationTest extends FunctionalTestCase
         ));
     }
 
-    private function storeReadingAttemptsAs(string $expression): PdoOutboxStore
+    private function storeReadingAttemptsAs(string $expression): PostgreSqlOutboxStore
     {
-        $platform = new class(new PostgreSqlPlatform(), $expression) implements Platform {
+        // The claim query selects `attempts`; the connection swaps that column
+        // for the expression, so the store hydrates a deliberately bad value.
+        [$dsn, $user, $password] = self::credentials();
+        $pdo = new class($dsn, $user, $password, $expression) extends PDO {
             public function __construct(
-                private readonly Platform $inner,
-                private readonly string $expression,
-            ) {}
-
-            public function insertOutboxSql(): string
-            {
-                return $this->inner->insertOutboxSql();
+                string $dsn,
+                string $user,
+                string $password,
+                private readonly string $expression
+            ) {
+                parent::__construct($dsn, $user, $password, [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                ]);
             }
 
-            public function selectClaimBatchSql(): string
+            public function prepare(string $query, array $options = []): PDOStatement|false
             {
-                return str_replace(', attempts', ", {$this->expression} AS attempts", $this->inner->selectClaimBatchSql());
-            }
-
-            public function insertDeduplicationSql(): string
-            {
-                return $this->inner->insertDeduplicationSql();
-            }
-
-            public function schemaSql(): array
-            {
-                return $this->inner->schemaSql();
-            }
-
-            public function bindBody(PDOStatement $statement, string $name, string $body): void
-            {
-                $this->inner->bindBody($statement, $name, $body);
-            }
-
-            public function readBody(mixed $value): string
-            {
-                return $this->inner->readBody($value);
+                return parent::prepare(str_replace(', attempts', ", {$this->expression} AS attempts", $query), $options);
             }
         };
 
-        return new PdoOutboxStore(self::$pdo, $platform);
+        return new PostgreSqlOutboxStore($pdo);
     }
 }

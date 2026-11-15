@@ -6,16 +6,16 @@ namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\Time\EpochMillis;
-use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
+use Freyr\MessageBroker\Transport\PostgreSqlDeduplicationStore;
 
 final class DeduplicationCleanupTest extends FunctionalTestCase
 {
-    private PdoDeduplicationStore $store;
+    private PostgreSqlDeduplicationStore $store;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->store = new PdoDeduplicationStore(self::$pdo, static::platform());
+        $this->store = new PostgreSqlDeduplicationStore(self::$pdo);
     }
 
     public function testAcquireIsAtomicPerMessageAndConsumer(): void
@@ -53,7 +53,7 @@ final class DeduplicationCleanupTest extends FunctionalTestCase
 
     public function testCleanupDeletesInChunksUntilNoOldEntryIsLeft(): void
     {
-        $store = new PdoDeduplicationStore(self::$pdo, static::platform(), deleteChunkSize: 2);
+        $store = new PostgreSqlDeduplicationStore(self::$pdo, deleteChunkSize: 2);
         foreach (['a', 'b', 'c', 'd', 'e'] as $id) {
             $store->acquire($this->incoming("m-{$id}"), 'orders_consumer');
         }

@@ -7,7 +7,7 @@ namespace Freyr\MessageBroker\Tests\Functional;
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
-use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
+use Freyr\MessageBroker\DeadLetter\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
@@ -17,7 +17,7 @@ use Freyr\MessageBroker\Tests\Fixtures\RecordingLogger;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
-use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
+use Freyr\MessageBroker\Transport\PostgreSqlDeduplicationStore;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
@@ -74,7 +74,6 @@ final class AmqpConsumerTest extends FunctionalTestCase
 
     private function consumer(int $maxAttempts = 5, ?\PDO $pdo = null, ?RecordingLogger $logger = null): AmqpConsumer
     {
-        $platform = static::platform();
         $pdo ??= self::$pdo;
         $dispatch = function (IncomingMessage $incoming): void {
             if ($this->failingDispatch !== null) {
@@ -90,12 +89,12 @@ final class AmqpConsumerTest extends FunctionalTestCase
                 deserializer: new JsonDeserializer(),
                 dispatcher: new CallableDispatcher($dispatch),
                 transaction: new PdoTransaction($pdo),
-                deduplication: new PdoDeduplicationStore($pdo, $platform),
+                deduplication: new PostgreSqlDeduplicationStore($pdo),
                 retryPolicy: new ExponentialRetryPolicy(
                     maxAttempts: $maxAttempts,
                     backoff: Backoff::exponential(initialDelayMs: 100, maxDelayMs: 100),
                 ),
-                deadLetters: new PdoDeadLetterStore($pdo, $platform),
+                deadLetters: new PostgreSqlDeadLetterStore($pdo),
                 name: 'orders_consumer',
                 logger: $logger ?? new RecordingLogger(),
             ),

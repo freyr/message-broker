@@ -12,32 +12,29 @@ use Freyr\MessageBroker\Console\DlqShowCommand;
 use Freyr\MessageBroker\Console\SetupSchemaCommand;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
-use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
+use Freyr\MessageBroker\DeadLetter\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
-use Freyr\MessageBroker\Storage\Platform;
 use Freyr\MessageBroker\Time\EpochMillis;
-use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
+use Freyr\MessageBroker\Transport\PostgreSqlDeduplicationStore;
 use RuntimeException;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
 final class ConsoleCommandsTest extends FunctionalTestCase
 {
-    private Platform $platform;
-    private PdoDeadLetterStore $deadLetters;
+    private PostgreSqlDeadLetterStore $deadLetters;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->platform = static::platform();
-        $this->deadLetters = new PdoDeadLetterStore(self::$pdo, $this->platform);
+        $this->deadLetters = new PostgreSqlDeadLetterStore(self::$pdo);
     }
 
     public function testSetupSchemaDumpSqlPrintsDdlWithoutTouchingTheDatabase(): void
     {
-        $tester = new CommandTester(new SetupSchemaCommand(self::$pdo, $this->platform));
+        $tester = new CommandTester(new SetupSchemaCommand(self::schemaInstaller()));
 
         $tester->execute([
             '--dump-sql' => true,
@@ -51,7 +48,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
 
     public function testSetupSchemaExecutesDdl(): void
     {
-        $tester = new CommandTester(new SetupSchemaCommand(self::$pdo, $this->platform));
+        $tester = new CommandTester(new SetupSchemaCommand(self::schemaInstaller()));
 
         $tester->execute([]);
 
@@ -70,7 +67,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
 
     public function testDedupCleanupParsesDurationAndPrunes(): void
     {
-        $store = new PdoDeduplicationStore(self::$pdo, $this->platform);
+        $store = new PostgreSqlDeduplicationStore(self::$pdo);
         $store->acquire(new IncomingMessage('m-old', 'order.placed', EpochMillis::now(), []), 'c');
         $eightDaysAgo = EpochMillis::toDateTime(EpochMillis::now() - 8 * 86_400_000)->format('Y-m-d H:i:s.v');
         self::$pdo->prepare('UPDATE message_deduplication SET created_at = :ts')->execute([
@@ -124,9 +121,8 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         self::assertStringContainsString('boom', $show->getDisplay());
 
         $replay = new CommandTester(new DlqReplayCommand(
-            new ReplayService($this->deadLetters, new PdoOutboxStore(
+            new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
                 self::$pdo,
-                $this->platform
             ), new JsonWireFormat()),
             $this->deadLetters,
         ));
@@ -152,7 +148,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
 
     public function testSetupSchemaDumpUsesByteaBody(): void
     {
-        $tester = new CommandTester(new SetupSchemaCommand(self::$pdo, $this->platform));
+        $tester = new CommandTester(new SetupSchemaCommand(self::schemaInstaller()));
         $tester->execute([
             '--dump-sql' => true,
         ]);
@@ -169,9 +165,8 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $this->seedDeadLetter('01900000-0000-7000-8000-00000000000a', 'order.placed');
 
         $replay = new CommandTester(new DlqReplayCommand(
-            new ReplayService($this->deadLetters, new PdoOutboxStore(
+            new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
                 self::$pdo,
-                $this->platform
             ), new JsonWireFormat()),
             $this->deadLetters,
         ));
@@ -191,9 +186,8 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $this->seedDeadLetter('01900000-0000-7000-8000-00000000000b', 'order.placed');
 
         $replay = new CommandTester(new DlqReplayCommand(
-            new ReplayService($this->deadLetters, new PdoOutboxStore(
+            new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
                 self::$pdo,
-                $this->platform
             ), new JsonWireFormat()),
             $this->deadLetters,
         ));
@@ -214,9 +208,8 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $this->seedDeadLetter('01900000-0000-7000-8000-00000000000c', 'order.placed');
 
         $replay = new CommandTester(new DlqReplayCommand(
-            new ReplayService($this->deadLetters, new PdoOutboxStore(
+            new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
                 self::$pdo,
-                $this->platform
             ), new JsonWireFormat()),
             $this->deadLetters,
         ));
@@ -268,7 +261,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
 
     public function testDedupCleanupDryRunReportsWithoutDeleting(): void
     {
-        $store = new PdoDeduplicationStore(self::$pdo, $this->platform);
+        $store = new PostgreSqlDeduplicationStore(self::$pdo);
         $store->acquire(new IncomingMessage('m-old', 'order.placed', EpochMillis::now(), []), 'c');
         $eightDaysAgo = EpochMillis::toDateTime(EpochMillis::now() - 8 * 86_400_000)->format('Y-m-d H:i:s.v');
         self::$pdo->prepare('UPDATE message_deduplication SET created_at = :ts')->execute([
@@ -310,9 +303,8 @@ final class ConsoleCommandsTest extends FunctionalTestCase
 
         // batchSize 1 forces the drain through multiple pages.
         $replay = new CommandTester(new DlqReplayCommand(
-            new ReplayService($this->deadLetters, new PdoOutboxStore(
+            new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
                 self::$pdo,
-                $this->platform
             ), new JsonWireFormat()),
             $this->deadLetters,
             batchSize: 1,

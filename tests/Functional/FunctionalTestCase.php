@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Functional;
 
-use Freyr\MessageBroker\Outbox\OutboxPartitionManager;
-use Freyr\MessageBroker\Storage\Platform;
-use Freyr\MessageBroker\Storage\PostgreSqlPlatform;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxRetention;
+use Freyr\MessageBroker\Storage\PostgreSqlSchemaInstaller;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -18,9 +17,15 @@ abstract class FunctionalTestCase extends TestCase
     /** @var array<string, true> */
     private static array $createdDatabases = [];
 
-    protected static function platform(): Platform
+    /** A BYTEA column as pdo_pgsql returns it: a stream resource (or a string). */
+    protected static function bodyOf(mixed $value): string
     {
-        return new PostgreSqlPlatform();
+        return is_resource($value) ? (string) stream_get_contents($value) : (string) $value;
+    }
+
+    protected static function schemaInstaller(): PostgreSqlSchemaInstaller
+    {
+        return new PostgreSqlSchemaInstaller(self::$pdo);
     }
 
     public static function setUpBeforeClass(): void
@@ -41,15 +46,13 @@ abstract class FunctionalTestCase extends TestCase
         foreach ($leftovers->fetchAll(PDO::FETCH_COLUMN) as $name) {
             self::$pdo->exec(sprintf('DROP TABLE "%s"', (string) $name)); // detached daily tables survive the parent
         }
-        foreach (static::platform()->schemaSql() as $ddl) {
-            self::$pdo->exec($ddl);
-        }
+        self::schemaInstaller()->install(1);
     }
 
     protected function setUp(): void
     {
         // No DEFAULT partition: rows of today (and of tomorrow, past midnight) need theirs.
-        (new OutboxPartitionManager(self::$pdo))->ensurePartitions(1);
+        (new PostgreSqlOutboxRetention(self::$pdo))->ensureCapacity(1);
         self::$pdo->exec('DELETE FROM outbox_messages');
         self::$pdo->exec('DELETE FROM message_deduplication');
         self::$pdo->exec('DELETE FROM dead_letters');

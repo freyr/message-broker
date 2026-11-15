@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Functional;
 
 use Freyr\MessageBroker\Outbox\OutboxProducer;
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
+use Freyr\MessageBroker\Outbox\Relay;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Tests\Fixtures\OrderPlaced;
@@ -13,8 +14,8 @@ use Freyr\MessageBroker\Tests\Fixtures\RecordingErrorHandler;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingEvents;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingLogger;
 use Freyr\MessageBroker\Time\EpochMillis;
+use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
-use Freyr\MessageBroker\Transport\Amqp\AmqpRelay;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Exception\AMQPProtocolChannelException;
@@ -75,7 +76,7 @@ final class AmqpRelayContractTest extends FunctionalTestCase
         $this->channel->queue_purge(self::isolated(self::QUEUE));
 
         $this->producer = new OutboxProducer(
-            new PdoOutboxStore(self::$pdo, static::platform()),
+            new PostgreSqlOutboxStore(self::$pdo),
             new JsonWireFormat(),
             lane: self::LANE,
         );
@@ -94,12 +95,14 @@ final class AmqpRelayContractTest extends FunctionalTestCase
         ?RecordingErrorHandler $errorHandler = null,
         ?RecordingEvents $events = null,
         ?int $batchSize = null,
-    ): AmqpRelay {
+    ): Relay {
         $arguments = [
-            'outbox' => new PdoOutboxStore(self::newConnection(), static::platform()),
-            'amqp' => self::$amqp->channel(),
-            'publish' => new AmqpPublishConfig(exchange: $exchange ?? self::isolated(self::EXCHANGE)),
-            'contentType' => JsonWireFormat::CONTENT_TYPE,
+            'outbox' => new PostgreSqlOutboxStore(self::newConnection()),
+            'publisher' => new AmqpMessagePublisher(
+                self::$amqp->channel(),
+                new AmqpPublishConfig(exchange: $exchange ?? self::isolated(self::EXCHANGE)),
+                JsonWireFormat::CONTENT_TYPE,
+            ),
             'lane' => self::LANE,
             'backoff' => $backoff,
             'errorHandler' => $errorHandler,
@@ -110,7 +113,7 @@ final class AmqpRelayContractTest extends FunctionalTestCase
             $arguments['batchSize'] = $batchSize;
         }
 
-        return new AmqpRelay(...$arguments);
+        return new Relay(...$arguments);
     }
 
     private static function availableAtMs(string $id): int

@@ -8,9 +8,9 @@ use DateTimeImmutable;
 use DateTimeZone;
 use Freyr\MessageBroker\Console\OutboxMaintainCommand;
 use Freyr\MessageBroker\Outbox\ClaimOutcome;
-use Freyr\MessageBroker\Outbox\OutboxPartitionManager;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
-use Freyr\MessageBroker\Outbox\PdoOutboxStore;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxRetention;
+use Freyr\MessageBroker\Outbox\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Time\EpochMillis;
 use LogicException;
 use PDOException;
@@ -24,10 +24,10 @@ use Symfony\Component\Uid\Uuid;
  * unpublished rows is kept by default, and dropped only with the opt-in
  * dropUnpublished. There is no DEFAULT partition.
  */
-final class OutboxPartitionManagerTest extends FunctionalTestCase
+final class PostgreSqlOutboxRetentionTest extends FunctionalTestCase
 {
-    private OutboxPartitionManager $partitions;
-    private PdoOutboxStore $store;
+    private PostgreSqlOutboxRetention $partitions;
+    private PostgreSqlOutboxStore $store;
 
     protected function setUp(): void
     {
@@ -41,16 +41,16 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
         foreach ($leftovers->fetchAll(\PDO::FETCH_COLUMN) as $name) {
             self::$pdo->exec(sprintf('DROP TABLE "%s"', (string) $name));
         }
-        $this->partitions = new OutboxPartitionManager(self::$pdo);
-        $this->store = new PdoOutboxStore(self::$pdo, static::platform());
+        $this->partitions = new PostgreSqlOutboxRetention(self::$pdo);
+        $this->store = new PostgreSqlOutboxStore(self::$pdo);
     }
 
     public function testEnsureCreatesOnePartitionPerDayAheadAndIsIdempotent(): void
     {
         $today = self::day('2026-03-10');
 
-        $names = $this->partitions->ensurePartitions(2, $today);
-        $this->partitions->ensurePartitions(2, $today);
+        $names = $this->partitions->ensureCapacity(2, $today);
+        $this->partitions->ensureCapacity(2, $today);
 
         self::assertSame(
             ['outbox_messages_p20260310', 'outbox_messages_p20260311', 'outbox_messages_p20260312'],
@@ -90,7 +90,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
     public function testEnsurePartitionsRejectsNegativeDaysAheadAndCreatesNothing(): void
     {
         try {
-            $this->partitions->ensurePartitions(-1, self::day('2026-03-10'));
+            $this->partitions->ensureCapacity(-1, self::day('2026-03-10'));
             self::fail('a negative daysAhead must be rejected');
         } catch (\InvalidArgumentException $error) {
             self::assertSame('daysAhead must be 0 or more, got -1', $error->getMessage());
@@ -101,7 +101,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
 
     public function testEnsurePartitionsCreatesThreeDaysAheadByDefault(): void
     {
-        $names = $this->partitions->ensurePartitions(today: self::day('2026-03-10'));
+        $names = $this->partitions->ensureCapacity(3, today: self::day('2026-03-10'));
 
         self::assertSame(
             ['outbox_messages_p20260310', 'outbox_messages_p20260311', 'outbox_messages_p20260312', 'outbox_messages_p20260313'],
@@ -114,7 +114,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
     {
         self::$pdo->exec('CREATE TABLE outbox_messages_p20260310 (LIKE outbox_messages INCLUDING DEFAULTS INCLUDING CONSTRAINTS)');
 
-        $names = $this->partitions->ensurePartitions(0, self::day('2026-03-10'));
+        $names = $this->partitions->ensureCapacity(0, self::day('2026-03-10'));
 
         self::assertSame(['outbox_messages_p20260310'], $names);
         self::assertSame(['outbox_messages_p20260310'], $this->dailyPartitionNames(), 'the leftover table is now a partition');
@@ -131,7 +131,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
 
     public function testRowsLandInTheirDailyPartition(): void
     {
-        $this->partitions->ensurePartitions(0, self::day('2026-03-10'));
+        $this->partitions->ensureCapacity(0, self::day('2026-03-10'));
 
         $this->insertAt('2026-03-10 13:00:00');
 
@@ -148,7 +148,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
 
     public function testPurgeKeepsAnExpiredPartitionWithUnpublishedRowsAndDropsTheRest(): void
     {
-        $this->partitions->ensurePartitions(3, self::day('2026-03-01'));
+        $this->partitions->ensureCapacity(3, self::day('2026-03-01'));
         $this->insertAt('2026-03-01 10:00:00', published: true);  // expired, all published → dropped
         $this->insertAt('2026-03-02 10:00:00', published: false); // expired, unpublished → kept, reported
         $this->insertAt('2026-03-02 11:00:00', published: false);
@@ -175,7 +175,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
 
     public function testPurgeDropsAKeptPartitionOnALaterRunOnceItsRowsArePublished(): void
     {
-        $this->partitions->ensurePartitions(0, self::day('2026-03-01'));
+        $this->partitions->ensureCapacity(0, self::day('2026-03-01'));
         $this->insertAt('2026-03-01 10:00:00', published: false);
 
         $first = $this->partitions->purge(1, today: self::day('2026-03-05'));
@@ -195,7 +195,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
 
     public function testPurgeWithDropUnpublishedDropsThePartitionAndReportsTheRows(): void
     {
-        $this->partitions->ensurePartitions(3, self::day('2026-03-01'));
+        $this->partitions->ensureCapacity(3, self::day('2026-03-01'));
         $this->insertAt('2026-03-01 10:00:00', published: true);
         $this->insertAt('2026-03-02 10:00:00', published: false);
         $this->insertAt('2026-03-02 11:00:00', published: false);
@@ -216,7 +216,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
 
     public function testDryRunReportsWhatWouldBeKeptAndDroppedWithoutChangingAnything(): void
     {
-        $this->partitions->ensurePartitions(1, self::day('2026-03-01'));
+        $this->partitions->ensureCapacity(1, self::day('2026-03-01'));
         $this->insertAt('2026-03-01 10:00:00', published: false);
         $this->insertAt('2026-03-02 10:00:00', published: true);
 
@@ -231,7 +231,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
 
     public function testDryRunWithDropUnpublishedReportsWithoutDropping(): void
     {
-        $this->partitions->ensurePartitions(0, self::day('2026-03-01'));
+        $this->partitions->ensureCapacity(0, self::day('2026-03-01'));
         $this->insertAt('2026-03-01 10:00:00', published: false);
 
         $report = $this->partitions->purge(1, dryRun: true, today: self::day('2026-03-05'), dropUnpublished: true);
@@ -244,7 +244,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
 
     public function testPurgeKeepsTheDetachedTableWhenAnUnpublishedRowArrivesBetweenTheCountAndTheDetach(): void
     {
-        $this->partitions->ensurePartitions(1, self::day('2026-03-01'));
+        $this->partitions->ensureCapacity(1, self::day('2026-03-01'));
         $this->insertAt('2026-03-01 10:00:00', published: true);
         $this->insertAt('2026-03-02 10:00:00', published: true);
 
@@ -276,7 +276,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
                 return parent::exec($statement);
             }
         };
-        $manager = new OutboxPartitionManager($racing);
+        $manager = new PostgreSqlOutboxRetention($racing);
 
         $report = $manager->purge(1, today: self::day('2026-03-05'));
 
@@ -336,7 +336,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
 
     public function testPurgeFinalizesAndAttachesAPartitionWithAPendingDetachThatHoldsUnpublishedRows(): void
     {
-        $this->partitions->ensurePartitions(0, self::day('2026-03-01'));
+        $this->partitions->ensureCapacity(0, self::day('2026-03-01'));
         $this->insertAt('2026-03-01 10:00:00', published: false);
         $this->leaveDetachPending('outbox_messages_p20260301');
 
@@ -358,7 +358,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
 
     public function testPurgeFinishesAnInterruptedConcurrentDetach(): void
     {
-        $this->partitions->ensurePartitions(0, self::day('2026-03-01'));
+        $this->partitions->ensureCapacity(0, self::day('2026-03-01'));
 
         $this->leaveDetachPending('outbox_messages_p20260301');
 
@@ -405,7 +405,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
 
         $old = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->modify('-10 day')->setTime(0, 0);
         $name = 'outbox_messages_p'.$old->format('Ymd');
-        $this->partitions->ensurePartitions(0, $old);
+        $this->partitions->ensureCapacity(0, $old);
         $this->insertAt($old->format('Y-m-d').' 10:00:00', published: false);
 
         $status = $command->execute([
@@ -431,7 +431,7 @@ final class OutboxPartitionManagerTest extends FunctionalTestCase
         $command = new CommandTester(new OutboxMaintainCommand($this->partitions));
         $old = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->modify('-10 day')->setTime(0, 0);
         $name = 'outbox_messages_p'.$old->format('Ymd');
-        $this->partitions->ensurePartitions(0, $old);
+        $this->partitions->ensureCapacity(0, $old);
         $this->insertAt($old->format('Y-m-d').' 10:00:00', published: false);
 
         $status = $command->execute([

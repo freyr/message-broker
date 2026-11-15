@@ -12,19 +12,19 @@ declare(strict_types=1);
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
-use Freyr\MessageBroker\DeadLetter\PdoDeadLetterStore;
+use Freyr\MessageBroker\DeadLetter\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Storage\PdoTransaction;
-use Freyr\MessageBroker\Storage\PostgreSqlPlatform;
+use Freyr\MessageBroker\Storage\PostgreSqlSchemaInstaller;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
 use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
-use Freyr\MessageBroker\Transport\PdoDeduplicationStore;
+use Freyr\MessageBroker\Transport\PostgreSqlDeduplicationStore;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use Symfony\Component\Uid\Uuid;
 
@@ -53,12 +53,8 @@ $amqp = static fn (): AMQPStreamConnection => new AMQPStreamConnection(
     password: getenv('AMQP_PASSWORD') ?: 'guest',
     vhost: getenv('AMQP_VHOST') ?: '/',
 );
-$platform = new PostgreSqlPlatform();
-
 $db = $pdo();
-foreach ($platform->schemaSql() as $ddl) {
-    $db->exec($ddl);
-}
+(new PostgreSqlSchemaInstaller($db))->install(0);
 $db->exec('TRUNCATE message_deduplication');
 $db->exec('TRUNCATE dead_letters');
 
@@ -106,9 +102,9 @@ for ($w = 0; $w < $workers; ++$w) {
                     }
                 }),
                 transaction: new PdoTransaction($workerPdo),
-                deduplication: new PdoDeduplicationStore($workerPdo, $platform),
+                deduplication: new PostgreSqlDeduplicationStore($workerPdo),
                 retryPolicy: new ExponentialRetryPolicy(),
-                deadLetters: new PdoDeadLetterStore($workerPdo, $platform),
+                deadLetters: new PostgreSqlDeadLetterStore($workerPdo),
                 name: 'bench',
             ),
         );
