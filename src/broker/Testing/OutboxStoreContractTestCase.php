@@ -167,7 +167,8 @@ abstract class OutboxStoreContractTestCase extends TestCase
         $later = $this->record();
         $this->store()->insert($soon);
         $this->store()->insert($later);
-        $soonAt = EpochMillis::now() + 150;
+        // 300 ms: the claim below must run before this time, also on a loaded machine.
+        $soonAt = EpochMillis::now() + 300;
         $laterAt = EpochMillis::now() + 60_000;
         $this->store()->drainClaimed(self::LANE, 10, static fn (array $claimed): ClaimOutcome => ClaimOutcome::retryAll([
             $soon->id => $soonAt,
