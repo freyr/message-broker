@@ -31,7 +31,7 @@ jobs:
       releases: ${{ steps.release.outputs.releases }}
     steps:
       - id: release
-        uses: freyr/.github/actions/release@631e66e10bce4839aec46f7e71ed36f6c8017b16 # v1.0.1
+        uses: freyr/.github/actions/release@b0c5431e29887b95f0031751c6d92506a2b2fc81 # v2.0.0
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

@@ -16,12 +16,12 @@ jobs:
   pr-title:
     runs-on: ubuntu-latest
     steps:
-      - uses: freyr/.github/actions/pr-title@631e66e10bce4839aec46f7e71ed36f6c8017b16 # v1.0.1
+      - uses: freyr/.github/actions/pr-title@b0c5431e29887b95f0031751c6d92506a2b2fc81 # v2.0.0
 
   version:
     runs-on: ubuntu-latest
     steps:
-      - uses: freyr/.github/actions/version@631e66e10bce4839aec46f7e71ed36f6c8017b16 # v1.0.1
+      - uses: freyr/.github/actions/version@b0c5431e29887b95f0031751c6d92506a2b2fc81 # v2.0.0
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
