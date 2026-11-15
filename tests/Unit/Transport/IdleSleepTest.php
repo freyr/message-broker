@@ -22,12 +22,11 @@ final class IdleSleepTest extends TestCase
     {
         $seen = [];
         for ($i = 0; $i < 30_000; ++$i) {
-            $micros = IdleSleep::micros(0, 1);
-            self::assertGreaterThanOrEqual(0, $micros);
-            self::assertLessThanOrEqual(1_000, $micros);
-            $seen[$micros] = true;
+            $seen[IdleSleep::micros(0, 1)] = true;
         }
 
+        self::assertGreaterThanOrEqual(0, min(array_keys($seen)));
+        self::assertLessThanOrEqual(1_000, max(array_keys($seen)));
         self::assertArrayHasKey(0, $seen, 'no jitter is possible');
         self::assertArrayHasKey(1_000, $seen, 'the full jitter is possible');
         self::assertGreaterThan(900, count($seen), 'the sleep is randomized');
