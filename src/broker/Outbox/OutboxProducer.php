@@ -28,6 +28,7 @@ final readonly class OutboxProducer
         private WireFormat $wireFormat,
         private string $lane = 'default',
         private ?BrokerEvents $events = null,
+        private ?LaneLimits $limits = null,
     ) {}
 
     /** @param array<string, mixed> $headers */
@@ -38,6 +39,10 @@ final readonly class OutboxProducer
         // application's transaction — nothing
         // commits, and the bytes that were validated are the bytes stored.
         $body = $this->wireFormat->encode($message->name, $message->payload());
+
+        if ($this->limits !== null) {
+            $this->assertWithinLimits($message, $body, $headers, $this->limits);
+        }
 
         // OutboxRecord rejects an empty or over-long lane or name.
         $this->store->insert(new OutboxRecord(
@@ -54,5 +59,30 @@ final readonly class OutboxProducer
             'message_id' => $message->id,
             'message_name' => $message->name,
         ]);
+    }
+
+    /**
+     * The body size is the length of the encoded bytes; the header size is the length of the
+     * JSON form that the store writes. A size equal to the limit passes.
+     *
+     * @param array<string, mixed> $headers
+     */
+    private function assertWithinLimits(Message $message, string $body, array $headers, LaneLimits $limits): void
+    {
+        if ($limits->maxBodyBytes !== null && strlen($body) > $limits->maxBodyBytes) {
+            throw $this->tooLarge($message, MessageTooLarge::PART_BODY, strlen($body), $limits->maxBodyBytes);
+        }
+        if ($limits->maxHeaderBytes !== null) {
+            $size = strlen(json_encode($headers, JSON_THROW_ON_ERROR));
+            if ($size > $limits->maxHeaderBytes) {
+                throw $this->tooLarge($message, MessageTooLarge::PART_HEADERS, $size, $limits->maxHeaderBytes);
+            }
+        }
+    }
+
+    /** @param MessageTooLarge::PART_* $part */
+    private function tooLarge(Message $message, string $part, int $size, int $limit): MessageTooLarge
+    {
+        return new MessageTooLarge($this->lane, $message->id, $message->name, $part, $size, $limit);
     }
 }

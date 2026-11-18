@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Adapter\Amqp\Tests\Functional;
 
+use Freyr\MessageBroker\Adapter\Amqp\AmqpLaneLimits;
 use Freyr\MessageBroker\Adapter\Amqp\AmqpMessagePublisher;
 use Freyr\MessageBroker\Adapter\Amqp\AmqpPublishConfig;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
+use Freyr\MessageBroker\Outbox\MessageTooLarge;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Outbox\Relay;
 use Freyr\MessageBroker\Retry\Backoff;
@@ -17,6 +19,7 @@ use Freyr\MessageBroker\Testing\RecordingLogger;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Exception\AMQPProtocolChannelException;
+use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
 use Psr\Log\LogLevel;
 
@@ -158,8 +161,18 @@ final class AmqpRelayTest extends AmqpFunctionalTestCase
         try {
             $failing->drainOnce();
             self::fail('a channel failure must stop the worker (crash-only)');
-        } catch (AMQPProtocolChannelException) {
+        } catch (AMQPProtocolChannelException $e) {
+            self::assertSame(404, $e->getCode(), 'NOT_FOUND: a missing exchange closes the channel only');
         }
+
+        // The connection stays open: a new channel on it publishes and gets its confirm.
+        self::assertTrue(self::$amqp->isConnected());
+        $probe = self::$amqp->channel();
+        $probe->confirm_select();
+        $probe->exchange_declare(self::isolated('mb_relay_probe'), 'topic', false, false, true);
+        $probe->basic_publish(new AMQPMessage('probe'), self::isolated('mb_relay_probe'), 'probe');
+        $probe->wait_for_pending_acks();
+        $probe->close();
 
         // The whole claimed batch backed off individually (committed before
         // the error propagated) — attempts bumped, nothing marked published.
@@ -221,6 +234,59 @@ final class AmqpRelayTest extends AmqpFunctionalTestCase
             $connection->close();
         } catch (\Throwable) {
         }
+    }
+
+    public function testHeadersAtTheRabbitMqLimitPassTheProducerAndAreConfirmedAndOneByteMoreIsRefused(): void
+    {
+        $limits = AmqpLaneLimits::rabbitMqDefaults();
+        $limit = $limits->maxHeaderBytes;
+        self::assertNotNull($limit);
+        $producer = new OutboxProducer(
+            new PostgreSqlOutboxStore(self::$pdo),
+            new JsonWireFormat(),
+            lane: self::LANE,
+            limits: $limits,
+        );
+
+        // The worst case of the AMQP table form: one list of small integers.
+        $atLimit = self::integerListHeaders($limit, 10);
+        self::assertSame($limit, strlen(json_encode($atLimit, JSON_THROW_ON_ERROR)));
+        $message = OrderPlaced::create('o-1', 100);
+        $producer->produce($message, $atLimit);
+
+        self::assertSame(1, $this->worker(batchSize: 100)->drainOnce(), 'the broker confirmed the message with headers at the limit');
+        self::assertSame([$message->id], $this->drainQueue());
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages WHERE published_at IS NULL'));
+
+        $above = self::integerListHeaders($limit + 1, 100);
+        self::assertSame($limit + 1, strlen(json_encode($above, JSON_THROW_ON_ERROR)));
+        try {
+            $producer->produce(OrderPlaced::create('o-2', 200), $above);
+            self::fail('expected MessageTooLarge');
+        } catch (MessageTooLarge $e) {
+            self::assertSame('headers', $e->part);
+            self::assertSame($limit + 1, $e->size);
+            self::assertSame($limit, $e->limit);
+        }
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages WHERE published_at IS NULL'));
+    }
+
+    /**
+     * Headers {"ids":[0,0,...,$last]} whose JSON form is exactly $jsonBytes long.
+     *
+     * @return array{ids: list<int>}
+     */
+    private static function integerListHeaders(int $jsonBytes, int $last): array
+    {
+        // {"ids":[ and ]} are 10 bytes; each zero takes 2 bytes with its comma; the last value takes strlen($last) bytes.
+        $zeroBytes = $jsonBytes - 10 - strlen((string) $last);
+        self::assertSame(0, $zeroBytes % 2, 'the target size must be reachable with this last value');
+        $ids = array_fill(0, intdiv($zeroBytes, 2), 0);
+        $ids[] = $last;
+
+        return [
+            'ids' => $ids,
+        ];
     }
 
     public function testNackedMessagesBackOffAndTheWorkerKeepsRunning(): void

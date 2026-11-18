@@ -89,6 +89,48 @@ nacked ids.
 The AMQP publisher has no batch limit: `maxBatchSize()` returns `PHP_INT_MAX`,
 so one claim is one chunk and one confirm wait.
 
+## Size limits at produce time
+
+RabbitMQ refuses two kinds of message for good: a body above `max_message_size`
+(default 16 MiB, reply code 406) and headers that do not fit one frame
+(`frame_max`, default 131072 bytes; 131064 bytes of payload). The relay retries
+such a row on each cycle without success. To stop the message at the door, give
+the producer a `LaneLimits` value. The producer throws `MessageTooLarge` before
+the insert, so the application decides what to do and no row enters the outbox.
+
+```php
+use Freyr\MessageBroker\Adapter\Amqp\AmqpLaneLimits;
+use Freyr\MessageBroker\Outbox\OutboxProducer;
+
+$producer = new OutboxProducer(
+    $store,
+    $wireFormat,
+    lane: 'orders',
+    limits: AmqpLaneLimits::rabbitMqDefaults(),
+);
+```
+
+`AmqpLaneLimits::rabbitMqDefaults()` returns `LaneLimits(maxBodyBytes: 15_728_640,
+maxHeaderBytes: 49_152)`:
+
+- **Body, 15 MiB.** RabbitMQ counts the body only for `max_message_size`. The
+  limit keeps a margin of 1 MiB below the broker limit.
+- **Headers, 48 KiB of JSON.** The producer measures the JSON form of the
+  headers, the form that the outbox stores. The AMQP table form is at most 2.5
+  times larger (122,880 bytes at the limit), and the rest of the frame holds
+  the envelope headers (`x-message-id`, `x-message-name`, `x-created-at`) and
+  the content header.
+
+The sizes are in bytes of the encoded body and of the JSON headers. A size equal
+to the limit passes. `MessageTooLarge` holds the lane, the message ID, the
+message name, the part (`body` or `headers`), the size and the limit, and never
+the body or a header value.
+
+A broker with a changed `max_message_size` or `frame_max` needs own values:
+build `LaneLimits` yourself. "Text only" is not a RabbitMQ limit, so no check
+for it exists. The core has no default limit: without `LaneLimits` the producer
+checks nothing.
+
 ## Topology
 
 The library declares one kind of queue only: the TTL wait queues of the

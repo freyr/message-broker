@@ -6,6 +6,8 @@ namespace Freyr\MessageBroker\Adapter\PostgreSql\Tests\Functional;
 
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Observability\BrokerEvents;
+use Freyr\MessageBroker\Outbox\LaneLimits;
+use Freyr\MessageBroker\Outbox\MessageTooLarge;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Testing\OrderPlaced;
@@ -78,6 +80,31 @@ final class OutboxProduceTest extends FunctionalTestCase
     {
         self::$pdo->beginTransaction();
         $this->producer->produce(OrderPlaced::create('o-9', 100));
+        self::$pdo->rollBack();
+
+        self::assertSame(0, (int) self::$pdo->query('SELECT COUNT(*) FROM outbox_messages')->fetchColumn());
+    }
+
+    public function testARefusedMessageInsideAnApplicationTransactionLeavesNoRow(): void
+    {
+        $producer = new OutboxProducer(
+            store: new PostgreSqlOutboxStore(self::$pdo),
+            wireFormat: new JsonWireFormat(),
+            lane: 'orders',
+            limits: new LaneLimits(maxBodyBytes: 40),
+        );
+
+        self::$pdo->beginTransaction();
+        $producer->produce(OrderPlaced::create('o-1', 1));
+        try {
+            $producer->produce(OrderPlaced::create(str_repeat('x', 20), 1));
+            self::fail('expected MessageTooLarge');
+        } catch (MessageTooLarge $e) {
+            self::assertSame('body', $e->part);
+            self::assertSame(51, $e->size);
+            self::assertSame(40, $e->limit);
+        }
+        self::assertSame(1, (int) self::$pdo->query('SELECT COUNT(*) FROM outbox_messages')->fetchColumn(), 'the refused message inserted no row');
         self::$pdo->rollBack();
 
         self::assertSame(0, (int) self::$pdo->query('SELECT COUNT(*) FROM outbox_messages')->fetchColumn());

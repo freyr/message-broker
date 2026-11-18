@@ -190,6 +190,90 @@ final class RelayTest extends TestCase
         self::assertCount(2, $publisher->calls);
     }
 
+    public function testARetriedRowThatThrowsAloneIsReportedWithItsIdNameAndNextAttemptCount(): void
+    {
+        $id = $this->insert(attempts: 2);
+        $publisher = new FakeOutboxPublisher(10);
+        $publisher->throwOnCall = [1];
+
+        try {
+            $this->relay($publisher)->drainOnce();
+            self::fail('The publisher failure must propagate.');
+        } catch (RuntimeException) {
+        }
+
+        $expected = [
+            'message_id' => $id,
+            'message_name' => 'order.placed',
+            'attempts' => 3,
+        ];
+        self::assertCount(1, $this->errors->calls);
+        self::assertSame(1, $this->errors->calls[0]['context']['rows']);
+        self::assertSame([$id], $this->errors->calls[0]['context']['ids']);
+        self::assertSame($expected, array_intersect_key($this->errors->calls[0]['context'], $expected));
+        self::assertCount(1, $this->logger->records);
+        self::assertSame(
+            'Relay publish failed; the failed rows back off and the worker stops',
+            $this->logger->records[0]['message'],
+        );
+        self::assertSame($expected, array_intersect_key($this->logger->records[0]['context'], $expected));
+        self::assertSame(3, $this->store->row($id)->attempts);
+    }
+
+    public function testARetriedRowThatThePublisherRefusesAloneIsReportedToTheLoggerOnly(): void
+    {
+        $id = $this->insert(attempts: 1);
+        $publisher = new FakeOutboxPublisher(10);
+        $publisher->refuse = [$id];
+
+        self::assertSame(0, $this->relay($publisher)->drainOnce());
+
+        self::assertCount(1, $this->logger->records);
+        self::assertSame('Broker nacked messages; they back off', $this->logger->records[0]['message']);
+        self::assertSame($id, $this->logger->records[0]['context']['message_id']);
+        self::assertSame('order.placed', $this->logger->records[0]['context']['message_name']);
+        self::assertSame(2, $this->logger->records[0]['context']['attempts']);
+        self::assertSame([], $this->errors->calls, 'a refusal does not reach the ErrorHandler');
+    }
+
+    public function testAFailureThatHoldsNoRetriedRowAloneHasNoRowKeys(): void
+    {
+        $ids = $this->insertFresh(2);
+        $freshAlone = $this->insert();
+        $publisher = new FakeOutboxPublisher(2);
+        $publisher->throwOnCall = [1, 2];
+
+        // The first call holds two fresh rows (a batch); the worker stops there.
+        try {
+            $this->relay($publisher)->drainOnce();
+            self::fail('The publisher failure must propagate.');
+        } catch (RuntimeException) {
+        }
+        self::assertSame(2, $this->errors->calls[0]['context']['rows']);
+        self::assertSame([$ids[0], $ids[1]], $this->errors->calls[0]['context']['ids']);
+        foreach (['message_id', 'message_name', 'attempts'] as $key) {
+            self::assertArrayNotHasKey($key, $this->errors->calls[0]['context']);
+            self::assertArrayNotHasKey($key, $this->logger->records[0]['context']);
+        }
+
+        // A fresh row that fails alone (attempts = 0) has no row keys either.
+        $this->errors->calls = [];
+        $this->logger->records = [];
+        $alone = new FakeOutboxPublisher(2);
+        $alone->throwOnCall = [1];
+        try {
+            $this->relay($alone, batchSize: 1)->drainOnce();
+            self::fail('The publisher failure must propagate.');
+        } catch (RuntimeException) {
+        }
+        self::assertSame(1, $this->errors->calls[0]['context']['rows']);
+        foreach (['message_id', 'message_name', 'attempts'] as $key) {
+            self::assertArrayNotHasKey($key, $this->errors->calls[0]['context']);
+            self::assertArrayNotHasKey($key, $this->logger->records[0]['context']);
+        }
+        self::assertContains($freshAlone, $this->store->unpublishedIds());
+    }
+
     public function testTheRelayedEventCarriesTheLaneAndTheTotalCountOfAllChunks(): void
     {
         $this->insertFresh(25);
