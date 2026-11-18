@@ -316,10 +316,12 @@ jobs:
   # (the same settings as the pgbouncer service of compose.yaml and `make test-pgbouncer`). It keeps the
   # statement of docs/postgresql/CONNECTION_POOLING.md true. The pooler is a service, so it starts before the steps.
   # The guard test runs first: when the pooler does not rotate server connections, the other steps prove nothing.
-  # PHP 8.4 only: pooling does not depend on the PHP version.
+  # PHP 8.4 only: pooling does not depend on the PHP version. The timeout stops a run that hangs on a wrong
+  # pooler setting (with max_prepared_statements = 0 a run hung and a server connection went out of sync).
   pgbouncer:
     name: pgbouncer (transaction mode)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     services:
       postgres:
@@ -363,7 +365,9 @@ jobs:
           SERVER_ROUND_ROBIN: "1"
           MIN_POOL_SIZE: "2"
           DEFAULT_POOL_SIZE: "4"
-          MAX_PREPARED_STATEMENTS: "0"
+          # Must be above 0 (200 is the default since 1.24.0): pdo_pgsql sends the prepare and the execute as
+          # separate round trips, and in transaction mode each can go to a different server connection.
+          MAX_PREPARED_STATEMENTS: "200"
         ports:
           - 6432:6432
         options: >-

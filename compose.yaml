@@ -41,8 +41,10 @@ services:
 
   # Transaction-mode pooler for `make test-pgbouncer` (not used by the default test run).
   # server_round_robin and min_pool_size force a new server connection between two
-  # consecutive transactions of one client; max_prepared_statements = 0 turns off the
-  # tracking of named prepared statements. No DB_NAME: a wildcard entry for every database.
+  # consecutive transactions of one client. max_prepared_statements must be above 0 (200 is
+  # the default since 1.24.0): pdo_pgsql sends the prepare and the execute as separate round
+  # trips, and in transaction mode each can go to a different server connection.
+  # No DB_NAME: a wildcard entry for every database. See docs/postgresql/CONNECTION_POOLING.md.
   pgbouncer:
     image: edoburu/pgbouncer:v1.26.1-p0
     environment:
@@ -56,7 +58,7 @@ services:
       SERVER_ROUND_ROBIN: "1"
       MIN_POOL_SIZE: "2"
       DEFAULT_POOL_SIZE: "4"
-      MAX_PREPARED_STATEMENTS: "0"
+      MAX_PREPARED_STATEMENTS: "200"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U broker -d message_broker_test"]
       interval: 5s
