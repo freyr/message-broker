@@ -8,6 +8,8 @@ use Freyr\MessageBroker\ErrorHandler;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Time\EpochMillis;
+use Freyr\MessageBroker\Worker\WorkerLimitGuard;
+use Freyr\MessageBroker\Worker\WorkerLimits;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Throwable;
@@ -69,15 +71,35 @@ final class Relay
 
     /**
      * Long-running entrypoint; stops on SIGTERM/SIGINT when pcntl is
-     * available. A broker failure propagates out of it (crash-only).
+     * available, and when a limit of {@see WorkerLimits} is reached. A limit
+     * is checked at the end of each pass, so the run can publish up to one
+     * batch above a message limit. A limit stop calls {@see stop()}, as a
+     * signal does. A broker failure propagates out of it (crash-only).
      */
-    public function run(): void
+    public function run(?WorkerLimits $limits = null): void
     {
+        $guard = new WorkerLimitGuard($limits ?? new WorkerLimits());
+        $guard->start();
         $this->registerSignalHandlers();
 
         while (!$this->shouldStop) {
-            if ($this->drainOnce() === 0) {
+            $published = $this->drainOnce();
+            if ($published === 0) {
                 usleep(IdleSleep::micros($this->idleSleepMs, intdiv($this->idleSleepMs, 4)));
+            }
+
+            $guard->recordMessages($published);
+            $reason = $guard->stopReason();
+            if ($reason !== null) {
+                $this->logger->info('Worker limit reached; the worker stops', [
+                    'lane' => $this->lane,
+                    'reason' => $reason->value,
+                    'messages' => $guard->messages(),
+                    'failures' => $guard->failures(),
+                    'elapsedSeconds' => $guard->elapsedMs() / 1_000,
+                    'memoryBytes' => $guard->usedMemory(),
+                ]);
+                $this->stop();
             }
         }
         // No shutdown hook: claims are transaction-scoped and never survive
