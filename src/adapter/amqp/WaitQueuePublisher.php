@@ -26,6 +26,12 @@ final class WaitQueuePublisher
 {
     public const string ATTEMPT_HEADER = 'x-attempt';
 
+    /**
+     * The broker count of deliveries that ended with no ack (quorum queues).
+     * The republish drops it, so a wait-queue pass starts the count again.
+     */
+    public const string DELIVERY_COUNT_HEADER = 'x-delivery-count';
+
     /** @var list<int> delays (ms) whose wait queue is already declared */
     private array $declaredWaitQueues = [];
 
@@ -72,6 +78,7 @@ final class WaitQueuePublisher
         $headers = $properties['application_headers'] ?? null;
         /** @var array<string, mixed> $applicationHeaders */
         $applicationHeaders = $headers instanceof AMQPTable ? $headers->getNativeData() : [];
+        unset($applicationHeaders[self::DELIVERY_COUNT_HEADER]);
         $properties['application_headers'] = new AMQPTable(
             array_merge($applicationHeaders, [
                 self::ATTEMPT_HEADER => $nextAttempt,

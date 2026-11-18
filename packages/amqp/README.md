@@ -13,8 +13,9 @@ name and gives no ordering guarantee.
 ## Requirements
 
 - PHP 8.4 or later
-- `freyr/message-broker` ^0.7 (the core)
+- `freyr/message-broker` ^0.8 (the core)
 - `php-amqplib/php-amqplib` ^3.7.2
+- `psr/log` ^3.0
 - A storage adapter for the outbox, deduplication and dead letters, for example
   `freyr/message-broker-postgresql`
 

@@ -73,6 +73,22 @@ final class WaitQueuePublisherTest extends TestCase
         self::assertSame(3, $this->published[0]['message']->get('application_headers')->getNativeData()['x-attempt']);
     }
 
+    public function testTheRepublishDropsTheDeliveryCountAndKeepsTheOtherHeaders(): void
+    {
+        $this->publisher()->scheduleRetry($this->delivery(1, 'm-1', [
+            'x-delivery-count' => 3,
+            'x-custom' => 'kept',
+            'x-attempt' => 1,
+        ]), 100, 2);
+
+        $headers = $this->published[0]['message']->get('application_headers')->getNativeData();
+        self::assertArrayNotHasKey('x-delivery-count', $headers, 'a wait-queue pass starts the count again');
+        self::assertSame('kept', $headers['x-custom']);
+        self::assertSame('m-1', $headers['x-message-id']);
+        self::assertSame(2, $headers['x-attempt']);
+        self::assertSame('x-delivery-count', WaitQueuePublisher::DELIVERY_COUNT_HEADER);
+    }
+
     public function testMessageWithoutApplicationHeadersGetsOnlyTheAttemptHeader(): void
     {
         $message = new \PhpAmqpLib\Message\AMQPMessage('body');

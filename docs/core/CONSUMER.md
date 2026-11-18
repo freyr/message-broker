@@ -8,7 +8,14 @@ processor uses are in [../postgresql/STORAGE.md](../postgresql/STORAGE.md).
 
 ## The algorithm
 
-For each delivery, the processor does these steps:
+For each delivery, the processor first checks the delivery limit, then runs the
+normal flow. The delivery limit (see *Delivery limit* below): when the delivery
+count of the transport is at or above `maxDeliveries`, the processor writes a
+dead letter with the error `Consumer\DeliveryLimitExceeded` and acks. It does
+not begin a transaction, does not touch the deduplication store and does not
+call the handler.
+
+The normal flow has these steps:
 
 1. It deserializes the body. A `MalformedMessage` never improves, so the
    processor writes a dead letter at once and acks. Any other failure (for
@@ -28,6 +35,57 @@ Every path that returns normally has acked the delivery. A dead letter of a
 malformed message keeps the raw bytes and is not replayable. A dead letter of
 a failed handler keeps the decoded message and is replayable (see
 [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md)).
+
+## Delivery limit
+
+A message that stops the process (for example, the handler runs out of memory,
+or the database fails at each try) comes back again and again. The delivery
+limit stops this loop with a dead letter. The last constructor parameter of
+`DeliveryProcessor` sets it:
+
+```php
+$processor = new DeliveryProcessor(
+    // ... the other arguments, see ../QUICKSTART.md
+    maxDeliveries: 5, // the default; null turns the limit off
+);
+```
+
+- `Delivery::$deliveryCount` is the number of earlier deliveries of the message
+  that ended with no ack. The transport gives it. The first delivery has no
+  count (`null`), then the count is 1, 2, 3.
+- When `maxDeliveries` is not `null`, the count is not `null`, and the count is
+  at or above `maxDeliveries`, the processor writes a dead letter and acks. With
+  the default 5, the sixth delivery after five process stops becomes a dead
+  letter.
+- The processor deserializes the message only to store the canonical document,
+  as for a failed handler. When the deserializer throws, it stores the raw
+  delivery.
+- The error class of the row is `Consumer\DeliveryLimitExceeded`, and its
+  message names the count and the limit. `attempts` is the attempt of the
+  delivery (`Delivery::$attempt`), never the delivery count.
+- The processor records `DEAD_LETTERED`, logs a warning (`Consumer delivery
+  limit reached; dead-lettered`) and calls the `ErrorHandler`, with the context
+  keys `queue`, `message_id`, `delivery_count`, `max_deliveries`, `attempt`.
+- When the dead letter write fails, the error propagates and the delivery stays
+  unacked.
+- A value below 1 throws `InvalidArgumentException` at construction.
+- A transport that gives no count (`null`) has no delivery limit. For AMQP, only
+  a quorum queue gives a count (see [../amqp/CONSUMER.md](../amqp/CONSUMER.md)).
+
+### The rule for the two limits
+
+The consumer has two independent limits:
+
+| Limit | Counts | Source (AMQP) | Starts again |
+| --- | --- | --- | --- |
+| Attempt limit (`maxAttempts` of the retry policy) | Handler failures | `x-attempt` | Never; a replay is a new message. |
+| Delivery limit (`maxDeliveries` of the processor) | Deliveries that ended with no ack (a process stop) | `x-delivery-count` | After each pass through a wait queue. |
+
+A message can fail its handler two times and then stop the process five
+times. Its dead letter then has `attempts = 3` and the error
+`DeliveryLimitExceeded`. Keep `maxDeliveries` not higher than the delivery
+limit of the broker (for RabbitMQ, `x-delivery-limit` of a quorum queue, 20 by
+default). A lower value is recommended.
 
 ## Retry policy
 
