@@ -21,10 +21,14 @@ interface OutboxRetention
 
     /**
      * Drop every storage unit that lies wholly before the cutoff (today
-     * 00:00 UTC minus $retentionDays). A unit that holds unpublished rows is
-     * kept and reported in RetentionReport::$kept, unless $dropUnpublished is
-     * true; then it is dropped with them and reported in
-     * RetentionReport::$unpublished. With $dryRun nothing changes and the
+     * 00:00 UTC minus $retentionDays). "Unpublished" means not published and
+     * not abandoned (published_at IS NULL AND abandoned_at IS NULL). A unit
+     * that holds unpublished rows is kept and reported in
+     * RetentionReport::$kept, unless $dropUnpublished is true; then it is
+     * dropped with them and reported in RetentionReport::$unpublished. An
+     * abandoned row does not keep its unit: a dropped unit (or, on a dry run,
+     * one that would be dropped) with abandoned rows is reported in
+     * RetentionReport::$abandoned. With $dryRun nothing changes and the
      * report shows what would change.
      *
      * Must run outside a transaction.

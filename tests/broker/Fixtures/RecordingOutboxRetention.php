@@ -8,7 +8,7 @@ use DateTimeImmutable;
 use Freyr\MessageBroker\Outbox\OutboxRetention;
 use Freyr\MessageBroker\Outbox\RetentionReport;
 
-/** An OutboxRetention that records its calls and answers with a prepared report. */
+/** An OutboxRetention that records its calls and answers with a prepared report (with each field, also $abandoned). */
 final class RecordingOutboxRetention implements OutboxRetention
 {
     /** @var list<int> */
@@ -18,7 +18,7 @@ final class RecordingOutboxRetention implements OutboxRetention
     public array $purgeCalls = [];
 
     public function __construct(
-        public RetentionReport $report = new RetentionReport(new DateTimeImmutable('2026-03-03 00:00:00 UTC'), [], [], []),
+        public RetentionReport $report = new RetentionReport(new DateTimeImmutable('2026-03-03 00:00:00 UTC'), [], [], [], []),
     ) {}
 
     public function ensureCapacity(int $daysAhead): array

@@ -18,6 +18,8 @@ use Symfony\Component\Console\Output\OutputInterface;
  * default: it is reported and the command exits with FAILURE, so a scheduler
  * alerts. --drop-unpublished makes the retention period a hard age limit: such
  * a partition is dropped with its unpublished rows, and the command warns.
+ * An abandoned row does not keep its partition: the command prints the count
+ * of abandoned rows of each dropped partition, and the exit code does not change.
  * A dry run changes nothing and always exits with SUCCESS.
  */
 #[AsCommand(
@@ -67,6 +69,9 @@ final class OutboxMaintainCommand extends Command
         }
         foreach ($report->unpublished as $name => $count) {
             $output->writeln("<comment>{$prefix}{$name} held {$count} unpublished row(s) older than the retention period; they are dropped.</comment>");
+        }
+        foreach ($report->abandoned as $name => $count) {
+            $output->writeln("<info>{$prefix}{$name} held {$count} abandoned row(s); they are dropped.</info>");
         }
         foreach ($report->kept as $name => $count) {
             $verb = $dryRun ? 'would be kept' : 'is kept';
