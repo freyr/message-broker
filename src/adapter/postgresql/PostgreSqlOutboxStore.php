@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Adapter\PostgreSql;
 
+use Freyr\MessageBroker\Outbox\FailingRow;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Time\EpochMillis;
+use InvalidArgumentException;
 use PDO;
 use PDOStatement;
 use Throwable;
@@ -47,12 +49,13 @@ final readonly class PostgreSqlOutboxStore implements OutboxStore
         try {
             // Oldest-due first is a fairness bias, not an ordering contract. The
             // partial index idx_outbox_pending serves this query; published rows
-            // are outside it. FOR UPDATE SKIP LOCKED: concurrent relay workers
-            // never block each other.
+            // are outside it, abandoned rows are inside it and skipped here.
+            // FOR UPDATE SKIP LOCKED: concurrent relay workers never block
+            // each other.
             $statement = $this->pdo->prepare(<<<'SQL'
                 SELECT id, lane, message_name, body, headers, created_at, available_at, attempts
                 FROM outbox_messages
-                WHERE lane = :lane AND published_at IS NULL AND available_at <= :now
+                WHERE lane = :lane AND published_at IS NULL AND abandoned_at IS NULL AND available_at <= :now
                 ORDER BY available_at
                 LIMIT :limit
                 FOR UPDATE SKIP LOCKED
@@ -103,10 +106,65 @@ final readonly class PostgreSqlOutboxStore implements OutboxStore
     }
 
     /**
+     * One UPDATE with no created_at range: it reads the primary key index of
+     * each partition, an acceptable cost for an operator command. A value that
+     * is not a UUID matches no row: it returns 0 and sends no query.
+     */
+    public function abandon(string $id): int
+    {
+        if (preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $id) !== 1) {
+            return 0;
+        }
+        $statement = $this->pdo->prepare(
+            'UPDATE outbox_messages SET abandoned_at = :now'
+            .' WHERE id = :id AND published_at IS NULL AND abandoned_at IS NULL',
+        );
+        $statement->execute([
+            'now' => self::timestamp(EpochMillis::now()),
+            'id' => $id,
+        ]);
+
+        return $statement->rowCount();
+    }
+
+    public function failing(string $lane, int $minAttempts, int $limit): array
+    {
+        if ($minAttempts < 1 || $limit < 1) {
+            throw new InvalidArgumentException("minAttempts and limit must be 1 or more, got {$minAttempts} and {$limit}");
+        }
+        $statement = $this->pdo->prepare(<<<'SQL'
+            SELECT id, lane, message_name, attempts, created_at, available_at, octet_length(body) AS body_bytes
+            FROM outbox_messages
+            WHERE lane = :lane AND published_at IS NULL AND abandoned_at IS NULL AND attempts >= :min
+            ORDER BY attempts DESC, created_at
+            LIMIT :limit
+            SQL);
+        $statement->bindValue('lane', $lane);
+        $statement->bindValue('min', $minAttempts, PDO::PARAM_INT);
+        $statement->bindValue('limit', $limit, PDO::PARAM_INT);
+        $statement->execute();
+
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_map(static fn (array $row): FailingRow => new FailingRow(
+            id: self::stringColumn($row, 'id'),
+            lane: self::stringColumn($row, 'lane'),
+            messageName: self::stringColumn($row, 'message_name'),
+            attempts: self::intColumn($row, 'attempts'),
+            createdAt: self::epochMilliseconds(self::stringColumn($row, 'created_at')),
+            availableAt: self::epochMilliseconds(self::stringColumn($row, 'available_at')),
+            bodyBytes: self::intColumn($row, 'body_bytes'),
+        ), $rows);
+    }
+
+    /**
      * Published rows stay for retention; published_at is the audit trail and
      * keeps them out of every later claim. The `published_at IS NULL` guard
      * matters on replay: a replayed message reuses its original id, and the
-     * original row (already published) must keep its own published_at.
+     * original row (already published) must keep its own published_at. The
+     * `abandoned_at IS NULL` guard is a second barrier: the claim locks keep an
+     * abandon away from a claimed row.
      *
      * @param non-empty-list<string> $ids
      * @param array{string, string} $createdAtRange
@@ -115,7 +173,7 @@ final readonly class PostgreSqlOutboxStore implements OutboxStore
     {
         $statement = $this->pdo->prepare(
             'UPDATE outbox_messages SET published_at = :published_at'
-            .' WHERE id = ANY(CAST(:ids AS uuid[])) AND created_at BETWEEN :from AND :to AND published_at IS NULL',
+            .' WHERE id = ANY(CAST(:ids AS uuid[])) AND created_at BETWEEN :from AND :to AND published_at IS NULL AND abandoned_at IS NULL',
         );
         $statement->execute([
             'published_at' => self::timestamp(EpochMillis::now()),
@@ -129,7 +187,8 @@ final readonly class PostgreSqlOutboxStore implements OutboxStore
      * Failed publish: move available_at to the retry time, increment attempts.
      * There is no exhaustion and no relay-side DLQ: a row that keeps failing
      * stays in the outbox; retention keeps its partition until the row is
-     * published (unless the operator opts in to dropping unpublished rows).
+     * published (unless the operator opts in to dropping unpublished rows), or
+     * until an operator abandons it. An abandoned row is not changed.
      *
      * @param non-empty-array<string, int> $retryAtMs row id => next available_at, epoch ms
      * @param array{string, string} $createdAtRange
@@ -139,7 +198,7 @@ final readonly class PostgreSqlOutboxStore implements OutboxStore
         $statement = $this->pdo->prepare(
             'UPDATE outbox_messages o SET available_at = r.available_at, attempts = o.attempts + 1'
             .' FROM unnest(CAST(:ids AS uuid[]), CAST(:available_at AS timestamp(3)[])) AS r(id, available_at)'
-            .' WHERE o.id = r.id AND o.created_at BETWEEN :from AND :to AND o.published_at IS NULL',
+            .' WHERE o.id = r.id AND o.created_at BETWEEN :from AND :to AND o.published_at IS NULL AND o.abandoned_at IS NULL',
         );
         $statement->execute([
             'ids' => self::pgArray(array_map('strval', array_keys($retryAtMs))),

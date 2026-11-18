@@ -21,4 +21,14 @@ final class RecordingOutboxStore implements OutboxStore
     {
         return 0;
     }
+
+    public function abandon(string $id): int
+    {
+        return 0;
+    }
+
+    public function failing(string $lane, int $minAttempts, int $limit): array
+    {
+        return [];
+    }
 }

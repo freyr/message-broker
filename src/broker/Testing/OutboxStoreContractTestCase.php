@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Testing;
 
 use Freyr\MessageBroker\Outbox\ClaimOutcome;
+use Freyr\MessageBroker\Outbox\FailingRow;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Time\EpochMillis;
+use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Symfony\Component\Uid\Uuid;
@@ -284,13 +287,156 @@ abstract class OutboxStoreContractTestCase extends TestCase
         );
     }
 
+    public function testAnAbandonedRowIsNeverClaimedAlsoAfterItsAvailableAt(): void
+    {
+        $abandoned = $this->record();
+        $notDueYet = $this->record(availableAt: EpochMillis::now() + 300);
+        $open = $this->record();
+        $this->store()->insert($abandoned);
+        $this->store()->insert($notDueYet);
+        $this->store()->insert($open);
+
+        self::assertSame(1, $this->store()->abandon($abandoned->id));
+        self::assertSame(1, $this->store()->abandon($notDueYet->id));
+
+        self::assertSame([$open->id], self::ids($this->claimAndPublish($this->store(), self::LANE, 10)), 'the claim skips an abandoned row');
+        self::waitUntil($notDueYet->availableAt ?? 0);
+        self::assertSame([], $this->claimAndPublish($this->store(), self::LANE, 10), 'an abandoned row stays out of the claim after its available_at');
+    }
+
+    public function testAbandonReturnsOneForAnOpenRowAndZeroForAnUnknownIdAndForARepeat(): void
+    {
+        $row = $this->record();
+        $this->store()->insert($row);
+
+        self::assertSame(0, $this->store()->abandon(self::newId()), 'an id that no row has');
+        self::assertSame(1, $this->store()->abandon($row->id), 'one open row');
+        self::assertSame(0, $this->store()->abandon($row->id), 'a repeat marks nothing');
+    }
+
+    public function testAbandonDoesNotMarkAPublishedRow(): void
+    {
+        $row = $this->record();
+        $this->store()->insert($row);
+        self::assertSame([$row->id], self::ids($this->claimAndPublish($this->store(), self::LANE, 10)));
+
+        self::assertSame(0, $this->store()->abandon($row->id), 'a published row is not abandoned');
+        self::assertSame(0, $this->store()->abandon($row->id));
+        self::assertSame([], $this->claimAndPublish($this->store(), self::LANE, 10), 'the row stays published');
+    }
+
+    public function testAbandonMarksEachOpenRowWithTheIdAndSkipsAPublishedOne(): void
+    {
+        $published = $this->record();
+        $this->store()->insert($published);
+        $this->claimAndPublish($this->store(), self::LANE, 10);
+        $replay = $this->record(id: $published->id, createdAt: $published->createdAt - 1_000);
+        $this->store()->insert($replay);
+
+        self::assertSame(1, $this->store()->abandon($published->id), 'one published and one open row: the open one');
+
+        $twice = $this->record();
+        $this->store()->insert($twice);
+        $this->store()->insert($this->record(id: $twice->id, createdAt: $twice->createdAt - 2_000));
+
+        self::assertSame(2, $this->store()->abandon($twice->id), 'two open rows with one id: both');
+        self::assertSame([], $this->claimAndPublish($this->store(), self::LANE, 10));
+    }
+
+    public function testFailingListsTheOpenRowsOfTheLaneFromTheMinimumAttemptsByAttemptsThenAge(): void
+    {
+        $now = EpochMillis::now();
+        $three = $this->record(body: "\x00\xffzażółć", createdAt: $now - 1_000);
+        $twoOld = $this->record(body: '{"a":1}', createdAt: $now - 3_000);
+        $twoNew = $this->record(createdAt: $now - 2_000);
+        $one = $this->record(createdAt: $now - 4_000);
+        $abandoned = $this->record(createdAt: $now - 5_000);
+        $published = $this->record(createdAt: $now - 6_000);
+        $otherLane = $this->record(lane: 'contract_other', createdAt: $now - 7_000);
+        foreach ([$three, $twoOld, $twoNew, $one, $abandoned, $published, $otherLane] as $row) {
+            $this->store()->insert($row);
+        }
+        $due = $now - 60_000; // due again at once
+        $later = $now + 60_000;
+        $this->claimAndApply(self::LANE, [], [
+            $three->id => $due,
+            $twoOld->id => $due,
+            $twoNew->id => $due,
+            $abandoned->id => $due,
+            $published->id => $due,
+            $one->id => $later,
+        ]);
+        $this->claimAndApply(self::LANE, [$published->id], [
+            $three->id => $due,
+            $twoOld->id => $later,
+            $twoNew->id => $later + 1,
+            $abandoned->id => $later,
+        ]);
+        $this->claimAndApply(self::LANE, [], [
+            $three->id => $later + 2,
+        ]);
+        $this->claimAndApply('contract_other', [], [
+            $otherLane->id => $due,
+        ]);
+        $this->claimAndApply('contract_other', [], [
+            $otherLane->id => $later,
+        ]);
+        $this->store()->insert($this->record(createdAt: $now - 8_000)); // no attempt yet
+        self::assertSame(1, $this->store()->abandon($abandoned->id));
+
+        $failing = $this->store()->failing(self::LANE, 2, 10);
+
+        self::assertEquals([
+            new FailingRow($three->id, self::LANE, 'order.placed', 3, $three->createdAt, $later + 2, strlen("\x00\xffzażółć")),
+            new FailingRow($twoOld->id, self::LANE, 'order.placed', 2, $twoOld->createdAt, $later, 7),
+            new FailingRow($twoNew->id, self::LANE, 'order.placed', 2, $twoNew->createdAt, $later + 1, 2),
+        ], $failing, 'attempts first (highest first), then age (oldest first); not due rows are listed');
+        self::assertSame(
+            [$three->id, $twoOld->id, $twoNew->id, $one->id],
+            array_map(static fn (FailingRow $row): string => $row->id, $this->store()->failing(self::LANE, 1, 10)),
+            'a row of 1 attempt from the minimum 1; no published, abandoned or new row',
+        );
+        self::assertSame(
+            [$three->id, $twoOld->id],
+            array_map(static fn (FailingRow $row): string => $row->id, $this->store()->failing(self::LANE, 1, 2)),
+            'at most the limit',
+        );
+        self::assertSame([$three->id], array_map(static fn (FailingRow $row): string => $row->id, $this->store()->failing(self::LANE, 3, 10)));
+        self::assertSame([], $this->store()->failing(self::LANE, 4, 10));
+        self::assertSame([$otherLane->id], array_map(static fn (FailingRow $row): string => $row->id, $this->store()->failing('contract_other', 1, 10)));
+
+        self::assertSame(1, $this->store()->abandon($three->id));
+        self::assertSame(
+            [$twoOld->id, $twoNew->id],
+            array_map(static fn (FailingRow $row): string => $row->id, $this->store()->failing(self::LANE, 2, 10)),
+            'an abandoned row leaves the list',
+        );
+    }
+
+    /** @return iterable<string, array{int, int}> */
+    public static function invalidFailingArguments(): iterable
+    {
+        yield 'min attempts 0' => [0, 10];
+        yield 'min attempts negative' => [-1, 10];
+        yield 'limit 0' => [1, 0];
+        yield 'limit negative' => [1, -1];
+    }
+
+    #[DataProvider('invalidFailingArguments')]
+    public function testFailingRejectsAMinimumOrALimitBelowOne(int $minAttempts, int $limit): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        $this->store()->failing(self::LANE, $minAttempts, $limit);
+    }
+
     final protected function store(): OutboxStore
     {
         return $this->store ??= $this->createStore();
     }
 
     /**
-     * A due record of the test lane, with a new id.
+     * A due record of the test lane, with a new id (or the given one).
      *
      * @param array<string, mixed> $headers
      */
@@ -299,16 +445,36 @@ abstract class OutboxStoreContractTestCase extends TestCase
         ?int $availableAt = null,
         string $body = '{}',
         array $headers = [],
+        ?string $id = null,
+        ?int $createdAt = null,
     ): OutboxRecord {
         return new OutboxRecord(
-            id: self::newId(),
+            id: $id ?? self::newId(),
             lane: $lane,
             messageName: 'order.placed',
             body: $body,
             headers: $headers,
-            createdAt: EpochMillis::now() - 1_000,
+            createdAt: $createdAt ?? EpochMillis::now() - 1_000,
             availableAt: $availableAt,
         );
+    }
+
+    /**
+     * Claim the due rows of the lane and apply the given outcome; the claim must
+     * hold exactly the rows of the outcome.
+     *
+     * @param list<string> $publishedIds
+     * @param array<string, int> $retryAtMs
+     */
+    private function claimAndApply(string $lane, array $publishedIds, array $retryAtMs): void
+    {
+        $claimed = [];
+        $this->store()->drainClaimed($lane, 100, static function (array $records) use (&$claimed, $publishedIds, $retryAtMs): ClaimOutcome {
+            $claimed = self::ids($records);
+
+            return new ClaimOutcome($publishedIds, $retryAtMs);
+        });
+        self::assertEqualsCanonicalizing([...$publishedIds, ...array_map('strval', array_keys($retryAtMs))], $claimed);
     }
 
     /**

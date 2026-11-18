@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Testing;
 
 use Freyr\MessageBroker\Outbox\ClaimOutcome;
+use Freyr\MessageBroker\Outbox\FailingRow;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Testing\InMemoryOutboxStore;
 use Freyr\MessageBroker\Testing\InMemoryTransaction;
@@ -125,6 +126,80 @@ final class InMemoryOutboxStoreTest extends TestCase
         self::assertSame($original, $store->row(self::ID));
         self::assertTrue($store->isPublished(self::ID));
         self::assertSame([], $store->unpublishedIds());
+    }
+
+    public function testAnOutcomeDoesNotChangeARowThatWasAbandonedDuringTheClaim(): void
+    {
+        $store = new InMemoryOutboxStore();
+        $published = self::record(self::ID, 1_000);
+        $retried = self::record('0190a1b2-0000-7000-8000-000000000002', 1_000);
+        $store->insert($published);
+        $store->insert($retried);
+
+        $count = $store->drainClaimed('default', 10, static function () use ($store, $published, $retried): ClaimOutcome {
+            self::assertSame(1, $store->abandon($published->id));
+            self::assertSame(1, $store->abandon($retried->id));
+
+            return new ClaimOutcome([$published->id], [
+                $retried->id => EpochMillis::now() + 60_000,
+            ]);
+        });
+
+        self::assertSame(1, $count, 'the count of the outcome ids');
+        self::assertFalse($store->isPublished($published->id), 'the abandoned row is not marked published');
+        self::assertTrue($store->isAbandoned($published->id));
+        self::assertSame($retried, $store->row($retried->id), 'the abandoned row gets no attempt and no new time');
+        self::assertSame([$published->id, $retried->id], $store->unpublishedIds(), 'an abandoned row is not published');
+    }
+
+    public function testIsAbandonedAddressesTheRowWithTheLatestCreatedAt(): void
+    {
+        $store = new InMemoryOutboxStore();
+        $store->insert(self::record(self::ID, 5_000));
+        self::assertSame(1, $store->abandon(self::ID));
+        self::assertTrue($store->isAbandoned(self::ID));
+
+        $store->insert(self::record(self::ID, 1_000));
+
+        self::assertFalse($store->isAbandoned(self::ID), 'the replay is not abandoned');
+        self::assertFalse($store->isAbandoned('0190a1b2-0000-7000-8000-00000000ffff'), 'an unknown id');
+    }
+
+    public function testARollBackRestoresTheAbandonMark(): void
+    {
+        $transaction = new InMemoryTransaction();
+        $store = new InMemoryOutboxStore($transaction);
+        $kept = self::record(self::ID, 5_000);
+        $undone = self::record('0190a1b2-0000-7000-8000-000000000002', 5_000);
+        $store->insert($kept);
+        $store->insert($undone);
+        self::assertSame(1, $store->abandon($kept->id));
+
+        $transaction->begin();
+        self::assertSame(1, $store->abandon($undone->id));
+        $transaction->rollBack();
+
+        self::assertTrue($store->isAbandoned($kept->id), 'a mark before begin() stays');
+        self::assertFalse($store->isAbandoned($undone->id), 'a mark inside the transaction rolls back');
+        $claimed = [];
+        $store->drainClaimed('default', 10, static function (array $records) use (&$claimed): ClaimOutcome {
+            $claimed = $records;
+
+            return ClaimOutcome::published([]);
+        });
+        self::assertSame([$undone], $claimed);
+    }
+
+    public function testFailingGivesTheCreatedAtAsTheNextAttemptOfARowWithNoAvailableAt(): void
+    {
+        $store = new InMemoryOutboxStore();
+        $row = new OutboxRecord(self::ID, 'default', 'order.placed', '{"a":1}', [], 1_000, attempts: 2);
+        $store->insert($row);
+
+        self::assertEquals(
+            [new FailingRow(self::ID, 'default', 'order.placed', 2, 1_000, 1_000, 7)],
+            $store->failing('default', 1, 10),
+        );
     }
 
     public function testRowOfAnUnknownIdThrows(): void

@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Testing;
 
 use Freyr\MessageBroker\Outbox\ClaimOutcome;
+use Freyr\MessageBroker\Outbox\FailingRow;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Time\EpochMillis;
+use InvalidArgumentException;
 use LogicException;
 
 /**
@@ -23,6 +25,10 @@ use LogicException;
  * a replay of a published message is a second row with the same id. An id in
  * the outcome applies to each claimed row with that id. The helpers that take
  * only an id (row(), isPublished()) address the row with the latest createdAt.
+ *
+ * abandon() marks each open row of an id; the claim, failing() and the outcome
+ * writes skip an abandoned row. An abandoned row is not published, so
+ * unpublishedIds() still lists it. A roll back restores the marks too.
  */
 final class InMemoryOutboxStore implements OutboxStore, TransactionParticipant
 {
@@ -39,6 +45,9 @@ final class InMemoryOutboxStore implements OutboxStore, TransactionParticipant
 
     /** @var array<string, true> row keys */
     private array $published = [];
+
+    /** @var array<string, true> row keys of the abandoned rows */
+    private array $abandoned = [];
 
     /** @var array<string, true> row keys of the claims that are open now */
     private array $claiming = [];
@@ -69,6 +78,7 @@ final class InMemoryOutboxStore implements OutboxStore, TransactionParticipant
             }
             if ($row->lane === $lane
                 && !isset($this->published[$key])
+                && !isset($this->abandoned[$key])
                 && !isset($this->claiming[$key])
                 && ($row->availableAt ?? 0) <= $now) {
                 $claimed[$key] = $row;
@@ -101,8 +111,12 @@ final class InMemoryOutboxStore implements OutboxStore, TransactionParticipant
         }
 
         // An id of the outcome applies to each claimed row with that id, as the
-        // UPDATE ... WHERE id = ANY(...) of the database does.
+        // UPDATE ... WHERE id = ANY(...) of the database does. A row that was
+        // abandoned during the claim keeps its state.
         foreach ($claimed as $key => $row) {
+            if (isset($this->abandoned[$key])) {
+                continue;
+            }
             if (in_array($row->id, $outcome->publishedIds, true)) {
                 $this->published[$key] = true;
             }
@@ -122,6 +136,56 @@ final class InMemoryOutboxStore implements OutboxStore, TransactionParticipant
         }
 
         return count($outcome->publishedIds);
+    }
+
+    public function abandon(string $id): int
+    {
+        $count = 0;
+        foreach ($this->rows as $key => $row) {
+            if ($row->id === $id && !isset($this->published[$key]) && !isset($this->abandoned[$key])) {
+                $this->abandoned[$key] = true;
+                ++$count;
+            }
+        }
+
+        return $count;
+    }
+
+    public function failing(string $lane, int $minAttempts, int $limit): array
+    {
+        if ($minAttempts < 1 || $limit < 1) {
+            throw new InvalidArgumentException("minAttempts and limit must be 1 or more, got {$minAttempts} and {$limit}");
+        }
+        $rows = array_filter(
+            $this->rows,
+            fn (OutboxRecord $row, string $key): bool => $row->lane === $lane
+                && $row->attempts >= $minAttempts
+                && !isset($this->published[$key])
+                && !isset($this->abandoned[$key]),
+            ARRAY_FILTER_USE_BOTH,
+        );
+        usort($rows, static fn (OutboxRecord $a, OutboxRecord $b): int => [$b->attempts, $a->createdAt] <=> [$a->attempts, $b->createdAt]);
+
+        return array_map(
+            static fn (OutboxRecord $row): FailingRow => new FailingRow(
+                $row->id,
+                $row->lane,
+                $row->messageName,
+                $row->attempts,
+                $row->createdAt,
+                $row->availableAt ?? $row->createdAt,
+                strlen($row->body),
+            ),
+            array_slice($rows, 0, $limit),
+        );
+    }
+
+    /** Whether the row of this id with the latest createdAt is abandoned. False for an unknown id. */
+    public function isAbandoned(string $id): bool
+    {
+        $key = $this->latestKey($id);
+
+        return $key !== null && isset($this->abandoned[$key]);
     }
 
     /** Whether the row of this id with the latest createdAt is published. False for an unknown id. */
@@ -155,13 +219,13 @@ final class InMemoryOutboxStore implements OutboxStore, TransactionParticipant
 
     public function snapshot(): mixed
     {
-        return [$this->rows, $this->published];
+        return [$this->rows, $this->published, $this->abandoned];
     }
 
     public function restore(mixed $snapshot): void
     {
-        /** @var array{array<string, OutboxRecord>, array<string, true>} $snapshot */
-        [$this->rows, $this->published] = $snapshot;
+        /** @var array{array<string, OutboxRecord>, array<string, true>, array<string, true>} $snapshot */
+        [$this->rows, $this->published, $this->abandoned] = $snapshot;
     }
 
     /** The primary key of outbox_messages is (id, created_at): a replay adds a second row with the same id. */

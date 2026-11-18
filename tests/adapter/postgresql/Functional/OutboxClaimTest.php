@@ -216,6 +216,38 @@ final class OutboxClaimTest extends FunctionalTestCase
         );
     }
 
+    public function testAbandonOfAValueThatIsNotAUuidReturnsZeroAndSendsNoQuery(): void
+    {
+        $id = '01900000-0000-7000-8000-00000000abcd';
+        $this->store->insert(new OutboxRecord($id, self::LANE, 'order.placed', '{}', [], EpochMillis::now()));
+
+        // A query with such a value fails in PostgreSQL (invalid input syntax for type uuid).
+        self::assertSame(0, $this->store->abandon('not-a-uuid'));
+        self::assertSame(0, $this->store->abandon('x'.$id));
+        self::assertSame(0, $this->store->abandon($id.'x'));
+        self::assertSame(0, $this->store->abandon(''));
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages WHERE abandoned_at IS NOT NULL'));
+
+        self::assertSame(1, $this->store->abandon(strtoupper($id)), 'a UUID in upper case is a UUID');
+        self::assertSame(1, self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE id = '{$id}' AND abandoned_at IS NOT NULL"));
+    }
+
+    public function testAbandonSetsAbandonedAtToNowAndLeavesTheOtherColumns(): void
+    {
+        $id = '01900000-0000-7000-8000-00000000abce';
+        $createdAt = EpochMillis::now() - 2_000;
+        $this->store->insert(new OutboxRecord($id, self::LANE, 'order.placed', '{}', [], $createdAt));
+        $before = EpochMillis::now();
+
+        self::assertSame(1, $this->store->abandon($id));
+
+        $abandonedAt = self::fetchInt("SELECT (EXTRACT(EPOCH FROM abandoned_at) * 1000)::bigint FROM outbox_messages WHERE id = '{$id}'");
+        self::assertGreaterThanOrEqual($before, $abandonedAt);
+        self::assertLessThanOrEqual(EpochMillis::now(), $abandonedAt);
+        self::assertSame(0, self::fetchInt("SELECT attempts FROM outbox_messages WHERE id = '{$id}'"));
+        self::assertSame(1, self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE id = '{$id}' AND published_at IS NULL"));
+    }
+
     public function testInsertStoresTheGivenAvailableAtAndDefaultsItToCreatedAt(): void
     {
         $createdAt = EpochMillis::now();
