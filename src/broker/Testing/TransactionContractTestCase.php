@@ -6,6 +6,8 @@ namespace Freyr\MessageBroker\Testing;
 
 use Freyr\MessageBroker\Consumer\DeduplicationStore;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
+use Freyr\MessageBroker\DeadLetter\DeadLetter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\Outbox\ClaimOutcome;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\OutboxStore;
@@ -27,17 +29,21 @@ use Symfony\Component\Uid\Uuid;
  *  - createDeduplicationStore(): a deduplication store on the connection of the
  *    transaction;
  *  - createOutboxStore() (optional hook): an outbox store on that connection.
- *    Without it the tests of the outbox insert are skipped.
+ *    Without it the tests of the outbox insert are skipped;
+ *  - createDeadLetterStore() (optional hook): a dead letter store on that
+ *    connection. Without it the tests of the replay mark are skipped. The test
+ *    of a mark and an outbox insert in one transaction needs both hooks.
  *
  * The test case calls each factory once per test, in this order and before the
- * first begin(): transaction, deduplication store, outbox store. A store can
- * therefore join the transaction in its constructor.
+ * first begin(): transaction, deduplication store, outbox store, dead letter
+ * store. A store can therefore join the transaction in its constructor.
  */
 abstract class TransactionContractTestCase extends TestCase
 {
     private ?Transaction $transaction = null;
     private ?DeduplicationStore $deduplication = null;
     private ?OutboxStore $outbox = null;
+    private ?DeadLetterStore $deadLetters = null;
     private bool $created = false;
 
     abstract protected function createTransaction(): Transaction;
@@ -47,6 +53,12 @@ abstract class TransactionContractTestCase extends TestCase
 
     /** An outbox store on the connection of the transaction. Return null when the adapter has none. */
     protected function createOutboxStore(): ?OutboxStore
+    {
+        return null;
+    }
+
+    /** A dead letter store on the connection of the transaction. Return null when the adapter has none. */
+    protected function createDeadLetterStore(): ?DeadLetterStore
     {
         return null;
     }
@@ -126,6 +138,38 @@ abstract class TransactionContractTestCase extends TestCase
         self::assertSame([], self::claimIds($outbox), 'the row rolls back with the state change of the application');
     }
 
+    public function testAReplayMarkInARolledBackTransactionIsGone(): void
+    {
+        $deadLetters = $this->deadLettersOrSkip();
+        $deadLetter = self::deadLetter();
+        $deadLetters->store($deadLetter);
+
+        $this->transaction()->begin();
+        $deadLetters->markReplayed($deadLetter->id);
+        $this->transaction()->rollBack();
+
+        $found = $deadLetters->find($deadLetter->id);
+        self::assertNotNull($found, 'the row stored before the transaction stays');
+        self::assertNull($found->replayedAt, 'the mark rolls back with the transaction');
+    }
+
+    public function testAReplayMarkAndAnOutboxInsertInACommittedTransactionBothStay(): void
+    {
+        $outbox = $this->outboxOrSkip();
+        $deadLetters = $this->deadLettersOrSkip();
+        $deadLetter = self::deadLetter();
+        $deadLetters->store($deadLetter);
+        $record = self::outboxRecord();
+
+        $this->transaction()->begin();
+        $deadLetters->markReplayed($deadLetter->id);
+        $outbox->insert($record);
+        $this->transaction()->commit();
+
+        self::assertNotNull($deadLetters->find($deadLetter->id)?->replayedAt, 'the mark stays');
+        self::assertSame([$record->id], self::claimIds($outbox), 'the outbox row stays');
+    }
+
     final protected function transaction(): Transaction
     {
         $this->create();
@@ -149,6 +193,7 @@ abstract class TransactionContractTestCase extends TestCase
         $this->transaction = $this->createTransaction();
         $this->deduplication = $this->createDeduplicationStore();
         $this->outbox = $this->createOutboxStore();
+        $this->deadLetters = $this->createDeadLetterStore();
     }
 
     private function outboxOrSkip(): OutboxStore
@@ -160,6 +205,17 @@ abstract class TransactionContractTestCase extends TestCase
         }
 
         return $outbox;
+    }
+
+    private function deadLettersOrSkip(): DeadLetterStore
+    {
+        $this->create();
+        $deadLetters = $this->deadLetters;
+        if ($deadLetters === null) {
+            self::markTestSkipped('The adapter gives no dead letter store: override createDeadLetterStore() to run the tests of the replay mark.');
+        }
+
+        return $deadLetters;
     }
 
     /** @return list<string> */
@@ -184,6 +240,23 @@ abstract class TransactionContractTestCase extends TestCase
             body: '{}',
             headers: [],
             createdAt: EpochMillis::now() - 1_000,
+        );
+    }
+
+    private static function deadLetter(): DeadLetter
+    {
+        return new DeadLetter(
+            id: Uuid::v7()->toString(),
+            source: 'orders_q',
+            messageId: Uuid::v7()->toString(),
+            messageName: 'order.placed',
+            body: '{}',
+            headers: [],
+            errorClass: 'RuntimeException',
+            errorMessage: 'boom',
+            errorTrace: '#0 trace-line',
+            attempts: 1,
+            failedAt: EpochMillis::now() - 60_000,
         );
     }
 

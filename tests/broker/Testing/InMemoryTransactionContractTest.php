@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Testing;
 
 use Freyr\MessageBroker\Consumer\DeduplicationStore;
+use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Storage\Transaction;
+use Freyr\MessageBroker\Testing\InMemoryDeadLetterStore;
 use Freyr\MessageBroker\Testing\InMemoryDeduplicationStore;
 use Freyr\MessageBroker\Testing\InMemoryOutboxStore;
 use Freyr\MessageBroker\Testing\InMemoryTransaction;
@@ -30,6 +32,11 @@ final class InMemoryTransactionContractTest extends TransactionContractTestCase
     protected function createOutboxStore(): OutboxStore
     {
         return new InMemoryOutboxStore($this->shared());
+    }
+
+    protected function createDeadLetterStore(): DeadLetterStore
+    {
+        return new InMemoryDeadLetterStore($this->shared());
     }
 
     private function shared(): InMemoryTransaction
