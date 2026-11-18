@@ -38,9 +38,9 @@ Each factory must return a store that is empty at the start of the test. Some te
 - `OutboxStoreContractTestCase::createSecondStore()` returns a second store with its own connection to the same rows. Without it, the tests of two claimers are skipped, and PHPUnit shows the skip message.
 - `TransactionContractTestCase::createOutboxStore()` returns an outbox store on the connection of the transaction. Without it, the tests of the outbox insert are skipped.
 - `TransactionContractTestCase::createDeadLetterStore()` returns a dead letter store on the connection of the transaction. Without it, the tests of the replay mark are skipped. The test of a mark and an outbox insert in one committed transaction needs both hooks.
+- `OutboxPublisherContractTestCase::assertDelivered()` checks that the records arrived on the transport. For example, the AMQP test reads them from a bound queue.
 
 `TransactionContractTestCase` calls each factory one time in each test, before the first `begin()`, in this order: `createTransaction()`, `createDeduplicationStore()`, `createOutboxStore()`, `createDeadLetterStore()`. Thus a store can join the transaction in its constructor.
-- `OutboxPublisherContractTestCase::assertDelivered()` checks that the records arrived on the transport. For example, the AMQP test reads them from a bound queue.
 
 Put the tests that depend on the technology (SQL text, partitions, the headers of an AMQP message) in your own test classes. The contract test cases do not hold them.
 
