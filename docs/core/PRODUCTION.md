@@ -64,6 +64,30 @@ php bin/console message-broker:relay:run orders --require-signals
 php bin/console message-broker:consume orders --require-signals
 ```
 
+## Worker limits
+
+`message-broker:relay:run` takes `--limit`, `--time-limit` and `--memory-limit`.
+A worker that stops after a limit starts again with a fresh process, so memory
+growth and long-lived connections do not build up. The options and the callable
+type are in [CLI_REFERENCE.md](CLI_REFERENCE.md#message-brokerrelayrun-lane).
+
+A limit stop ends the process with exit code `0`. **The supervisor must start a
+new process after each exit, exit code `0` included.** A supervisor that restarts
+only after a failure leaves the lane with no worker.
+
+| Supervisor | Setting that restarts after exit code 0 | Setting that does not |
+| --- | --- | --- |
+| systemd | `Restart=always` | `Restart=on-failure` |
+| Supervisor | `autorestart=true` | `autorestart=unexpected` |
+| Kubernetes | `restartPolicy: Always` (the default of a `Deployment`) | `OnFailure` or `Never` |
+
+Set `--memory-limit` below the PHP `memory_limit`. The relay checks the memory
+after each pass, so a pass that goes above the PHP `memory_limit` ends the
+process with a fatal error before the check. The check uses
+`memory_get_usage(true)`, the memory that PHP took from the system; it seldom
+goes down, so a worker can stop after a short peak, which a recycle limit
+accepts.
+
 ## Observability
 
 There is no built-in metrics interface. Instead, inject:
