@@ -15,7 +15,7 @@ use PDO;
  * has an old available_at, so each claim of its lane reads it and skips it.
  * The permanent assertion: a claim of 100 still returns the 100 due rows. The
  * test prints EXPLAIN (ANALYZE, BUFFERS) of the claim with no abandoned row and
- * with 1,000 to STDERR, to record the scale. The table has the same rows in both
+ * with 1,000 to STDOUT, to record the scale. The table has the same rows in both
  * plans: the 1,000 old rows are first published (outside the index), then
  * abandoned (inside the index). 20,000 published rows make the partition look
  * like a live one, where the planner reads the index and not the whole table.
@@ -48,7 +48,8 @@ final class OutboxAbandonedClaimCostTest extends FunctionalTestCase
         self::assertSame(1_000, self::fetchInt('SELECT COUNT(*) FROM outbox_messages WHERE abandoned_at IS NOT NULL AND published_at IS NULL'));
         $withAbandoned = $this->explainClaim();
 
-        fwrite(STDERR, "\nClaim of 100, no abandoned row:\n{$withoutAbandoned}\nClaim of 100, 1,000 abandoned rows:\n{$withAbandoned}\n");
+        // STDOUT, not STDERR: Infection stops its initial test run at the first output on STDERR.
+        print "\nClaim of 100, no abandoned row:\n{$withoutAbandoned}\nClaim of 100, 1,000 abandoned rows:\n{$withAbandoned}\n";
 
         $claimed = [];
         (new PostgreSqlOutboxStore(self::$pdo))->drainClaimed(self::LANE, 100, static function (array $records) use (&$claimed): ClaimOutcome {
