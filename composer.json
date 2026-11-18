@@ -35,6 +35,7 @@
         "symplify/easy-coding-standard": "^13.3"
     },
     "suggest": {
+        "ext-pcntl": "Graceful shutdown of the relay and the consumer on SIGTERM and SIGINT",
         "php-amqplib/php-amqplib": "Required for the AMQP transport",
         "phpunit/phpunit": "Required for Freyr\\MessageBroker\\Testing\\*, the test kit of contract test cases and fakes"
     },

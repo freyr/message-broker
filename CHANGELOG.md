@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - `InMemoryOutboxStore` keys its rows by (`id`, `createdAt`), as the primary key of `outbox_messages` is (`id`, `created_at`). Before, it keyed them by `id`, so in a test the replay of a published message replaced the original row. An id in the `ClaimOutcome` applies to each claimed row with that id, as in `PostgreSqlOutboxStore`. `row()` and `isPublished()` use the row of the id with the latest `createdAt`; `unpublishedIds()` gives each id one time
+- The warning for a missing `ext-pcntl` (and `docs/core/PRODUCTION.md`) said that only SIGKILL stops the process. Measured with no `pcntl`: SIGTERM ends the process at once when it is not PID 1 of a container, and as PID 1 the process ignores SIGTERM until the runtime sends SIGKILL after its stop timeout. The text now states both cases. `ext-pcntl` is now in `suggest` of the root, `core` and `amqp` manifests
 
 ### Changed
 

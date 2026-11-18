@@ -71,7 +71,7 @@ the command more than once for the same lane to run parallel workers.
 | Argument/Option | Description |
 | --- | --- |
 | `lane` (argument, required) | The outbox lane to drain; must be a key in the registered `$relays` array. |
-| `--require-signals` | Fail immediately at startup if `ext-pcntl` is unavailable, instead of warning and continuing without graceful shutdown. |
+| `--require-signals` | Fail immediately at startup if `ext-pcntl` is unavailable, instead of warning and continuing without graceful shutdown (without `ext-pcntl`, SIGTERM ends the process at once, or is ignored until SIGKILL when the process is PID 1 of a container). |
 
 ## `message-broker:consume <name>`
 
@@ -83,7 +83,7 @@ Runs a registered consumer. Blocks until stopped.
 | Argument/Option | Description |
 | --- | --- |
 | `name` (argument, required) | The registered consumer name. |
-| `--require-signals` | Fail immediately at startup if `ext-pcntl` is unavailable. |
+| `--require-signals` | Fail immediately at startup if `ext-pcntl` is unavailable (see the relay option above for the effect of a missing extension). |
 
 ## `message-broker:dlq:list`
 

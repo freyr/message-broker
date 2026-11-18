@@ -28,6 +28,7 @@
         "phpunit/phpunit": "^13.4"
     },
     "suggest": {
+        "ext-pcntl": "Graceful shutdown of the relay and the consumer on SIGTERM and SIGINT",
         "freyr/message-broker-postgresql": "Storage adapter: the outbox, deduplication and dead-letter stores on PostgreSQL",
         "freyr/message-broker-amqp": "Transport adapter: AMQP (RabbitMQ) publisher and consumer",
         "phpunit/phpunit": "Required for Freyr\\MessageBroker\\Testing\\*, the test kit of contract test cases and fakes"
