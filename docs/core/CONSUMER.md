@@ -81,7 +81,7 @@ The consumer has two independent limits:
 | Attempt limit (`maxAttempts` of the retry policy) | Handler failures | `x-attempt` | Never; a replay is a new message. |
 | Delivery limit (`maxDeliveries` of the processor) | Deliveries that ended with no ack (a process stop) | `x-delivery-count` | After each pass through a wait queue. |
 
-A message can fail its handler three times and then stop the process five
+A message can fail its handler two times and then stop the process five
 times. Its dead letter then has `attempts = 3` and the error
 `DeliveryLimitExceeded`. Keep `maxDeliveries` not higher than the delivery
 limit of the broker (for RabbitMQ, `x-delivery-limit` of a quorum queue, 20 by
