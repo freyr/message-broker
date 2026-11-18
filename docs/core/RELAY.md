@@ -85,7 +85,8 @@ never abandons a row. The operator decides.
 Runbook:
 
 1. Find the row. Signs: a worker that stops again and again with the same
-   single ID in the log context (`ids`), or a row with a high `attempts` in
+   single ID in the log context (`message_id`, with the `attempts` that grow
+   from one failure to the next), or a row with a high `attempts` in
    `message-broker:outbox:failing`.
 2. Read the broker error. Examples: 406 with "message size" (the body is above
    `max_message_size`), 501 `frame_too_large` (the headers do not fit one

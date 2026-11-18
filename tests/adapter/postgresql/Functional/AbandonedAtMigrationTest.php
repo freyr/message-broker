@@ -18,7 +18,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
 /**
- * The migration note of UPGRADE.md (0.8.0) on a table of 0.7.x with no
+ * The migration note of UPGRADE.md (0.9.0) on a table of 0.8.x with no
  * abandoned_at column: attached daily partitions, an expired detached table, a
  * partition with a pending detach, and a daily table that stays outside the
  * parent. The steps run in the order of the note. ALTER TABLE on the parent
@@ -60,7 +60,7 @@ final class AbandonedAtMigrationTest extends FunctionalTestCase
         self::assertSame([$expiredDetached, $outside, $skipped], $this->tablesOutsideTheParent());
         self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM pg_inherits WHERE inhdetachpending'));
 
-        // Step 1: outbox:maintain once by hand, with the code of 0.7.x.
+        // Step 1: outbox:maintain once by hand, with the code of 0.8.x.
         $maintain = new CommandTester(new OutboxMaintainCommand(new PostgreSqlOutboxRetention(self::oldCodeConnection())));
         self::assertSame(Command::FAILURE, $maintain->execute([
             '--retention-days' => '7',
@@ -151,8 +151,8 @@ final class AbandonedAtMigrationTest extends FunctionalTestCase
     }
 
     /**
-     * A connection that runs the retention SQL of 0.7.x: the 0.8.0 class with
-     * the abandoned_at conditions removed (0.7.x counted published_at IS NULL
+     * A connection that runs the retention SQL of 0.8.x: the 0.9.0 class with
+     * the abandoned_at conditions removed (0.8.x counted published_at IS NULL
      * and had no count of abandoned rows). The rest of the retention class is
      * the same in both versions.
      */
