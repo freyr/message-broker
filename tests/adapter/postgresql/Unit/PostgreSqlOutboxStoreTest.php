@@ -23,10 +23,21 @@ final class PostgreSqlOutboxStoreTest extends TestCase
         $store->drainClaimed('lane', 10, static fn (array $claimed): ClaimOutcome => ClaimOutcome::published([]));
 
         self::assertCount(1, $sql);
-        self::assertStringContainsString('WHERE lane = :lane AND published_at IS NULL AND available_at <= :now', $sql[0]);
+        self::assertStringContainsString('WHERE lane = :lane AND published_at IS NULL AND abandoned_at IS NULL AND available_at <= :now', $sql[0]);
         self::assertStringContainsString('ORDER BY available_at', $sql[0]);
         self::assertStringContainsString('LIMIT :limit', $sql[0]);
         self::assertStringContainsString('FOR UPDATE SKIP LOCKED', $sql[0]);
+    }
+
+    public function testAbandonOfAValueThatIsNotAUuidSendsNoQuery(): void
+    {
+        $sql = [];
+        $store = new PostgreSqlOutboxStore($this->pdoReturning([], $sql));
+
+        self::assertSame(0, $store->abandon('not-a-uuid'));
+        self::assertSame(0, $store->abandon('x01900000-0000-7000-8000-000000000001'));
+        self::assertSame(0, $store->abandon('01900000-0000-7000-8000-000000000001x'));
+        self::assertSame([], $sql);
     }
 
     public function testInsertSqlTargetsTheOutboxTableWithZeroAttempts(): void
