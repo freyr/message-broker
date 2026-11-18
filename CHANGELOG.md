@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - `composer.json` now has `replace` for `freyr/message-broker-postgresql` and `freyr/message-broker-amqp` (`self.version`): when the code moves to separate packages, this package will stand in for them, so no second copy of the code is installed. The `branch-alias` (`dev-main` as `1.0-dev`) is removed because no 1.0 line is planned; `dev-main` now has no alias and does not satisfy `^0.7`
+- `docs/postgresql/CONNECTION_POOLING.md` no longer says that any pool mode works. It states the tested result: transaction mode works behind pgbouncer with `max_prepared_statements` above 0 (tested with pgbouncer 1.26.1 and the value 200; the setting exists since 1.21.0, and earlier versions than 1.26.1 are not tested); with `max_prepared_statements = 0` the library fails with `prepared statement "pdo_stmt_…" does not exist`, because pdo_pgsql sends the prepare and the execute as separate round trips. A new CI job `pgbouncer` (and `make test-pgbouncer`) runs the PostgreSQL contract tests and the consumer functional tests through pgbouncer 1.26.1 in transaction mode, with forced rotation of server connections. No code change
 
 ## [0.7.1] - 2026-11-15
 

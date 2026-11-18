@@ -39,6 +39,35 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  # Transaction-mode pooler for `make test-pgbouncer` (not used by the default test run).
+  # server_round_robin and min_pool_size force a new server connection between two
+  # consecutive transactions of one client. max_prepared_statements must be above 0 (200 is
+  # the default since 1.24.0): pdo_pgsql sends the prepare and the execute as separate round
+  # trips, and in transaction mode each can go to a different server connection.
+  # No DB_NAME: a wildcard entry for every database. See docs/postgresql/CONNECTION_POOLING.md.
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.26.1-p0
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: broker
+      DB_PASSWORD: broker
+      AUTH_TYPE: scram-sha-256
+      LISTEN_PORT: "6432"
+      POOL_MODE: transaction
+      SERVER_ROUND_ROBIN: "1"
+      MIN_POOL_SIZE: "2"
+      DEFAULT_POOL_SIZE: "4"
+      MAX_PREPARED_STATEMENTS: "200"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U broker -d message_broker_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   rabbitmq:
     image: rabbitmq:4.3.1-management-alpine
     ports:

@@ -142,6 +142,13 @@ final class AmqpConsumerTest extends AmqpFunctionalTestCase
 
     public function testADatabaseFailureStopsTheConsumerAndTheDeliveryIsRedelivered(): void
     {
+        if (getenv('POSTGRES_ROTATING_POOLER') === '1') {
+            self::markTestSkipped(
+                'A pooler in transaction mode gives the client a different server connection after the backend is '
+                .'terminated, so this method cannot simulate a database failure; the run on a direct connection covers the case',
+            );
+        }
+
         $pdo = self::newConnection();
         $statement = $pdo->query('SELECT pg_backend_pid()');
         self::assertNotFalse($statement);
