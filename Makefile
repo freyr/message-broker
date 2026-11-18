@@ -26,7 +26,7 @@ PGBOUNCER_RUN = docker compose run --rm -e "POSTGRES_DSN=pgsql:host=pgbouncer;po
 
 test-pgbouncer: ## Run the rotation guard, the PostgreSQL contract tests and the consumer functional tests through pgbouncer (transaction mode)
 	docker compose up -d --wait pgbouncer
-	$(PGBOUNCER_RUN) tests/adapter/postgresql/Functional/PoolerRotationGuardTest.php
+	$(PGBOUNCER_RUN) --fail-on-skipped tests/adapter/postgresql/Functional/PoolerRotationGuardTest.php
 	$(PGBOUNCER_RUN) \
 		tests/adapter/postgresql/Functional/PostgreSqlOutboxStoreContractTest.php \
 		tests/adapter/postgresql/Functional/PostgreSqlDeduplicationStoreContractTest.php \
