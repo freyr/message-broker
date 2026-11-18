@@ -51,6 +51,22 @@ Consumers must be order-insensitive.
   limit, which closes the channel) then fails alone. The rows of the claim
   that the worker did not try yet stay due and unchanged, so they do not wait
   behind the refused row.
+- **Log context of a row that fails alone.** A call that holds exactly one
+  row with `attempts > 0` fails with the keys `message_id`, `message_name` and
+  `attempts` in the log context, in addition to `lane`, `rows` and `ids`.
+  `attempts` is the count after the failure (the stored value plus 1). The
+  `ErrorHandler` gets the same keys when the publisher throws. When the broker
+  nacks the row, only the logger gets them: a nack does not reach the
+  `ErrorHandler`. A failed call of fresh rows (a batch) has none of the three
+  keys, and the log message texts do not change.
+- **A failed batch backs off each row of the call.** This includes a row that
+  the broker confirmed before the failure, because the relay does not know
+  which rows of the call the broker accepted. Consumer-side deduplication
+  absorbs the repeat. The relay has no automatic rule that gives up a row: a
+  row that the transport refuses on each try keeps its backoff until an
+  operator acts. To stop a message that is too large before it enters the
+  outbox, give `LaneLimits` to the producer (see
+  [../amqp/TRANSPORT.md](../amqp/TRANSPORT.md), *Size limits at produce time*).
 
 The relay has no dead-letter path. A worker that crashes after publishing but
 before its claim commits leaves the rows unpublished; the next claim
