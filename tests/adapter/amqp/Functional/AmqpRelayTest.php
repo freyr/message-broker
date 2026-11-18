@@ -19,6 +19,7 @@ use Freyr\MessageBroker\Testing\RecordingLogger;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Exception\AMQPProtocolChannelException;
+use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
 use Psr\Log\LogLevel;
 
@@ -160,8 +161,18 @@ final class AmqpRelayTest extends AmqpFunctionalTestCase
         try {
             $failing->drainOnce();
             self::fail('a channel failure must stop the worker (crash-only)');
-        } catch (AMQPProtocolChannelException) {
+        } catch (AMQPProtocolChannelException $e) {
+            self::assertSame(404, $e->getCode(), 'NOT_FOUND: a missing exchange closes the channel only');
         }
+
+        // The connection stays open: a new channel on it publishes and gets its confirm.
+        self::assertTrue(self::$amqp->isConnected());
+        $probe = self::$amqp->channel();
+        $probe->confirm_select();
+        $probe->exchange_declare(self::isolated('mb_relay_probe'), 'topic', false, false, true);
+        $probe->basic_publish(new AMQPMessage('probe'), self::isolated('mb_relay_probe'), 'probe');
+        $probe->wait_for_pending_acks();
+        $probe->close();
 
         // The whole claimed batch backed off individually (committed before
         // the error propagated) — attempts bumped, nothing marked published.
