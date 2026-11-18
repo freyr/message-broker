@@ -7,9 +7,12 @@ transaction. No component uses an advisory lock, `LISTEN` or a session `SET`.
 ## Transaction mode: the requirement
 
 Transaction mode (`pool_mode = transaction`) works behind pgbouncer when the
-pooler supports protocol-level prepared statements: **pgbouncer 1.21.0 or later
-with `max_prepared_statements` above 0**. The default of
-`max_prepared_statements` is 200 since pgbouncer 1.24.0.
+pooler supports protocol-level prepared statements: **`max_prepared_statements`
+above 0**. The library is tested with **pgbouncer 1.26.1 and the value 200**.
+
+According to the pgbouncer documentation, the setting `max_prepared_statements`
+exists since pgbouncer 1.21.0, and its default is 200 since pgbouncer 1.24.0.
+Versions before 1.26.1 that have the setting are not tested.
 
 The reason: pdo_pgsql prepares statements on the server by default, and it
 sends the prepare and the execute as separate round trips. This is true for
@@ -65,9 +68,10 @@ the results of other queries until pgbouncer was restarted.
 ## Alternative: emulated prepares
 
 `PDO::ATTR_EMULATE_PREPARES => true` on the connection makes pdo_pgsql send no
-server-side prepared statements. With `max_prepared_statements = 0`, this
-passed the same suites one time during the work on the CI job. CI does not run
-this configuration.
+server-side prepared statements. With `max_prepared_statements = 0` and
+emulated prepares, one run of the same suites gave the same result as the
+supported setting, with the same one test that does not work behind a pooler
+(the database failure test above). CI does not run this variant.
 
 ## Not tested through a pooler
 
