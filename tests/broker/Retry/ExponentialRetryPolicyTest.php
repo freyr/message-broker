@@ -8,12 +8,13 @@ use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
 use Freyr\MessageBroker\Retry\RetryAction;
+use Freyr\MessageBroker\Tests\Fixtures\MarkedException;
+use Freyr\MessageBroker\Tests\Fixtures\MarkerThrowable;
 use InvalidArgumentException;
 use LogicException;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Stringable;
-use Throwable;
 
 final class ExponentialRetryPolicyTest extends TestCase
 {
@@ -172,7 +173,3 @@ final class ExponentialRetryPolicyTest extends TestCase
         return new IncomingMessage('m-1', 'order.placed', 1, []);
     }
 }
-
-interface MarkerThrowable extends Throwable {}
-
-final class MarkedException extends RuntimeException implements MarkerThrowable {}

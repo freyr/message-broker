@@ -50,6 +50,13 @@ queue, `x-attempt` incremented) while `$attempt < maxAttempts`, otherwise
 (`decide(int $attempt, Throwable $error, IncomingMessage $message)`) replaces
 it; the message parameter lets a policy decide per message name.
 
+`$attempt` is the number of the attempt that failed, starting at 1. The
+delay is `Backoff::delayForAttempt($attempt)`. The default `backoff` and the
+`Backoff::exponential()` multiplier (`4.0`) are the same as for the relay (see
+[RELAY.md](RELAY.md), *Backoff*). With `maxAttempts: 5` and the defaults, the
+failures of attempts 1 to 4 retry after 1 s, 4 s, 16 s and 64 s. The failure of
+attempt 5 goes to the dead letters.
+
 ### Error class lists
 
 `ExponentialRetryPolicy` has two optional lists of throwable classes or
@@ -112,13 +119,6 @@ value that is not a `RetryPolicy`.
   `attempt`, `error_class`.
 
 A dead letter records `DEAD_LETTERED`, as before.
-
-`$attempt` is the number of the attempt that failed, starting at 1. The
-delay is `Backoff::delayForAttempt($attempt)`. The default `backoff` and the
-`Backoff::exponential()` multiplier (`4.0`) are the same as for the relay (see
-[RELAY.md](RELAY.md), *Backoff*). With `maxAttempts: 5` and the defaults, the
-failures of attempts 1 to 4 retry after 1 s, 4 s, 16 s and 64 s. The failure of
-attempt 5 goes to the dead letters.
 
 ## Database failures
 
