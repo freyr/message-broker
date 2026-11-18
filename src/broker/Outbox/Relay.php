@@ -96,7 +96,7 @@ final class Relay
                     'reason' => $reason->value,
                     'messages' => $guard->messages(),
                     'failures' => $guard->failures(),
-                    'elapsedSeconds' => $guard->elapsedMs() / 1_000,
+                    'elapsedSeconds' => $guard->elapsedMs() / 1_000.0,
                     'memoryBytes' => $guard->usedMemory(),
                 ]);
                 $this->stop();

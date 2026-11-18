@@ -23,6 +23,8 @@ final class ByteSizeTest extends TestCase
         yield 'lower case m' => ['128m', 134_217_728];
         yield 'lower case g' => ['3g', 3_221_225_472];
         yield 'one kilobyte' => ['1K', 1_024];
+        yield 'largest gigabyte value' => ['8589934591G', 9_223_372_035_781_033_984];
+        yield 'largest byte value' => [(string) PHP_INT_MAX, PHP_INT_MAX];
     }
 
     #[DataProvider('validSizes')]
@@ -45,6 +47,9 @@ final class ByteSizeTest extends TestCase
         yield 'trailing text' => ['12Mx'];
         yield 'fraction' => ['1.5M'];
         yield 'space' => ['12 M'];
+        yield 'overflow in gigabytes' => ['9000000000G'];
+        yield 'overflow at the first value above' => ['8589934592G'];
+        yield 'overflow in bytes' => ['9223372036854775808'];
     }
 
     #[DataProvider('invalidSizes')]

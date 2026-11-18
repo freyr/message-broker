@@ -98,6 +98,9 @@ final class RelayRunCommandTest extends TestCase
         yield 'memory limit empty' => [[
             '--memory-limit' => '',
         ], '--memory-limit'];
+        yield 'memory limit overflow' => [[
+            '--memory-limit' => '9000000000G',
+        ], '--memory-limit'];
     }
 
     /** @param array<string, string> $options */

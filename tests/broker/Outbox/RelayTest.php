@@ -394,7 +394,7 @@ final class RelayTest extends TestCase
         $this->insertFresh(3);
         $relay = $this->relay(new FakeOutboxPublisher());
         $this->store->onDrain = static function () use ($clock): void {
-            $clock->sleep(1.5);
+            $clock->sleep(2);
         };
 
         $relay->run(new WorkerLimits(maxMessages: 3));
@@ -408,7 +408,7 @@ final class RelayTest extends TestCase
         self::assertSame(self::LANE, $context['lane']);
         self::assertSame(3, $context['messages']);
         self::assertSame(0, $context['failures']);
-        self::assertSame(1.5, $context['elapsedSeconds']);
+        self::assertSame(2.0, $context['elapsedSeconds'], 'a float also for whole seconds');
         self::assertIsInt($context['memoryBytes']);
         self::assertGreaterThan(0, $context['memoryBytes']);
     }

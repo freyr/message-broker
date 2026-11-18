@@ -13,16 +13,26 @@ final readonly class ByteSize
     public static function toBytes(string $size): int
     {
         if (preg_match('/^([1-9]\d*)([KMG]?)$/i', $size, $matches) !== 1) {
-            throw new \InvalidArgumentException(
-                "Invalid memory limit '{$size}' — expected <number>[K|M|G], 1 or more, e.g. '128M'",
-            );
+            throw self::invalid($size, 'expected <number>[K|M|G], 1 or more, e.g. \'128M\'');
         }
 
-        return (int) $matches[1] * match (strtoupper($matches[2])) {
+        $unit = match (strtoupper($matches[2])) {
             'K' => 1_024,
             'M' => 1_048_576,
             'G' => 1_073_741_824,
             default => 1,
         };
+        $count = (int) $matches[1];
+        // (int) of a digit string above PHP_INT_MAX gives PHP_INT_MAX, so compare the text too.
+        if ((string) $count !== $matches[1] || $count > intdiv(PHP_INT_MAX, $unit)) {
+            throw self::invalid($size, 'the value is larger than PHP_INT_MAX bytes');
+        }
+
+        return $count * $unit;
+    }
+
+    private static function invalid(string $size, string $reason): \InvalidArgumentException
+    {
+        return new \InvalidArgumentException("Invalid memory limit '{$size}' — {$reason}");
     }
 }
