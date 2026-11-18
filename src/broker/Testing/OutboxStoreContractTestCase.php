@@ -402,6 +402,7 @@ abstract class OutboxStoreContractTestCase extends TestCase
             'at most the limit',
         );
         self::assertSame([$three->id], array_map(static fn (FailingRow $row): string => $row->id, $this->store()->failing(self::LANE, 3, 10)));
+        self::assertSame([$three->id], array_map(static fn (FailingRow $row): string => $row->id, $this->store()->failing(self::LANE, 1, 1)), 'a limit of 1 is valid');
         self::assertSame([], $this->store()->failing(self::LANE, 4, 10));
         self::assertSame([$otherLane->id], array_map(static fn (FailingRow $row): string => $row->id, $this->store()->failing('contract_other', 1, 10)));
 
