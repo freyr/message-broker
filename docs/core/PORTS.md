@@ -18,7 +18,7 @@ ports and extends the contract test cases of the test kit (see
 | `DeadLetter\DeadLetterStore` | Store, find, list, mark as replayed and purge dead letters. | `PostgreSqlDeadLetterStore` (PostgreSQL adapter); `InMemoryDeadLetterStore` (test kit) |
 | `Consumer\DeliveryControl` | Ack one delivery, or schedule its retry. | `AmqpDeliveryControl` (AMQP adapter); `RecordingDeliveryControl` (test kit) |
 | `Consumer\MessageDispatcher` | Run the handler of an incoming message. | `CallableDispatcher` (core); your own adapter to a command bus |
-| `Retry\RetryPolicy` | Decide to retry, dead-letter or discard a failed delivery. | `ExponentialRetryPolicy` (core); your own policy |
+| `Retry\RetryPolicy` | Decide to retry, dead-letter or discard a failed delivery. | `ExponentialRetryPolicy` and `RetryPolicyMap` (core); your own policy |
 | `Serializer\WireFormat` | Encode the payload to the bytes of the `body` column. | `JsonWireFormat` (core) |
 | `Serializer\Deserializer` | Decode a delivery to an `IncomingMessage`. | `JsonDeserializer` (core) |
 | `Observability\BrokerEvents` | Receive the lifecycle events (see [PRODUCTION.md](PRODUCTION.md), *Observability*). | Your own class |
