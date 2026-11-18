@@ -9,6 +9,11 @@ All notable changes to this project will be documented in this file.
 - `ExponentialRetryPolicy` takes two optional lists of throwable classes or interfaces: `deadLetterOn` (dead-letter at once, with no retry) and `discardOn` (ack and drop). An error in both lists is dead-lettered; a `discardOn` error at the last attempt is discarded. An entry that is not a throwable class throws `InvalidArgumentException`. Both lists are empty by default
 - `Retry\RetryPolicyMap` selects a retry policy for each message name (exact match), with a default policy
 - The events `BrokerEvents::RETRIED` (`message.retried`) and `BrokerEvents::DISCARDED` (`message.discarded`), recorded by `DeliveryProcessor`. `RETRIED` comes after the transport confirmed the retry
+- `TransactionContractTestCase` has the optional hook `createDeadLetterStore()` (default `null`), which the test case calls after `createOutboxStore()`. With the hook, two cases run: a replay mark in a rolled-back transaction is gone, and a mark and an outbox insert in one committed transaction both stay. Without it, the cases are skipped. `InMemoryTransactionContractTest` and `PdoTransactionContractTest` implement the hook. See `docs/core/TESTING.md`
+
+### Fixed
+
+- `InMemoryOutboxStore` keys its rows by (`id`, `createdAt`), as the primary key of `outbox_messages` is (`id`, `created_at`). Before, it keyed them by `id`, so in a test the replay of a published message replaced the original row. An id in the `ClaimOutcome` applies to each claimed row with that id, as in `PostgreSqlOutboxStore`. `row()` and `isPublished()` use the row of the id with the latest `createdAt`; `unpublishedIds()` gives each id one time
 
 ### Changed
 
