@@ -30,7 +30,7 @@ An adapter imports the core and its own package only, never the other adapter. D
 
 ## Connection pooling
 
-No component holds a session-scoped lock. The relay and the consumer use only transaction-scoped locks, so every pool mode works, including a transaction-mode pooler. See `docs/postgresql/CONNECTION_POOLING.md`.
+No component holds a session-scoped lock. The relay and the consumer use only transaction-scoped locks. Transaction mode works behind pgbouncer when the pooler supports protocol-level prepared statements: pgbouncer 1.21.0 or later with `max_prepared_statements` above 0 (tested in CI, job `pgbouncer` and `make test-pgbouncer`, with pgbouncer 1.26.1, the value 200 and forced rotation of server connections; the guard test `PoolerRotationGuardTest` proves the rotation). pdo_pgsql sends the prepare and the execute as separate round trips, so with `max_prepared_statements = 0` the library fails with `prepared statement "pdo_stmt_…" does not exist`, also outside a transaction: not supported. `PDO::ATTR_EMULATE_PREPARES => true` passed the same suites once with the value 0; CI does not run it. `outbox:maintain` and `setup:schema` were tested on a direct connection only. See `docs/postgresql/CONNECTION_POOLING.md`.
 
 ## After every code change
 
