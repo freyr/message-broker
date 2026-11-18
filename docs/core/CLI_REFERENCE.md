@@ -55,10 +55,67 @@ for example `new OutboxMaintainCommand(new PostgreSqlOutboxRetention($pdo))`.
 The partitions, the retention rules and the locks are described in
 [../postgresql/RETENTION.md](../postgresql/RETENTION.md).
 
+An abandoned row (see `message-broker:outbox:abandon`) does not keep its
+partition. For each dropped partition that held abandoned rows, the command
+prints one line, for example `outbox_messages_p20260301 held 2 abandoned
+row(s); they are dropped.` (with the prefix `[dry-run] ` on a dry run). These
+lines do not change the exit code.
+
 Exit codes: `0` success (also when it dropped unpublished rows with
 `--drop-unpublished`, and always on `--dry-run`); `1` at least one expired
 partition was kept because of unpublished rows; `2` invalid options
 (`--retention-days` must be 1 or more, `--premake-days` 0 or more).
+
+## `message-broker:outbox:failing`
+
+Lists the open outbox rows of one lane that have failed publish attempts:
+rows that are not published and not abandoned, with `attempts` of at least
+`--min-attempts`. The list includes rows that are not due yet. The rows with
+the most attempts come first, then the oldest rows. Use it to find a row that
+the transport refuses again and again (see [RELAY.md](RELAY.md), *A row that
+the transport refuses*).
+
+**Constructor:** `new OutboxFailingCommand(OutboxStore $store)`, for example
+`new OutboxFailingCommand(new PostgreSqlOutboxStore($pdo))`.
+
+| Option | Description |
+| --- | --- |
+| `--lane` | The outbox lane (default `default`, the default lane of `OutboxProducer` and `Relay`). |
+| `--min-attempts` | Only rows with at least this many failed attempts (default `3`). |
+| `--limit` | Maximum rows (default `100`). |
+
+The output is a table with the columns `id`, `lane`, `message_name`,
+`attempts`, `created_at`, `next_attempt_at` and `body_bytes` (times in UTC).
+The command shows the size of the body, never the body, because the body can
+hold personal data. With no row, it prints one line that says so.
+
+Exit codes: `0` success (also when it lists rows); `2` invalid options
+(`--min-attempts` and `--limit` must be integers of 1 or more).
+
+## `message-broker:outbox:abandon <id>`
+
+Abandons the open outbox rows of one message ID: the rows that are not
+published and not abandoned get `abandoned_at`. The relay never claims an
+abandoned row again, and retention drops it with its partition. A replay
+makes a second row with the same ID, so the count can be more than 1. The
+command asks no confirmation: SQL can undo the mark while the partition exists
+(see [RELAY.md](RELAY.md)). Read the broker error before you abandon a row.
+
+**Constructor:** `new OutboxAbandonCommand(OutboxStore $store, ?BrokerEvents $events = null, LoggerInterface $logger = new NullLogger())`.
+
+| Argument/Option | Description |
+| --- | --- |
+| `id` (argument, required) | The message ID of the outbox row. |
+| `--reason` | Why the row is abandoned. It goes to the log and to the event, not to the row. |
+
+When it marks a row, the command logs the warning "Outbox row abandoned by an
+operator; it will not be published" and records the event `message.abandoned`,
+both with `message_id`, `count` and `reason` (`null` with no `--reason`), and
+prints the count.
+
+Exit codes: `0` one or more rows abandoned; `1` no row abandoned ("No
+unpublished row with this ID: it is published, already abandoned, or does not
+exist."), with no event and no log; `2` the ID is empty.
 
 ## `message-broker:relay:run <lane>`
 

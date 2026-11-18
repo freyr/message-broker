@@ -9,7 +9,7 @@ work is `PostgreSqlOutboxRetention`, which implements the core port
 `OutboxRetention`.
 
 The relay never deletes rows. It sets `published_at`, and the rows stay until
-retention drops their partition, once every row of it is published. `outbox_messages` is partitioned by
+retention drops their partition, once every row of it is published or abandoned. `outbox_messages` is partitioned by
 `created_at`, with one partition per UTC day (`outbox_messages_pYYYYMMDD`) and
 no default partition. An insert for a day with no partition fails, and the
 producer's transaction fails with it, so create partitions ahead of time.
@@ -32,12 +32,24 @@ The command:
   run detached.
 
 **Unpublished rows.** By default, an expired partition that still holds a row
-with `published_at IS NULL` is kept. The command prints the partition and the
+with `published_at IS NULL AND abandoned_at IS NULL` is kept. The command prints the partition and the
 number of unpublished rows and exits with code 1, so that a scheduler or a
 monitor alerts. A later run drops the partition once its rows are published.
 The same rule covers a partition with a pending detach and an expired table
 that an earlier run detached. A partition that is kept grows, so fix the relay
 or alert on the exit code well before the disk fills.
+
+**Abandoned rows.** An abandoned row (`abandoned_at IS NOT NULL`, see
+`message-broker:outbox:abandon`) does not keep its partition. An expired
+partition whose only unpublished rows are abandoned is dropped, and the
+command prints one line for it, for example `outbox_messages_p20260301 held 2
+abandoned row(s); they are dropped.`. The line does not change the exit code.
+A partition with abandoned rows and other unpublished rows is kept; the count
+of the kept line is the count of the other rows only. With
+`--drop-unpublished`, the command reports the unpublished rows and the
+abandoned rows of a dropped partition apart. A dry run reports the abandoned
+rows that it would drop. In code, `RetentionReport::$abandoned` holds the
+count for each partition, and `abandonedRowsDropped()` gives the sum.
 
 The check and the detach are not one atomic step. The command counts the
 unpublished rows before the detach and again on the detached table, before
@@ -84,6 +96,11 @@ they expire. Configure pg_partman like this:
   Let `outbox:maintain` drop the partitions.
 - **UTC:** run the database in UTC, so pg_partman's day boundaries agree with
   the UTC days of this library.
+
+pg_partman takes the columns of a new partition from the parent; its template
+table manages only the properties that its documentation lists (for example a
+primary key on a column that is not the partition key). A new column such as
+`abandoned_at` needs no change of the pg_partman configuration.
 
 Monitor three signals: the age of the oldest unpublished row per lane, the
 exit code of the maintain command, and the partition of tomorrow.

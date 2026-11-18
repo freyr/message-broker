@@ -215,10 +215,16 @@ final class AbandonedAtMigrationTest extends FunctionalTestCase
         return $this->names("SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid WHERE i.inhparent = 'outbox_messages'::regclass ORDER BY c.relname");
     }
 
-    /** @return list<string> */
+    /** @return list<string> the result of the check query of the note (UPGRADE.md), in name order */
     private function tablesOutsideTheParent(): array
     {
-        return array_values(array_diff($this->dailyTables(), $this->attachedTables()));
+        return $this->names(<<<'SQL'
+            SELECT c.relname FROM pg_class c
+            WHERE c.relkind = 'r' AND c.relname ~ '^outbox_messages_p[0-9]{8}$'
+              AND NOT EXISTS (SELECT 1 FROM pg_inherits i
+                              WHERE i.inhrelid = c.oid AND i.inhparent = 'outbox_messages'::regclass)
+            ORDER BY c.relname
+            SQL);
     }
 
     /** @return list<string> */

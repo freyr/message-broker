@@ -9,7 +9,7 @@ ports and extends the contract test cases of the test kit (see
 
 | Port | Purpose | Implemented by |
 |---|---|---|
-| `Outbox\OutboxStore` | Insert outbox rows. Claim due rows of one lane and apply the outcome. | `PostgreSqlOutboxStore` (PostgreSQL adapter); `InMemoryOutboxStore` (test kit) |
+| `Outbox\OutboxStore` | Insert outbox rows. Claim due rows of one lane and apply the outcome. Abandon the open rows of one message ID (`abandon()`). List the open rows of a lane with failed attempts (`failing()`). | `PostgreSqlOutboxStore` (PostgreSQL adapter); `InMemoryOutboxStore` (test kit) |
 | `Outbox\OutboxPublisher` | Send claimed rows to the transport and report the refused rows. | `AmqpMessagePublisher` (AMQP adapter); `FakeOutboxPublisher` (test kit) |
 | `Outbox\OutboxRetention` | Create the upcoming outbox partitions and drop the expired ones. | `PostgreSqlOutboxRetention` (PostgreSQL adapter) |
 | `Storage\SchemaInstaller` | Create the tables, or return their DDL. | `PostgreSqlSchemaInstaller` (PostgreSQL adapter) |
@@ -23,3 +23,25 @@ ports and extends the contract test cases of the test kit (see
 | `Serializer\Deserializer` | Decode a delivery to an `IncomingMessage`. | `JsonDeserializer` (core) |
 | `Observability\BrokerEvents` | Receive the lifecycle events (see [PRODUCTION.md](PRODUCTION.md), *Observability*). | Your own class |
 | `ErrorHandler` | Receive each handled failure with its context. | Your own class |
+
+### The abandon methods of `OutboxStore`
+
+- `abandon(string $id): int` marks each row with this message ID that is not
+  published and not abandoned (`published_at IS NULL AND abandoned_at IS NULL`):
+  it sets `abandoned_at` to now and returns the count. A replay makes a second
+  row with the same ID, so the count can be more than 1. An ID that no row has
+  gives 0; the PostgreSQL store also gives 0 for a value that is not a UUID,
+  and sends no query. It is one statement on the connection of the store: it
+  opens no transaction, and it joins a transaction that the caller opened.
+- `failing(string $lane, int $minAttempts, int $limit): array` returns a list
+  of `Outbox\FailingRow` (`id`, `lane`, `messageName`, `attempts`, `createdAt`,
+  `availableAt`, `bodyBytes`; times in epoch milliseconds). It gives the open
+  rows of the lane with `attempts >= $minAttempts`, also the rows that are not
+  due yet, at most `$limit`, by `attempts` (highest first) and then by
+  `createdAt` (oldest first). It never returns the body. A `$minAttempts` or a
+  `$limit` below 1 throws `InvalidArgumentException`.
+
+The claim, `failing()` and the outcome writes ignore an abandoned row.
+Retention does not keep a partition for an abandoned row (see
+`Outbox\OutboxRetention`: "unpublished" means `published_at IS NULL AND
+abandoned_at IS NULL`).

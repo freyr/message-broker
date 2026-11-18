@@ -18,6 +18,11 @@ All notable changes to this project will be documented in this file.
 - `DeliveryProcessor` takes the last constructor parameter `?int $maxDeliveries = 5`, the delivery limit. When the delivery count of the transport is at or above it, the processor writes a dead letter with the error `DeliveryLimitExceeded` and acks, with no transaction, no deduplication and no dispatch. `null` turns the limit off; a value below 1 throws `InvalidArgumentException`. See `docs/core/CONSUMER.md`
 - `AmqpConsumer` takes the last constructor parameter `LoggerInterface $logger = new NullLogger()`, which receives a failure inside the return of the unacked deliveries. `psr/log` is now in the `require` section of `packages/amqp/composer.json`
 - `Adapter\Amqp\WaitQueuePublisher::DELIVERY_COUNT_HEADER` (`x-delivery-count`). The retry republish to a wait queue no longer copies this header, so the first delivery after a wait-queue pass has no count
+- `message-broker:outbox:failing [--lane=default] [--min-attempts=3] [--limit=100]` (`Console\OutboxFailingCommand`) lists the open outbox rows of a lane with failed publish attempts, with the body size and never the body. `message-broker:outbox:abandon <id> [--reason=...]` (`Console\OutboxAbandonCommand`) abandons the open rows of a message ID, so that the relay does not publish them, and logs a warning with the reason. See `docs/core/CLI_REFERENCE.md` and the runbook in `docs/core/RELAY.md`
+- `Outbox\FailingRow`, the value that `OutboxStore::failing()` returns
+- The event `BrokerEvents::ABANDONED` (`message.abandoned`), recorded by `OutboxAbandonCommand` with `message_id`, `count` and `reason`
+- `RetentionReport` has the new last parameter `$abandoned` (partition => count of abandoned rows that were dropped, or would be on a dry run) and `abandonedRowsDropped()`. `outbox:maintain` prints one line for each entry; its exit codes do not change
+- `InMemoryOutboxStore::isAbandoned()`, and `OutboxStoreContractTestCase::record()` takes the optional parameters `id` and `createdAt`
 
 ### Fixed
 
@@ -31,6 +36,9 @@ All notable changes to this project will be documented in this file.
 - **Breaking:** the delivery limit of `DeliveryProcessor` is active by default (`maxDeliveries = 5`). On a quorum queue, the sixth delivery after five deliveries that ended with no ack becomes a dead letter with the error `DeliveryLimitExceeded`, and the handler does not run. Pass `maxDeliveries: null` to keep the old behavior. See `UPGRADE.md`
 - **Breaking:** `AmqpConsumer` returns its unacked deliveries at each stop that it controls. A graceful stop sends `basic.cancel` and one `basic.nack` (tag 0, `multiple`, `requeue`), which adds no delivery count. A `Throwable` sends `basic.cancel`, `basic.reject` (requeue) of the delivery in work and the same `basic.nack`, then goes on; only the delivery in work gets +1. Before, the channel close returned each unacked delivery with +1, also each buffered delivery. See `docs/amqp/CONSUMER.md`, *The return rule*
 - **Breaking:** a confirm timeout of the wait-queue publish ends `AmqpConsumer::run()` with the exception, so `message-broker:consume` exits with a failure. Before, it ended `run()` as an idle stop, with the delivery unacked and exit code 0
+- **Breaking:** `Outbox\OutboxStore` has two new methods, `abandon(string $id): int` and `failing(string $lane, int $minAttempts, int $limit): array`. An implementation outside this library must add them, and its claim and outcome writes must skip an abandoned row. `PostgreSqlOutboxStore` and `InMemoryOutboxStore` implement them; `OutboxStoreContractTestCase` has new cases. See `UPGRADE.md`
+- **Breaking:** `outbox_messages` has the new column `abandoned_at TIMESTAMP(3) NULL`. An existing installation adds it before it deploys the new code; `UPGRADE.md` has the migration note. `idx_outbox_pending` does not change. The claim, `markPublished()` and `scheduleRetry()` of `PostgreSqlOutboxStore` skip an abandoned row
+- **Breaking:** retention does not keep a partition for an abandoned row: "unpublished" in `OutboxRetention` now means `published_at IS NULL AND abandoned_at IS NULL`, and `RetentionReport::$kept` and `$unpublished` count only the rows that are not abandoned
 
 ## [0.7.1] - 2026-11-15
 

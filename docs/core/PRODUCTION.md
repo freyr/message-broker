@@ -97,7 +97,10 @@ There is no built-in metrics interface. Instead, inject:
   `NullLogger` is silent.
 - **A `BrokerEvents` listener** — an optional lifecycle hook fired on the
   lifecycle transitions: `PRODUCED`, `RELAYED`, `DISPATCHED`, `DEDUPLICATED`,
-  `RETRIED`, `DISCARDED`, `DEAD_LETTERED`, `REPLAYED`.
+  `RETRIED`, `DISCARDED`, `DEAD_LETTERED`, `REPLAYED`, `ABANDONED`.
+  `ABANDONED` (`message.abandoned`) comes from `message-broker:outbox:abandon`
+  when it marks one or more rows; its context is `message_id`, `count` and
+  `reason` (a string or `null`).
 - **An `ErrorHandler`** — invoked with full context whenever a failure is
   handled (backoff scheduled, message dead-lettered).
 
@@ -118,11 +121,14 @@ and `dead_letters` tables plus these events:
 
 - **Throughput** — the `RELAYED`/`DISPATCHED` event rate.
 - **Retry rate** — the `RETRIED` event rate; `DISCARDED` counts the dropped messages.
-- **Relay backlog** — the age of the oldest unpublished row
-  (`published_at IS NULL`) per lane.
+- **Relay backlog** — the age of the oldest unpublished row that is not
+  abandoned (`published_at IS NULL AND abandoned_at IS NULL`) per lane.
+- **Abandoned rows** — the count of rows with `abandoned_at IS NOT NULL` in
+  the live partitions. Each one is a message that an operator stopped (see
+  [RELAY.md](RELAY.md), *A row that the transport refuses*).
 - **Retention health** — the exit code of `message-broker:outbox:maintain`,
   its report of kept partitions with unpublished rows, and the partition of tomorrow
-  (it must exist).
+  (it must exist). The command also prints the abandoned rows that it dropped.
 - **Consumer lag** — broker queue depth (AMQP).
 - **DLQ depth** — `SELECT COUNT(*) FROM dead_letters WHERE replayed_at IS NULL`,
   optionally grouped by `source`/`message_name`.

@@ -19,15 +19,26 @@ partitions and the retention of the outbox are in
 with no partition fails. Columns: `id` UUID, `lane`
 VARCHAR(64), `message_name` VARCHAR(255), `body` BYTEA (the final wire bytes,
 payload only), `headers` JSONB (the produce-time headers), `created_at`
-TIMESTAMP(3), `available_at` TIMESTAMP(3), `attempts` INTEGER and
-`published_at` TIMESTAMP(3) NULL. The primary key is `(id, created_at)`. A
-partial index on `(lane, available_at)` where `published_at IS NULL` serves
-the claim query.
+TIMESTAMP(3), `available_at` TIMESTAMP(3), `attempts` INTEGER,
+`published_at` TIMESTAMP(3) NULL and `abandoned_at` TIMESTAMP(3) NULL. The
+primary key is `(id, created_at)`. A partial index `idx_outbox_pending` on
+`(lane, available_at)` where `published_at IS NULL` serves the claim query.
+
+`abandoned_at` marks a row that an operator abandoned with
+`message-broker:outbox:abandon` (UTC, as each timestamp of the table; `NULL`
+means not abandoned). The reason is not in the row: it goes to the log and to
+the event. The claim, `markPublished()` and `scheduleRetry()` have the
+condition `abandoned_at IS NULL`. The index keeps its predicate
+`published_at IS NULL`: the claim still implies it, so PostgreSQL still uses
+the index. An abandoned row stays in the index until retention drops its
+partition, so each claim of its lane reads it and skips it. Abandoned rows are
+few, because an operator makes each one by hand.
 
 The relay only sets `published_at`. Rows leave the table when
 `message-broker:outbox:maintain` drops an expired daily partition. A partition
-that still holds unpublished rows is kept (and the command exits with code 1),
-unless the option `--drop-unpublished` is set. See
+that still holds unpublished rows that are not abandoned is kept (and the
+command exits with code 1), unless the option `--drop-unpublished` is set. An
+abandoned row does not keep its partition. See
 [../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md) and
 [RETENTION.md](RETENTION.md).
 

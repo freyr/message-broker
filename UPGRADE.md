@@ -1,5 +1,101 @@
 # Upgrade guide
 
+## From 0.8.x to 0.9.0
+
+This release adds the abandon mark of an outbox row: a new column, two new
+methods of the `OutboxStore` port and two new commands. Change the schema
+first, then deploy the code.
+
+### Migration of `outbox_messages`
+
+The new code needs the column `outbox_messages.abandoned_at`. The code of
+0.8.x works with the column present, because its insert names its columns.
+Run these steps in this order:
+
+1. Stop the scheduled `message-broker:outbox:maintain`, and start it again
+   only after step 2. A run of the 0.8.x code between the steps can detach an
+   expired partition and attach it again after the `ADD COLUMN`; that
+   `ATTACH` fails, and the table stays outside the parent with its unpublished
+   rows. Then run `message-broker:outbox:maintain` once by hand. It finishes a
+   pending detach, and it drops or attaches again a detached daily table. Then
+   check that no daily table is outside the parent. `ALTER TABLE` on the
+   parent changes only the attached partitions, and a later `ATTACH` of a
+   table with no `abandoned_at` fails:
+
+   ```sql
+   SELECT c.relname FROM pg_class c
+   WHERE c.relkind = 'r' AND c.relname ~ '^outbox_messages_p[0-9]{8}$'
+     AND NOT EXISTS (SELECT 1 FROM pg_inherits i
+                     WHERE i.inhrelid = c.oid AND i.inhparent = 'outbox_messages'::regclass);
+   ```
+
+   For each daily table that the check shows, run:
+
+   ```sql
+   ALTER TABLE "<name>" ADD COLUMN abandoned_at TIMESTAMP(3) NULL;
+   ```
+
+2. Add the column to the parent. With no default, it needs no table rewrite,
+   and it applies to all attached partitions. It takes `ACCESS EXCLUSIVE` on
+   the parent and on each partition for a short time, and it waits for the
+   open transactions on the table; producers wait behind it. Set
+   `lock_timeout`, and repeat the step on a timeout:
+
+   ```sql
+   SET lock_timeout = '5s';
+   ALTER TABLE outbox_messages ADD COLUMN abandoned_at TIMESTAMP(3) NULL;
+   ```
+
+   Then repeat the check of step 1 for daily tables outside the parent, and
+   start the scheduled `outbox:maintain` again.
+3. Deploy the new code. The schema change comes first: the new code fails
+   with no column.
+4. No index change: `idx_outbox_pending` keeps its predicate
+   `published_at IS NULL`. A new installation gets the column from
+   `message-broker:setup:schema`.
+
+pg_partman takes the columns of a new partition from the parent, so its
+configuration needs no change.
+
+To roll back to 0.8.x, deploy the old code; it runs with the column present.
+It does not read `abandoned_at`, so its relay claims an abandoned row again.
+Before you drop the column, list those rows with
+`SELECT id FROM outbox_messages WHERE abandoned_at IS NOT NULL`. Drop it only
+when the rollback is final: `ALTER TABLE outbox_messages DROP COLUMN
+abandoned_at` (a short `ACCESS EXCLUSIVE` lock; set `lock_timeout`).
+
+### New methods of `OutboxStore`
+
+An implementation of `Outbox\OutboxStore` outside this library must add two
+methods (see `docs/core/PORTS.md`):
+
+```php
+public function abandon(string $id): int;
+
+/** @return list<FailingRow> */
+public function failing(string $lane, int $minAttempts, int $limit): array;
+```
+
+- `abandon()` sets `abandoned_at` on each row of the message ID that is not
+  published and not abandoned, and returns the count (0 for an unknown ID).
+- `failing()` returns the open rows of a lane with `attempts >= $minAttempts`,
+  by attempts (highest first) and then by age (oldest first), at most
+  `$limit`. It throws `InvalidArgumentException` for a value below 1.
+- The claim and the outcome writes of `drainClaimed()` must skip an
+  abandoned row.
+
+Extend `OutboxStoreContractTestCase` to check your implementation; it has new
+cases for both methods. The record helper of the test case takes two new
+optional parameters, `id` and `createdAt`.
+
+### New text of `OutboxRetention`
+
+"Unpublished" now means `published_at IS NULL AND abandoned_at IS NULL`. An
+abandoned row does not keep its storage unit. A third-party implementation of
+`Outbox\OutboxRetention` must follow this text, and it reports the abandoned
+rows of each dropped unit in the new last parameter of `RetentionReport`,
+`$abandoned`.
+
 ## From 0.7.x to 0.8.0
 
 This release changes the default behavior of the consumer. The database
