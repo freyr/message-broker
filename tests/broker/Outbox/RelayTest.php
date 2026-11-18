@@ -14,10 +14,14 @@ use Freyr\MessageBroker\Testing\RecordingErrorHandler;
 use Freyr\MessageBroker\Testing\RecordingEvents;
 use Freyr\MessageBroker\Testing\RecordingLogger;
 use Freyr\MessageBroker\Time\EpochMillis;
+use Freyr\MessageBroker\Worker\WorkerLimits;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LogLevel;
 use ReflectionClass;
 use RuntimeException;
+use Symfony\Component\Clock\Clock;
+use Symfony\Component\Clock\MockClock;
+use Symfony\Component\Clock\NativeClock;
 
 /** Relay loop with a fake publisher and an in-memory store: no AMQP, no database. */
 final class RelayTest extends TestCase
@@ -36,6 +40,11 @@ final class RelayTest extends TestCase
         $this->logger = new RecordingLogger();
         $this->events = new RecordingEvents();
         $this->errors = new RecordingErrorHandler();
+    }
+
+    protected function tearDown(): void
+    {
+        Clock::set(new NativeClock());
     }
 
     public function testFreshRowsArePublishedInChunksOfMaxBatchSize(): void
@@ -268,6 +277,140 @@ final class RelayTest extends TestCase
 
         self::assertSame(1, $this->store->drainCalls);
         self::assertLessThan(1_000.0, (hrtime(true) - $start) / 1e6, 'a productive drain does not sleep');
+    }
+
+    public function testTheRunStopsAfterTheBatchThatReachesTheMessageLimit(): void
+    {
+        $this->insertFresh(25);
+        $publisher = new FakeOutboxPublisher();
+        $relay = $this->relay($publisher, batchSize: 10);
+
+        $relay->run(new WorkerLimits(maxMessages: 15));
+
+        self::assertSame([10, 10], $this->store->claimSizes, 'the second batch reaches 20, above the limit of 15');
+        self::assertSame(2, $this->store->drainCalls);
+        self::assertCount(5, $this->store->unpublishedIds());
+    }
+
+    public function testTheRunStopsAtOnceWhenABatchReachesTheMessageLimitExactly(): void
+    {
+        $this->insertFresh(25);
+        $relay = $this->relay(new FakeOutboxPublisher(), batchSize: 10);
+
+        $relay->run(new WorkerLimits(maxMessages: 10));
+
+        self::assertSame(1, $this->store->drainCalls);
+    }
+
+    public function testTheTimeLimitStopsTheRun(): void
+    {
+        $clock = new MockClock('2026-06-15 12:00:00 UTC');
+        Clock::set($clock);
+        $relay = $this->relay(new FakeOutboxPublisher());
+        $this->store->onDrain = static function () use ($clock): void {
+            $clock->sleep(4);
+        };
+
+        $relay->run(new WorkerLimits(maxSeconds: 10));
+
+        self::assertSame(3, $this->store->drainCalls, 'the clock shows 4 s, 8 s, then 12 s');
+    }
+
+    public function testTheTimeLimitStopsAnIdleRunAfterTheIdleSleep(): void
+    {
+        $clock = new MockClock('2026-06-15 12:00:00 UTC');
+        Clock::set($clock);
+        $relay = $this->relay(new FakeOutboxPublisher());
+        $this->store->onDrain = static function () use ($clock): void {
+            $clock->sleep(10);
+        };
+
+        $relay->run(new WorkerLimits(maxSeconds: 10));
+
+        self::assertSame(1, $this->store->drainCalls, 'an empty pass is checked too');
+    }
+
+    public function testAMemoryLimitOfOneStopsTheRunAfterTheFirstPass(): void
+    {
+        $this->insertFresh(3);
+        $relay = $this->relay(new FakeOutboxPublisher());
+
+        $relay->run(new WorkerLimits(maxMemoryBytes: 1));
+
+        self::assertSame(1, $this->store->drainCalls);
+        self::assertSame([], $this->store->unpublishedIds(), 'the pass that ran is complete');
+    }
+
+    public function testAMemoryLimitOfPhpIntMaxDoesNotStopTheRun(): void
+    {
+        $relay = $this->relay(new FakeOutboxPublisher());
+        $this->store->onDrain = static function (int $call) use ($relay): void {
+            if ($call === 3) {
+                $relay->stop();
+            }
+        };
+
+        $relay->run(new WorkerLimits(maxMemoryBytes: PHP_INT_MAX));
+
+        self::assertSame(3, $this->store->drainCalls);
+        self::assertSame([], $this->logger->records);
+    }
+
+    public function testARunWithNoLimitsRunsUntilStop(): void
+    {
+        $relay = $this->relay(new FakeOutboxPublisher());
+        $this->store->onDrain = static function (int $call) use ($relay): void {
+            if ($call === 3) {
+                $relay->stop();
+            }
+        };
+
+        $relay->run();
+
+        self::assertSame(3, $this->store->drainCalls);
+    }
+
+    public function testALimitStopAndStopEndTheRunTheSameWay(): void
+    {
+        $this->insertFresh(2);
+        $limited = $this->relay(new FakeOutboxPublisher());
+        $limited->run(new WorkerLimits(maxMessages: 1));
+        $limitedCalls = $this->store->drainCalls;
+
+        $stopped = $this->relay(new FakeOutboxPublisher());
+        $stopped->stop();
+
+        // A stopped relay does not start another pass, so a second run() returns at once.
+        $limited->run();
+        $stopped->run();
+
+        self::assertSame($limitedCalls, $this->store->drainCalls);
+    }
+
+    public function testALimitStopLogsTheReasonTheCountsTheElapsedTimeAndTheMemory(): void
+    {
+        $clock = new MockClock('2026-06-15 12:00:00 UTC');
+        Clock::set($clock);
+        $this->insertFresh(3);
+        $relay = $this->relay(new FakeOutboxPublisher());
+        $this->store->onDrain = static function () use ($clock): void {
+            $clock->sleep(2);
+        };
+
+        $relay->run(new WorkerLimits(maxMessages: 3));
+
+        self::assertCount(1, $this->logger->records);
+        $record = $this->logger->records[0];
+        self::assertSame(LogLevel::INFO, $record['level']);
+        self::assertSame('Worker limit reached; the worker stops', $record['message']);
+        $context = $record['context'];
+        self::assertSame('message limit', $context['reason']);
+        self::assertSame(self::LANE, $context['lane']);
+        self::assertSame(3, $context['messages']);
+        self::assertSame(0, $context['failures']);
+        self::assertSame(2.0, $context['elapsedSeconds'], 'a float also for whole seconds');
+        self::assertIsInt($context['memoryBytes']);
+        self::assertGreaterThan(0, $context['memoryBytes']);
     }
 
     public function testTheConstructorDefaults(): void

@@ -66,12 +66,38 @@ Runs the registered relay for one outbox lane. Blocks until stopped. Start
 the command more than once for the same lane to run parallel workers.
 
 **Constructor:** `new RelayRunCommand(array $relays)` —
-`array<string, callable(): void>` keyed by lane name.
+`array<string, callable(WorkerLimits): void>` keyed by lane name. The command
+builds one `Freyr\MessageBroker\Worker\WorkerLimits` from the limit options and
+passes it to the callable, which gives it to `Relay::run()`:
+
+```php
+new RelayRunCommand(['orders' => static fn (WorkerLimits $limits) => $relay->run($limits)]);
+```
+
+A callable with no parameter still runs, but the limits then have no effect;
+when a limit option is set, the command prints a warning.
 
 | Argument/Option | Description |
 | --- | --- |
 | `lane` (argument, required) | The outbox lane to drain; must be a key in the registered `$relays` array. |
+| `--limit=<n>` | Stop after `<n>` published rows (integer, 1 or more). The relay checks the limit after each batch, so it can publish up to one batch (`batchSize`) above the limit. Rows that back off do not count. |
+| `--time-limit=<seconds>` | Stop after `<seconds>` seconds since the start (integer, 1 or more). The relay checks the limit after each pass, so the stop comes up to one batch and one idle sleep late. |
+| `--memory-limit=<size>` | Stop when `memory_get_usage(true)` reaches `<size>`: `<number>[K\|M\|G]`, case-insensitive, binary units (`128M` is 134217728 bytes); a plain number is bytes; 1 or more. Set it below the PHP `memory_limit`. |
 | `--require-signals` | Fail immediately at startup if `ext-pcntl` is unavailable, instead of warning and continuing without graceful shutdown (without `ext-pcntl`, SIGTERM ends the process at once, or is ignored until SIGKILL when the process is PID 1 of a container). |
+
+A limit is checked between passes, never inside one. A limit stop ends the run
+like SIGTERM does: the relay logs one `info` line ("Worker limit reached; the
+worker stops") and `run()` returns. With no limit option, the relay runs until
+a signal or a failure, as before.
+
+Exit codes: `0` after the callable returned, also after a limit stop; `1` with
+`--require-signals` and no `ext-pcntl`; `2` for an unknown lane or an invalid
+option value (the callable does not run). A publisher failure is not caught: the
+process ends with an error, and the supervisor restarts it.
+
+**Supervisor rule.** A limit stop exits with code `0`, so the supervisor must
+start a new process after each exit, exit code `0` included. See
+[Worker limits in PRODUCTION.md](PRODUCTION.md#worker-limits).
 
 ## `message-broker:consume <name>`
 

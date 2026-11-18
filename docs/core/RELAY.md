@@ -104,6 +104,16 @@ $worker = new Relay(
 $worker->run();
 ```
 
+`run()` takes an optional `Freyr\MessageBroker\Worker\WorkerLimits`:
+`$worker->run(new WorkerLimits(maxMessages: 10_000, maxSeconds: 3_600, maxMemoryBytes: 134_217_728))`.
+The relay checks the limits at the end of each pass, so it can publish up to one batch
+above `maxMessages`. When a limit is reached, the relay logs one `info` line
+("Worker limit reached; the worker stops") with the reason, the counts, the elapsed
+seconds and the memory in bytes, and then stops like it does on SIGTERM: `run()`
+returns and the claims are already closed. `maxFailures` has no effect on the relay,
+because a publisher failure already ends the run. The operator sets the limits with
+the options of `message-broker:relay:run`; see [CLI_REFERENCE.md](CLI_REFERENCE.md).
+
 `Relay` constructor arguments: `outbox`, `publisher`, `lane = 'default'`,
 `batchSize = 500`, `backoff`, `errorHandler`, `idleSleepMs = 200`, `logger`,
 `events`. The `AmqpMessagePublisher` arguments are in

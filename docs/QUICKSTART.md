@@ -192,8 +192,9 @@ supervisor) starts it by lane/consumer name:
 ```php
 use Freyr\MessageBroker\Console\ConsumeCommand;
 use Freyr\MessageBroker\Console\RelayRunCommand;
+use Freyr\MessageBroker\Worker\WorkerLimits;
 
-$application->add(new RelayRunCommand(['orders' => static fn () => $relay->run()]));
+$application->add(new RelayRunCommand(['orders' => static fn (WorkerLimits $limits) => $relay->run($limits)]));
 $application->add(new ConsumeCommand(['orders' => static fn () => $consumer->run()]));
 ```
 
