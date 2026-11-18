@@ -18,6 +18,11 @@ use LogicException;
  * callback throws, nothing is applied. Rows of an open claim are skipped by a
  * nested claim of the same store, as a database skips locked rows. Pass an
  * {@see InMemoryTransaction} to make inserts roll back with it.
+ *
+ * Rows are keyed by (id, createdAt), as the primary key of the outbox table:
+ * a replay of a published message is a second row with the same id. An id in
+ * the outcome applies to each claimed row with that id. The helpers that take
+ * only an id (row(), isPublished()) address the row with the latest createdAt.
  */
 final class InMemoryOutboxStore implements OutboxStore, TransactionParticipant
 {
@@ -29,13 +34,13 @@ final class InMemoryOutboxStore implements OutboxStore, TransactionParticipant
     /** @var (callable(int): void)|null called at the start of each drainClaimed() with the call number */
     public $onDrain;
 
-    /** @var array<string, OutboxRecord> row id => current state */
+    /** @var array<string, OutboxRecord> row key (id and createdAt) => current state */
     private array $rows = [];
 
-    /** @var array<string, true> */
+    /** @var array<string, true> row keys */
     private array $published = [];
 
-    /** @var array<string, true> rows of the claims that are open now */
+    /** @var array<string, true> row keys of the claims that are open now */
     private array $claiming = [];
 
     public function __construct(?InMemoryTransaction $transaction = null)
@@ -45,7 +50,7 @@ final class InMemoryOutboxStore implements OutboxStore, TransactionParticipant
 
     public function insert(OutboxRecord $record): void
     {
-        $this->rows[$record->id] = $record;
+        $this->rows[self::key($record)] = $record;
     }
 
     public function drainClaimed(string $lane, int $limit, callable $publish): int
@@ -56,16 +61,17 @@ final class InMemoryOutboxStore implements OutboxStore, TransactionParticipant
         }
 
         $now = EpochMillis::now();
+        /** @var array<string, OutboxRecord> $claimed row key => row */
         $claimed = [];
-        foreach ($this->rows as $id => $row) {
+        foreach ($this->rows as $key => $row) {
             if (count($claimed) >= $limit) {
                 break;
             }
             if ($row->lane === $lane
-                && !isset($this->published[$id])
-                && !isset($this->claiming[$id])
+                && !isset($this->published[$key])
+                && !isset($this->claiming[$key])
                 && ($row->availableAt ?? 0) <= $now) {
-                $claimed[] = $row;
+                $claimed[$key] = $row;
             }
         }
         if ($claimed === []) {
@@ -73,14 +79,14 @@ final class InMemoryOutboxStore implements OutboxStore, TransactionParticipant
         }
         $this->claimSizes[] = count($claimed);
 
-        $claimedIds = array_map(static fn (OutboxRecord $r): string => $r->id, $claimed);
-        foreach ($claimedIds as $id) {
-            $this->claiming[$id] = true;
+        $claimedIds = array_map(static fn (OutboxRecord $r): string => $r->id, array_values($claimed));
+        foreach (array_keys($claimed) as $key) {
+            $this->claiming[$key] = true;
         }
 
         try {
             /** @var ClaimOutcome $outcome */
-            $outcome = $publish($claimed);
+            $outcome = $publish(array_values($claimed));
 
             $retryIds = array_map('strval', array_keys($outcome->retryAtMs));
             $overlap = array_intersect($outcome->publishedIds, $retryIds);
@@ -89,48 +95,62 @@ final class InMemoryOutboxStore implements OutboxStore, TransactionParticipant
                 throw new LogicException('The outcome breaks the drainClaimed() contract.');
             }
         } finally {
-            foreach ($claimedIds as $id) {
-                unset($this->claiming[$id]);
+            foreach (array_keys($claimed) as $key) {
+                unset($this->claiming[$key]);
             }
         }
 
-        foreach ($outcome->publishedIds as $id) {
-            $this->published[$id] = true;
-        }
-        foreach ($outcome->retryAtMs as $id => $availableAt) {
-            $row = $this->rows[$id];
-            $this->rows[$id] = new OutboxRecord(
-                $row->id,
-                $row->lane,
-                $row->messageName,
-                $row->body,
-                $row->headers,
-                $row->createdAt,
-                $row->attempts + 1,
-                $availableAt,
-            );
+        // An id of the outcome applies to each claimed row with that id, as the
+        // UPDATE ... WHERE id = ANY(...) of the database does.
+        foreach ($claimed as $key => $row) {
+            if (in_array($row->id, $outcome->publishedIds, true)) {
+                $this->published[$key] = true;
+            }
+            $availableAt = $outcome->retryAtMs[$row->id] ?? null;
+            if ($availableAt !== null) {
+                $this->rows[$key] = new OutboxRecord(
+                    $row->id,
+                    $row->lane,
+                    $row->messageName,
+                    $row->body,
+                    $row->headers,
+                    $row->createdAt,
+                    $row->attempts + 1,
+                    $availableAt,
+                );
+            }
         }
 
         return count($outcome->publishedIds);
     }
 
+    /** Whether the row of this id with the latest createdAt is published. False for an unknown id. */
     public function isPublished(string $id): bool
     {
-        return isset($this->published[$id]);
+        $key = $this->latestKey($id);
+
+        return $key !== null && isset($this->published[$key]);
     }
 
+    /** The row of this id with the latest createdAt. */
     public function row(string $id): OutboxRecord
     {
-        return $this->rows[$id] ?? throw new LogicException("Unknown row {$id}");
+        $key = $this->latestKey($id) ?? throw new LogicException("Unknown row {$id}");
+
+        return $this->rows[$key];
     }
 
-    /** @return list<string> ids of the rows that are not published */
+    /** @return list<string> ids of the rows that are not published, each id once, in the order of the first insert */
     public function unpublishedIds(): array
     {
-        return array_values(array_filter(
-            array_map('strval', array_keys($this->rows)),
-            fn (string $id): bool => !isset($this->published[$id]),
-        ));
+        $ids = [];
+        foreach ($this->rows as $key => $row) {
+            if (!isset($this->published[$key])) {
+                $ids[$row->id] = true;
+            }
+        }
+
+        return array_map('strval', array_keys($ids));
     }
 
     public function snapshot(): mixed
@@ -142,5 +162,23 @@ final class InMemoryOutboxStore implements OutboxStore, TransactionParticipant
     {
         /** @var array{array<string, OutboxRecord>, array<string, true>} $snapshot */
         [$this->rows, $this->published] = $snapshot;
+    }
+
+    /** The primary key of outbox_messages is (id, created_at): a replay adds a second row with the same id. */
+    private static function key(OutboxRecord $record): string
+    {
+        return $record->id.'@'.$record->createdAt;
+    }
+
+    private function latestKey(string $id): ?string
+    {
+        $latest = null;
+        foreach ($this->rows as $key => $row) {
+            if ($row->id === $id && ($latest === null || $row->createdAt > $this->rows[$latest]->createdAt)) {
+                $latest = $key;
+            }
+        }
+
+        return $latest;
     }
 }
