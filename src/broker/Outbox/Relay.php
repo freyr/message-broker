@@ -219,6 +219,15 @@ final class Relay
             'rows' => count($records),
             'ids' => array_map(static fn (OutboxRecord $r): string => $r->id, array_slice($records, 0, 20)),
         ];
+        // A retried row goes alone (one call, one row), so a failure of that call names the row
+        // that fails again: its ID, its name and the number of the attempt that just failed.
+        if (count($records) === 1 && $records[0]->attempts > 0) {
+            $context += [
+                'message_id' => $records[0]->id,
+                'message_name' => $records[0]->messageName,
+                'attempts' => $records[0]->attempts + 1,
+            ];
+        }
         $this->logger->warning($message, ($error === null ? [] : [
             'exception' => $error,
         ]) + $context);
