@@ -41,9 +41,19 @@ not reconnect logic — there is none to tune.
 ## Graceful shutdown needs ext-pcntl
 
 SIGTERM/SIGINT handling for relays and consumers is registered only when
-`ext-pcntl` is loaded. Without it, the signal is ignored, and the process
-can only be stopped with SIGKILL — which drops in-flight work (an
-unacked delivery, a lane mid-batch).
+`ext-pcntl` is loaded. Without it, the signal keeps its default action. This
+was measured on PHP 8.4 with no `pcntl`:
+
+- **The process is not PID 1** (for example under a shell wrapper, or under
+  an init process such as `docker run --init` or tini): SIGTERM ends the
+  process at once (exit status 143). There is no graceful shutdown. The
+  current delivery or batch is not completed. The broker redelivers it and
+  deduplication absorbs the repeat.
+- **The process is PID 1 of a container**: the kernel does not deliver a
+  signal with the default action to PID 1, so the process ignores SIGTERM.
+  The runtime sends SIGKILL after its stop timeout (exit status 137), so the
+  stop is slow and also not graceful. Run the process under an init process,
+  or load `ext-pcntl`.
 
 Use `--require-signals` on `message-broker:relay:run` and
 `message-broker:consume` to fail fast at startup if `ext-pcntl` is missing,

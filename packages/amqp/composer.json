@@ -26,6 +26,9 @@
         "symfony/clock": "^8.1",
         "symfony/uid": "^7.4|^8.1"
     },
+    "suggest": {
+        "ext-pcntl": "Graceful shutdown of the relay and the consumer on SIGTERM and SIGINT"
+    },
     "provide": {
         "freyr/message-broker-transport-implementation": "1.0"
     },
