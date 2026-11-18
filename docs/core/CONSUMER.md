@@ -57,6 +57,69 @@ delay is `Backoff::delayForAttempt($attempt)`. The default `backoff` and the
 failures of attempts 1 to 4 retry after 1 s, 4 s, 16 s and 64 s. The failure of
 attempt 5 goes to the dead letters.
 
+### Error class lists
+
+`ExponentialRetryPolicy` has two optional lists of throwable classes or
+interfaces. Each entry must be a class or interface that is a `Throwable`;
+the constructor throws `InvalidArgumentException` for any other entry.
+
+```php
+$retryPolicy = new ExponentialRetryPolicy(
+    maxAttempts: 5,
+    deadLetterOn: [DomainRuleViolated::class],
+    discardOn: [StaleEvent::class],
+);
+```
+
+- `deadLetterOn`: an error that matches the list dead-letters at once, with no retry.
+- `discardOn`: an error that matches the list is acked and dropped. No dead letter is written.
+
+The match is `instanceof`, so a subclass of a listed class and a class that
+implements a listed interface match. `decide()` checks in this order:
+
+1. The error matches `deadLetterOn`: `deadLetter`.
+2. The error matches `discardOn`: `discard`.
+3. `$attempt >= maxAttempts`: `deadLetter`.
+4. Otherwise: `retry` with the backoff delay.
+
+An error that is in both lists is dead-lettered, so an ambiguous
+configuration never loses data. A `discardOn` error at the last attempt is
+discarded, not dead-lettered. Both lists are empty by default.
+
+### A policy for each message name
+
+`Retry\RetryPolicyMap` selects a policy by the message name. The match is
+exact (no pattern, no wildcard). A name with no entry uses the default policy.
+
+```php
+use Freyr\MessageBroker\Retry\RetryPolicyMap;
+
+$retryPolicy = new RetryPolicyMap(
+    default: new ExponentialRetryPolicy(),
+    policies: [
+        'order.placed' => new ExponentialRetryPolicy(maxAttempts: 10),
+    ],
+);
+```
+
+The constructor throws `InvalidArgumentException` for an empty name or a
+value that is not a `RetryPolicy`.
+
+### Events
+
+`DeliveryProcessor` records two events for the retry policy (see
+[PRODUCTION.md](PRODUCTION.md), *Observability*):
+
+- `BrokerEvents::RETRIED` (`message.retried`): after the transport confirmed
+  the retry. Context keys: `consumer`, `source`, `message_id`,
+  `message_name`, `attempt`, `next_attempt`, `delay_ms`, `error_class`. A
+  refused retry throws and records no event.
+- `BrokerEvents::DISCARDED` (`message.discarded`): for a `Discard` decision.
+  Context keys: `consumer`, `source`, `message_id`, `message_name`,
+  `attempt`, `error_class`.
+
+A dead letter records `DEAD_LETTERED`, as before.
+
 ## Database failures
 
 A database failure is not a handler failure. When `BEGIN` fails, or the

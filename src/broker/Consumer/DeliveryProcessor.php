@@ -158,9 +158,16 @@ final class DeliveryProcessor
         $decision = $this->retryPolicy->decide($attempt, $error, $incoming);
 
         match ($decision->action) {
-            RetryAction::Retry => $control->retry($decision->delayMs, $attempt + 1),
+            RetryAction::Retry => $this->retry($delivery, $control, $incoming, $error, $decision->delayMs),
             RetryAction::DeadLetter => $this->deadLetterIncoming($delivery, $incoming, $error),
-            RetryAction::Discard => null,
+            RetryAction::Discard => $this->events?->record(BrokerEvents::DISCARDED, [
+                'consumer' => $this->name,
+                'source' => $delivery->source,
+                'message_id' => $incoming->messageId,
+                'message_name' => $incoming->messageName,
+                'attempt' => $attempt,
+                'error_class' => $error::class,
+            ]),
         };
 
         $context = [
@@ -176,6 +183,28 @@ final class DeliveryProcessor
         $this->errorHandler?->handle($error, $context);
 
         $control->ack();
+    }
+
+    private function retry(
+        Delivery $delivery,
+        DeliveryControl $control,
+        IncomingMessage $incoming,
+        Throwable $error,
+        int $delayMs,
+    ): void {
+        $control->retry($delayMs, $delivery->attempt + 1);
+
+        // Only after the transport confirmed the retry: a refused retry throws above.
+        $this->events?->record(BrokerEvents::RETRIED, [
+            'consumer' => $this->name,
+            'source' => $delivery->source,
+            'message_id' => $incoming->messageId,
+            'message_name' => $incoming->messageName,
+            'attempt' => $delivery->attempt,
+            'next_attempt' => $delivery->attempt + 1,
+            'delay_ms' => $delayMs,
+            'error_class' => $error::class,
+        ]);
     }
 
     private function deadLetterRaw(Delivery $delivery, Throwable $error): void

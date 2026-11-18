@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `ExponentialRetryPolicy` takes two optional lists of throwable classes or interfaces: `deadLetterOn` (dead-letter at once, with no retry) and `discardOn` (ack and drop). An error in both lists is dead-lettered; a `discardOn` error at the last attempt is discarded. An entry that is not a throwable class throws `InvalidArgumentException`. Both lists are empty by default
+- `Retry\RetryPolicyMap` selects a retry policy for each message name (exact match), with a default policy
+- The events `BrokerEvents::RETRIED` (`message.retried`) and `BrokerEvents::DISCARDED` (`message.discarded`), recorded by `DeliveryProcessor`. `RETRIED` comes after the transport confirmed the retry
+
 ### Changed
 
 - `composer.json` now has `replace` for `freyr/message-broker-postgresql` and `freyr/message-broker-amqp` (`self.version`): when the code moves to separate packages, this package will stand in for them, so no second copy of the code is installed. The `branch-alias` (`dev-main` as `1.0-dev`) is removed because no 1.0 line is planned; `dev-main` now has no alias and does not satisfy `^0.7`

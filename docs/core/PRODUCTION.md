@@ -62,8 +62,8 @@ There is no built-in metrics interface. Instead, inject:
   backoff decisions are logged (`warning`/`error`); the default
   `NullLogger` is silent.
 - **A `BrokerEvents` listener** — an optional lifecycle hook fired on the
-  success path: `PRODUCED`, `RELAYED`, `DISPATCHED`, `DEDUPLICATED`,
-  `DEAD_LETTERED`, `REPLAYED`.
+  lifecycle transitions: `PRODUCED`, `RELAYED`, `DISPATCHED`, `DEDUPLICATED`,
+  `RETRIED`, `DISCARDED`, `DEAD_LETTERED`, `REPLAYED`.
 - **An `ErrorHandler`** — invoked with full context whenever a failure is
   handled (backoff scheduled, message dead-lettered).
 
@@ -83,6 +83,7 @@ Derive operational metrics from the `outbox_messages`, `message_deduplication`,
 and `dead_letters` tables plus these events:
 
 - **Throughput** — the `RELAYED`/`DISPATCHED` event rate.
+- **Retry rate** — the `RETRIED` event rate; `DISCARDED` counts the dropped messages.
 - **Relay backlog** — the age of the oldest unpublished row
   (`published_at IS NULL`) per lane.
 - **Retention health** — the exit code of `message-broker:outbox:maintain`,

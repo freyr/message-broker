@@ -211,7 +211,27 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame(['begin', 'rollback'], $this->transaction->calls);
         self::assertSame(['retry:100:2', 'ack'], $this->control->calls, 'the retry is scheduled before the ack');
         self::assertSame([], $this->deadLetters());
-        self::assertSame([], $this->events->records);
+    }
+
+    public function testAConfirmedRetryRecordsTheRetriedEventWithEachKey(): void
+    {
+        $this->failingDispatch = self::failure();
+
+        $this->processor()->process($this->delivery('m-4', attempt: 2), $this->control);
+
+        self::assertSame([[
+            'event' => BrokerEvents::RETRIED,
+            'context' => [
+                'consumer' => 'orders_consumer',
+                'source' => self::SOURCE,
+                'message_id' => 'm-4',
+                'message_name' => 'order.placed',
+                'attempt' => 2,
+                'next_attempt' => 3,
+                'delay_ms' => 100,
+                'error_class' => RuntimeException::class,
+            ],
+        ]], $this->events->records);
     }
 
     public function testFailureReportsToTheLoggerAndTheErrorHandlerWithTheSameContext(): void
@@ -255,6 +275,7 @@ final class DeliveryProcessorTest extends TestCase
         }
 
         self::assertSame([], $this->control->calls, 'the delivery stays unacked');
+        self::assertSame([], $this->events->records, 'no RETRIED event when the transport refused the retry');
         self::assertSame([], $this->logger->records);
         self::assertSame([], $this->errorHandler->calls);
     }
@@ -366,7 +387,17 @@ final class DeliveryProcessorTest extends TestCase
 
         self::assertSame(['ack'], $this->control->calls);
         self::assertSame([], $this->deadLetters());
-        self::assertSame([], $this->events->records);
+        self::assertSame([[
+            'event' => BrokerEvents::DISCARDED,
+            'context' => [
+                'consumer' => 'orders_consumer',
+                'source' => self::SOURCE,
+                'message_id' => 'm-1',
+                'message_name' => 'order.placed',
+                'attempt' => 1,
+                'error_class' => RuntimeException::class,
+            ],
+        ]], $this->events->records);
         self::assertSame('Discard', $this->errorHandler->calls[0]['context']['action']);
     }
 
