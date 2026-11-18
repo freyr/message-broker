@@ -16,7 +16,7 @@ A contract test case is an abstract PHPUnit test case. It checks that an impleme
 | `OutboxStoreContractTestCase` | `Outbox\OutboxStore` |
 | `DeduplicationStoreContractTestCase` | `Consumer\DeduplicationStore` |
 | `DeadLetterStoreContractTestCase` | `DeadLetter\DeadLetterStore` |
-| `TransactionContractTestCase` | `Storage\Transaction` (with a deduplication store and an outbox store on the same connection) |
+| `TransactionContractTestCase` | `Storage\Transaction` (with a deduplication store, an outbox store and a dead letter store on the same connection) |
 | `OutboxPublisherContractTestCase` | `Outbox\OutboxPublisher` |
 
 To test an adapter, extend the test case and return the implementation from the abstract factory method:
@@ -37,7 +37,10 @@ Each factory must return a store that is empty at the start of the test. Some te
 
 - `OutboxStoreContractTestCase::createSecondStore()` returns a second store with its own connection to the same rows. Without it, the tests of two claimers are skipped, and PHPUnit shows the skip message.
 - `TransactionContractTestCase::createOutboxStore()` returns an outbox store on the connection of the transaction. Without it, the tests of the outbox insert are skipped.
+- `TransactionContractTestCase::createDeadLetterStore()` returns a dead letter store on the connection of the transaction. Without it, the tests of the replay mark are skipped. The test of a mark and an outbox insert in one committed transaction needs both hooks.
 - `OutboxPublisherContractTestCase::assertDelivered()` checks that the records arrived on the transport. For example, the AMQP test reads them from a bound queue.
+
+`TransactionContractTestCase` calls each factory one time in each test, before the first `begin()`, in this order: `createTransaction()`, `createDeduplicationStore()`, `createOutboxStore()`, `createDeadLetterStore()`. Thus a store can join the transaction in its constructor.
 
 Put the tests that depend on the technology (SQL text, partitions, the headers of an AMQP message) in your own test classes. The contract test cases do not hold them.
 
@@ -47,7 +50,7 @@ The fakes are correct in-memory implementations of the ports. Each fake passes t
 
 | Fake | Port |
 |---|---|
-| `InMemoryOutboxStore` | `OutboxStore`: it claims, and it applies the `ClaimOutcome` |
+| `InMemoryOutboxStore` | `OutboxStore`: it claims, and it applies the `ClaimOutcome`. It keys the rows by (`id`, `createdAt`), as the primary key of the outbox table, so a replay adds a second row with the same id. An id in the outcome applies to each claimed row with that id. `row()` and `isPublished()` use the row of the id with the latest `createdAt`; `unpublishedIds()` gives each id one time |
 | `InMemoryDeduplicationStore` | `DeduplicationStore` |
 | `InMemoryDeadLetterStore` | `DeadLetterStore` |
 | `InMemoryTransaction` | `Transaction` |
