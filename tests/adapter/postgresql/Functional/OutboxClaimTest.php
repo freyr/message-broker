@@ -216,6 +216,73 @@ final class OutboxClaimTest extends FunctionalTestCase
         );
     }
 
+    public function testTheClaimSkipsAnAbandonedRow(): void
+    {
+        $this->producer->produce($abandoned = OrderPlaced::create('o-1', 100));
+        $this->producer->produce($open = OrderPlaced::create('o-2', 200));
+        self::assertSame(1, $this->store->abandon($abandoned->id));
+
+        $seen = [];
+        $published = $this->store->drainClaimed(self::LANE, 10, static function (array $claimed) use (&$seen): ClaimOutcome {
+            $seen = self::ids($claimed);
+
+            return ClaimOutcome::published($seen);
+        });
+
+        self::assertSame(1, $published);
+        self::assertSame([$open->id], $seen);
+        self::assertSame(1, self::fetchInt(
+            "SELECT COUNT(*) FROM outbox_messages WHERE id = '{$abandoned->id}' AND published_at IS NULL AND abandoned_at IS NOT NULL",
+        ));
+    }
+
+    public function testAbandonOnASecondConnectionWaitsForAnOpenClaimOfTheRow(): void
+    {
+        $this->producer->produce($message = OrderPlaced::create('o-1', 100));
+        $operator = self::newConnection();
+        $operator->exec("SET lock_timeout = '100ms'");
+        $operatorStore = new PostgreSqlOutboxStore($operator);
+
+        $error = null;
+        $this->store->drainClaimed(self::LANE, 10, static function (array $claimed) use ($operatorStore, &$error): ClaimOutcome {
+            try {
+                $operatorStore->abandon($claimed[0]->id); // the claim holds the row lock
+            } catch (\PDOException $caught) {
+                $error = $caught;
+            }
+
+            return ClaimOutcome::published(self::ids($claimed));
+        });
+
+        self::assertInstanceOf(\PDOException::class, $error, 'abandon() waits for the claim');
+        self::assertSame('55P03', $error->getCode(), 'lock_not_available: the lock timeout');
+        self::assertSame(0, $operatorStore->abandon($message->id), 'after the claim published the row, nothing to abandon');
+        self::assertSame(1, self::fetchInt(
+            "SELECT COUNT(*) FROM outbox_messages WHERE id = '{$message->id}' AND published_at IS NOT NULL AND abandoned_at IS NULL",
+        ));
+    }
+
+    public function testAnOutcomeDoesNotChangeARowThatTheClaimTransactionAbandoned(): void
+    {
+        // On the connection of the claim, abandon() joins the claim transaction:
+        // the guards of markPublished() and scheduleRetry() keep the row as it is.
+        $this->producer->produce($published = OrderPlaced::create('o-1', 100));
+        $this->producer->produce($retried = OrderPlaced::create('o-2', 200));
+
+        $this->store->drainClaimed(self::LANE, 10, function () use ($published, $retried): ClaimOutcome {
+            self::assertSame(1, $this->store->abandon($published->id));
+            self::assertSame(1, $this->store->abandon($retried->id));
+
+            return new ClaimOutcome([$published->id], [
+                $retried->id => EpochMillis::now() + 60_000,
+            ]);
+        });
+
+        self::assertSame(2, self::fetchInt(
+            'SELECT COUNT(*) FROM outbox_messages WHERE published_at IS NULL AND abandoned_at IS NOT NULL AND attempts = 0',
+        ));
+    }
+
     public function testAbandonOfAValueThatIsNotAUuidReturnsZeroAndSendsNoQuery(): void
     {
         $id = '01900000-0000-7000-8000-00000000abcd';
