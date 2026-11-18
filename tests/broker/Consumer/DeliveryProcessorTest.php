@@ -6,9 +6,11 @@ namespace Freyr\MessageBroker\Tests\Consumer;
 
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\Delivery;
+use Freyr\MessageBroker\Consumer\DeliveryLimitExceeded;
 use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
@@ -16,6 +18,7 @@ use Freyr\MessageBroker\Retry\RetryDecision;
 use Freyr\MessageBroker\Retry\RetryPolicy;
 use Freyr\MessageBroker\Serializer\Deserializer;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
+use Freyr\MessageBroker\Serializer\MalformedMessage;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Testing\InMemoryDeadLetterStore;
 use Freyr\MessageBroker\Testing\RecordingDeliveryControl;
@@ -24,7 +27,9 @@ use Freyr\MessageBroker\Testing\RecordingEvents;
 use Freyr\MessageBroker\Testing\RecordingLogger;
 use Freyr\MessageBroker\Testing\RecordingTransaction;
 use Freyr\MessageBroker\Testing\StubDeduplicationStore;
+use InvalidArgumentException;
 use PDOException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LogLevel;
 use RuntimeException;
@@ -74,6 +79,8 @@ final class DeliveryProcessorTest extends TestCase
         int $maxAttempts = 3,
         bool $withObservers = true,
         ?RetryPolicy $retryPolicy = null,
+        ?int $maxDeliveries = 5,
+        ?DeadLetterStore $deadLetters = null,
     ): DeliveryProcessor {
         return new DeliveryProcessor(
             deserializer: $deserializer ?? new JsonDeserializer(),
@@ -89,11 +96,12 @@ final class DeliveryProcessorTest extends TestCase
                 maxAttempts: $maxAttempts,
                 backoff: Backoff::exponential(initialDelayMs: 100, maxDelayMs: 100),
             ),
-            deadLetters: $this->deadLetterStore,
+            deadLetters: $deadLetters ?? $this->deadLetterStore,
             name: 'orders_consumer',
             errorHandler: $withObservers ? $this->errorHandler : null,
             logger: $this->logger,
             events: $withObservers ? $this->events : null,
+            maxDeliveries: $maxDeliveries,
         );
     }
 
@@ -105,11 +113,12 @@ final class DeliveryProcessorTest extends TestCase
         bool $withEnvelope = true,
         ?string $fallbackMessageId = null,
         int $attempt = 1,
+        ?int $deliveryCount = null,
     ): Delivery {
         $headers = ($withEnvelope ? MetadataHeader::envelope($messageId, 'order.placed', 1_765_476_000_123) : [])
             + $extraHeaders;
 
-        return new Delivery($body, $headers, $attempt, self::SOURCE, $fallbackMessageId);
+        return new Delivery($body, $headers, $attempt, self::SOURCE, $fallbackMessageId, $deliveryCount);
     }
 
     /** @return list<DeadLetter> */
@@ -570,5 +579,298 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame([], $this->control->calls, 'no ack and no retry is spent');
         self::assertSame([], $this->deadLetters());
         self::assertSame('transaction', $this->errorHandler->calls[0]['context']['stage']);
+    }
+
+    // delivery limit
+
+    public function testACountEqualToTheLimitDeadLettersWithNoTransactionNoDeduplicationAndNoDispatchThenAcks(): void
+    {
+        $this->processor(maxDeliveries: 3)->process(
+            $this->delivery('m-7', [
+                'x-custom' => 'h',
+            ], attempt: 2, deliveryCount: 3),
+            $this->control,
+        );
+
+        self::assertSame([], $this->transaction->calls, 'no BEGIN');
+        self::assertSame([], $this->dedup->scopes, 'no deduplication acquire');
+        self::assertSame([], $this->dispatched, 'no dispatch');
+        self::assertSame(['ack'], $this->control->calls);
+        self::assertCount(1, $this->deadLetters());
+        $letter = $this->deadLetters()[0];
+        self::assertSame(self::SOURCE, $letter->source);
+        self::assertSame('m-7', $letter->messageId);
+        self::assertSame('order.placed', $letter->messageName);
+        self::assertSame(DeliveryLimitExceeded::class, $letter->errorClass);
+        self::assertSame('Delivery limit reached: 3 deliveries ended with no ack (limit 3)', $letter->errorMessage);
+        self::assertSame(2, $letter->attempts, 'attempts is the attempt of the delivery, never the count');
+        self::assertSame('h', $letter->headers['x-custom']);
+        self::assertSame([
+            'metadata' => [
+                'message_name' => 'order.placed',
+                'message_id' => 'm-7',
+                'created_at' => 1_765_476_000_123,
+            ],
+            'payload' => [
+                'order_id' => 'o-1',
+            ],
+        ], json_decode($letter->body, true), 'the canonical document');
+        self::assertSame([[
+            'event' => BrokerEvents::DEAD_LETTERED,
+            'context' => [
+                'source' => self::SOURCE,
+                'message_id' => 'm-7',
+                'message_name' => 'order.placed',
+            ],
+        ]], $this->events->records);
+    }
+
+    public function testACountAboveTheLimitDeadLetters(): void
+    {
+        $this->processor(maxDeliveries: 3)->process($this->delivery(deliveryCount: 4), $this->control);
+
+        self::assertSame(['ack'], $this->control->calls);
+        self::assertSame([], $this->dispatched);
+        self::assertSame(
+            'Delivery limit reached: 4 deliveries ended with no ack (limit 3)',
+            $this->deadLetters()[0]->errorMessage,
+        );
+    }
+
+    public function testACountOneBelowTheLimitTakesTheNormalPath(): void
+    {
+        $this->processor(maxDeliveries: 3)->process($this->delivery(deliveryCount: 2), $this->control);
+
+        self::assertSame(['begin', 'commit'], $this->transaction->calls);
+        self::assertCount(1, $this->dispatched);
+        self::assertSame(['ack'], $this->control->calls);
+        self::assertSame([], $this->deadLetters());
+    }
+
+    public function testNoCountTakesTheNormalPath(): void
+    {
+        $this->processor(maxDeliveries: 1)->process($this->delivery(deliveryCount: null), $this->control);
+
+        self::assertSame(['begin', 'commit'], $this->transaction->calls);
+        self::assertCount(1, $this->dispatched);
+        self::assertSame([], $this->deadLetters());
+    }
+
+    public function testNoLimitTakesTheNormalPathAtAnyCount(): void
+    {
+        $this->processor(maxDeliveries: null)->process($this->delivery(deliveryCount: 100), $this->control);
+
+        self::assertSame(['begin', 'commit'], $this->transaction->calls);
+        self::assertCount(1, $this->dispatched);
+        self::assertSame([], $this->deadLetters());
+    }
+
+    public function testTheDefaultLimitIsFive(): void
+    {
+        $processor = new DeliveryProcessor(
+            deserializer: new JsonDeserializer(),
+            dispatcher: new CallableDispatcher(function (IncomingMessage $incoming): void {
+                $this->dispatched[] = $incoming;
+            }),
+            transaction: $this->transaction,
+            deduplication: $this->dedup,
+            retryPolicy: new ExponentialRetryPolicy(),
+            deadLetters: $this->deadLetterStore,
+        );
+
+        $processor->process($this->delivery('m-4', deliveryCount: 4), $this->control);
+        $processor->process($this->delivery('m-5', deliveryCount: 5), $this->control);
+
+        self::assertCount(1, $this->dispatched);
+        self::assertSame('m-4', $this->dispatched[0]->messageId);
+        self::assertCount(1, $this->deadLetters());
+        self::assertSame('m-5', $this->deadLetters()[0]->messageId);
+        self::assertSame(
+            'Delivery limit reached: 5 deliveries ended with no ack (limit 5)',
+            $this->deadLetters()[0]->errorMessage,
+        );
+    }
+
+    public function testAMalformedDeliveryAtTheLimitStoresTheRawBytes(): void
+    {
+        $this->processor(maxDeliveries: 2)->process(
+            $this->delivery('m-bad', [
+                'x-custom' => 'h',
+            ], body: '{{{not json', attempt: 3, deliveryCount: 2),
+            $this->control,
+        );
+
+        self::assertSame(['ack'], $this->control->calls);
+        self::assertSame([], $this->transaction->calls);
+        self::assertCount(1, $this->deadLetters());
+        $letter = $this->deadLetters()[0];
+        self::assertSame('{{{not json', $letter->body);
+        self::assertSame('m-bad', $letter->messageId);
+        self::assertSame('order.placed', $letter->messageName);
+        self::assertSame('h', $letter->headers['x-custom']);
+        self::assertSame(DeliveryLimitExceeded::class, $letter->errorClass);
+        self::assertSame('Delivery limit reached: 2 deliveries ended with no ack (limit 2)', $letter->errorMessage);
+        self::assertSame(3, $letter->attempts);
+    }
+
+    /** @return iterable<string, array{Throwable}> */
+    public static function deserializeFailures(): iterable
+    {
+        yield 'malformed' => [new MalformedMessage('bad bytes')];
+        yield 'other throwable' => [new RuntimeException('registry down')];
+    }
+
+    #[DataProvider('deserializeFailures')]
+    public function testADeserializeFailureAtTheLimitStoresTheRawDeliveryAndReportsOnlyTheLimit(Throwable $failure): void
+    {
+        $this->processor(deserializer: self::throwingDeserializer($failure), maxDeliveries: 2)->process(
+            $this->delivery(withEnvelope: false, body: 'raw-bytes', fallbackMessageId: 'prop-id', deliveryCount: 2),
+            $this->control,
+        );
+
+        self::assertSame(['ack'], $this->control->calls);
+        self::assertCount(1, $this->deadLetters());
+        $letter = $this->deadLetters()[0];
+        self::assertSame('raw-bytes', $letter->body);
+        self::assertSame([], $letter->headers);
+        self::assertSame('prop-id', $letter->messageId);
+        self::assertSame('unknown', $letter->messageName);
+        self::assertSame(DeliveryLimitExceeded::class, $letter->errorClass);
+        self::assertCount(1, $this->logger->records, 'only the limit warning, no deserialize error');
+        self::assertSame('prop-id', $this->logger->records[0]['context']['message_id']);
+        self::assertCount(1, $this->errorHandler->calls);
+        self::assertInstanceOf(DeliveryLimitExceeded::class, $this->errorHandler->calls[0]['error']);
+    }
+
+    public function testTheLimitReportsToTheLoggerAndTheErrorHandlerWithTheSameContext(): void
+    {
+        $this->processor(maxDeliveries: 3)->process(
+            $this->delivery('m-7', attempt: 2, deliveryCount: 4),
+            $this->control,
+        );
+
+        $expected = [
+            'queue' => self::SOURCE,
+            'message_id' => 'm-7',
+            'delivery_count' => 4,
+            'max_deliveries' => 3,
+            'attempt' => 2,
+        ];
+        self::assertCount(1, $this->logger->records);
+        $record = $this->logger->records[0];
+        self::assertSame(LogLevel::WARNING, $record['level']);
+        self::assertSame('Consumer delivery limit reached; dead-lettered', $record['message']);
+        $exception = $record['context']['exception'];
+        self::assertInstanceOf(DeliveryLimitExceeded::class, $exception);
+        self::assertSame('Delivery limit reached: 4 deliveries ended with no ack (limit 3)', $exception->getMessage());
+        unset($record['context']['exception']);
+        self::assertSame($expected, $record['context']);
+
+        self::assertCount(1, $this->errorHandler->calls);
+        self::assertSame($exception, $this->errorHandler->calls[0]['error']);
+        self::assertSame($expected, $this->errorHandler->calls[0]['context']);
+    }
+
+    public function testTheLimitWorksWithoutEventsAndErrorHandler(): void
+    {
+        $this->processor(withObservers: false, maxDeliveries: 1)->process(
+            $this->delivery(deliveryCount: 1),
+            $this->control,
+        );
+
+        self::assertSame(['ack'], $this->control->calls);
+        self::assertCount(1, $this->deadLetters());
+        self::assertSame([], $this->events->records);
+        self::assertSame([], $this->errorHandler->calls);
+    }
+
+    public function testAFailedDeadLetterWriteAtTheLimitPropagatesWithNoAck(): void
+    {
+        $error = new PDOException('db down');
+        $store = new class($error) implements DeadLetterStore {
+            public function __construct(
+                private readonly PDOException $error,
+            ) {}
+
+            public function store(DeadLetter $deadLetter): void
+            {
+                throw $this->error;
+            }
+
+            public function find(string $id): ?DeadLetter
+            {
+                return null;
+            }
+
+            public function list(
+                ?string $messageName = null,
+                ?string $source = null,
+                ?int $sinceMs = null,
+                int $limit = 100,
+                int $offset = 0,
+                ?bool $replayed = null,
+            ): array {
+                return [];
+            }
+
+            public function count(
+                ?string $messageName = null,
+                ?string $source = null,
+                ?int $sinceMs = null,
+                ?bool $replayed = null,
+            ): int {
+                return 0;
+            }
+
+            public function markReplayed(string $id): void {}
+
+            public function purge(?string $messageName = null, ?string $source = null, ?int $olderThanMs = null): int
+            {
+                return 0;
+            }
+        };
+
+        try {
+            $this->processor(maxDeliveries: 1, deadLetters: $store)->process(
+                $this->delivery(deliveryCount: 1),
+                $this->control,
+            );
+            self::fail('a failed dead letter write must propagate');
+        } catch (PDOException $e) {
+            self::assertSame($error, $e);
+        }
+
+        self::assertSame([], $this->control->calls, 'no ack');
+        self::assertSame([], $this->dispatched);
+        self::assertSame([], $this->transaction->calls);
+    }
+
+    /** @return iterable<string, array{int}> */
+    public static function invalidLimits(): iterable
+    {
+        yield 'zero' => [0];
+        yield 'negative' => [-1];
+    }
+
+    #[DataProvider('invalidLimits')]
+    public function testALimitBelowOneThrowsAtConstruction(int $limit): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("maxDeliveries must be at least 1 or null, got {$limit}");
+
+        $this->processor(maxDeliveries: $limit);
+    }
+
+    public function testALimitOfOneDeadLettersTheFirstReturnedDelivery(): void
+    {
+        $processor = $this->processor(maxDeliveries: 1);
+
+        $processor->process($this->delivery('m-0', deliveryCount: 0), $this->control);
+        $processor->process($this->delivery('m-1', deliveryCount: 1), $this->control);
+
+        self::assertCount(1, $this->dispatched);
+        self::assertSame('m-0', $this->dispatched[0]->messageId);
+        self::assertCount(1, $this->deadLetters());
+        self::assertSame('m-1', $this->deadLetters()[0]->messageId);
     }
 }

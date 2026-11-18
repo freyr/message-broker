@@ -14,6 +14,7 @@ use Freyr\MessageBroker\Serializer\Deserializer;
 use Freyr\MessageBroker\Serializer\MalformedMessage;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Storage\Transaction;
+use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Throwable;
@@ -21,7 +22,10 @@ use Throwable;
 /**
  * The transport-neutral exactly-once algorithm for one delivery:
  *
- *   deserialize            (MalformedMessage → dead-letter immediately, ack;
+ *   delivery limit         (the delivery count of the transport >= maxDeliveries
+ *                           → dead-letter with DeliveryLimitExceeded, ack; no
+ *                           transaction, no dedup, no dispatch)
+ *   deserialize           (MalformedMessage → dead-letter immediately, ack;
  *                           transient failures, e.g. a schema that is not
  *                           known yet, propagate → no ack, the delivery is
  *                           redelivered, the process restarts)
@@ -41,6 +45,13 @@ use Throwable;
  */
 final class DeliveryProcessor
 {
+    /**
+     * @param int|null $maxDeliveries the delivery limit: a delivery whose count of earlier deliveries that
+     *                                ended with no ack (Delivery::$deliveryCount) is at or above it becomes a
+     *                                dead letter with no dispatch; null turns the limit off. A transport that
+     *                                gives no count has no limit.
+     * @throws InvalidArgumentException when $maxDeliveries is below 1
+     */
     public function __construct(
         private readonly Deserializer $deserializer,
         private readonly MessageDispatcher $dispatcher,
@@ -52,11 +63,24 @@ final class DeliveryProcessor
         private readonly ?ErrorHandler $errorHandler = null,
         private readonly LoggerInterface $logger = new NullLogger(),
         private readonly ?BrokerEvents $events = null,
-    ) {}
+        private readonly ?int $maxDeliveries = 5,
+    ) {
+        if ($maxDeliveries !== null && $maxDeliveries < 1) {
+            throw new InvalidArgumentException("maxDeliveries must be at least 1 or null, got {$maxDeliveries}");
+        }
+    }
 
     public function process(Delivery $delivery, DeliveryControl $control): void
     {
         $attempt = $delivery->attempt;
+        $deliveryCount = $delivery->deliveryCount;
+
+        if ($this->maxDeliveries !== null && $deliveryCount !== null && $deliveryCount >= $this->maxDeliveries) {
+            $this->deadLetterOverLimit($delivery, $deliveryCount, $this->maxDeliveries);
+            $control->ack();
+
+            return;
+        }
 
         try {
             $incoming = $this->deserializer->deserialize($delivery->body, $delivery->headers);
@@ -134,6 +158,42 @@ final class DeliveryProcessor
         }
     }
 
+    /**
+     * The delivery limit: no transaction, no dedup, no dispatch. The message is
+     * deserialized only to store the canonical document; when that fails for
+     * any reason, the raw delivery is stored. A failed dead letter write
+     * propagates before the ack.
+     */
+    private function deadLetterOverLimit(Delivery $delivery, int $deliveryCount, int $maxDeliveries): void
+    {
+        $error = DeliveryLimitExceeded::atCount($deliveryCount, $maxDeliveries);
+
+        try {
+            $incoming = $this->deserializer->deserialize($delivery->body, $delivery->headers);
+        } catch (Throwable) {
+            $incoming = null;
+        }
+
+        if ($incoming === null) {
+            $messageId = $this->deadLetterRaw($delivery, $error);
+        } else {
+            $this->deadLetterIncoming($delivery, $incoming, $error);
+            $messageId = $incoming->messageId;
+        }
+
+        $context = [
+            'queue' => $delivery->source,
+            'message_id' => $messageId,
+            'delivery_count' => $deliveryCount,
+            'max_deliveries' => $maxDeliveries,
+            'attempt' => $delivery->attempt,
+        ];
+        $this->logger->warning('Consumer delivery limit reached; dead-lettered', [
+            'exception' => $error,
+        ] + $context);
+        $this->errorHandler?->handle($error, $context);
+    }
+
     private function reportInfrastructureFailure(Delivery $delivery, IncomingMessage $incoming, Throwable $error): void
     {
         $context = [
@@ -207,7 +267,8 @@ final class DeliveryProcessor
         ]);
     }
 
-    private function deadLetterRaw(Delivery $delivery, Throwable $error): void
+    /** @return string the message id of the stored row */
+    private function deadLetterRaw(Delivery $delivery, Throwable $error): string
     {
         // Best-effort triage: prefer the x-message-* envelope headers; fall back
         // to the transport message id and 'unknown'. Stage-1 raw dead
@@ -233,6 +294,8 @@ final class DeliveryProcessor
             error: $error,
             attempt: $delivery->attempt,
         );
+
+        return $messageId;
     }
 
     private function deadLetterIncoming(Delivery $delivery, IncomingMessage $incoming, Throwable $error): void
