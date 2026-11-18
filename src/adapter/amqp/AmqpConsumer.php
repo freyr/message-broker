@@ -23,8 +23,6 @@ use PhpAmqpLib\Wire\AMQPTable;
  */
 final class AmqpConsumer
 {
-    private const string DELIVERY_COUNT_HEADER = 'x-delivery-count';
-
     private bool $shouldStop = false;
 
     private int $handled = 0;
@@ -106,7 +104,7 @@ final class AmqpConsumer
         $applicationHeaders = $headers instanceof AMQPTable ? $headers->getNativeData() : [];
 
         $attempt = $applicationHeaders[WaitQueuePublisher::ATTEMPT_HEADER] ?? null;
-        $deliveryCount = $applicationHeaders[self::DELIVERY_COUNT_HEADER] ?? null;
+        $deliveryCount = $applicationHeaders[WaitQueuePublisher::DELIVERY_COUNT_HEADER] ?? null;
         $messageId = $properties['message_id'] ?? null;
 
         return new Delivery(

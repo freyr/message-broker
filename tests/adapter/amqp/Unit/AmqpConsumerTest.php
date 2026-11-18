@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Adapter\Amqp\Tests\Unit;
 
 use Freyr\MessageBroker\Adapter\Amqp\AmqpConsumer;
 use Freyr\MessageBroker\Adapter\Amqp\AmqpQueueConfig;
+use Freyr\MessageBroker\Adapter\Amqp\WaitQueuePublisher;
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
@@ -408,6 +409,15 @@ final class AmqpConsumerTest extends TestCase
         ]));
 
         self::assertSame(3, $delivery->deliveryCount);
+    }
+
+    public function testMappingReadsTheDeliveryCountHeaderOfTheWaitQueuePublisher(): void
+    {
+        $delivery = $this->consumer()->deliveryFrom($this->delivery(1, 'm-1', [
+            WaitQueuePublisher::DELIVERY_COUNT_HEADER => 7,
+        ]));
+
+        self::assertSame(7, $delivery->deliveryCount);
     }
 
     /** @return iterable<string, array{mixed}> */
