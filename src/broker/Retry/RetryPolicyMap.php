@@ -23,7 +23,7 @@ final readonly class RetryPolicyMap implements RetryPolicy
         private array $policies = [],
     ) {
         foreach ($policies as $name => $policy) {
-            if ((string) $name === '') {
+            if ($name === '') {
                 throw new InvalidArgumentException('RetryPolicyMap: a message name must not be empty');
             }
             // The docblock type is not enforced at runtime: check the real value.
