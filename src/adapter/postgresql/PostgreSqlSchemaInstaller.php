@@ -54,6 +54,10 @@ final readonly class PostgreSqlSchemaInstaller implements SchemaInstaller
         // PostgreSqlOutboxRetention (or pg_partman). There is no DEFAULT
         // partition, so retention can DETACH ... CONCURRENTLY; an insert for
         // a day with no partition fails, so partitions are created ahead.
+        //
+        // abandoned_at marks a row that an operator abandoned: the claim skips
+        // it. idx_outbox_pending keeps its predicate: the claim still implies
+        // it, and an abandoned row leaves the index with its partition.
         return [
             <<<'SQL'
                 CREATE TABLE IF NOT EXISTS outbox_messages (
@@ -66,6 +70,7 @@ final readonly class PostgreSqlSchemaInstaller implements SchemaInstaller
                     available_at TIMESTAMP(3) NOT NULL,
                     attempts INTEGER NOT NULL DEFAULT 0,
                     published_at TIMESTAMP(3) NULL,
+                    abandoned_at TIMESTAMP(3) NULL,
                     PRIMARY KEY (id, created_at)
                 ) PARTITION BY RANGE (created_at)
                 SQL,
