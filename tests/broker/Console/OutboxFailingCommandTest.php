@@ -111,6 +111,7 @@ final class OutboxFailingCommandTest extends TestCase
             yield "{$option} leading text" => [$option, 'x1'];
             yield "{$option} decimal" => [$option, '1.5'];
             yield "{$option} empty" => [$option, ''];
+            yield "{$option} trailing newline" => [$option, "1\n"];
         }
     }
 

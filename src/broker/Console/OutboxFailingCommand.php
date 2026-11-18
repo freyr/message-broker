@@ -79,7 +79,7 @@ final class OutboxFailingCommand extends Command
 
     private static function intOption(mixed $value): ?int
     {
-        if (!is_string($value) || preg_match('/^[1-9]\d*$/', $value) !== 1) {
+        if (!is_string($value) || preg_match('/^[1-9]\d*\z/', $value) !== 1) {
             return null;
         }
 

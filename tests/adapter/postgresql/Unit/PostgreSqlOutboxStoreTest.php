@@ -37,6 +37,7 @@ final class PostgreSqlOutboxStoreTest extends TestCase
         self::assertSame(0, $store->abandon('not-a-uuid'));
         self::assertSame(0, $store->abandon('x01900000-0000-7000-8000-000000000001'));
         self::assertSame(0, $store->abandon('01900000-0000-7000-8000-000000000001x'));
+        self::assertSame(0, $store->abandon("01900000-0000-7000-8000-000000000001\n"), 'a trailing newline');
         self::assertSame([], $sql);
     }
 

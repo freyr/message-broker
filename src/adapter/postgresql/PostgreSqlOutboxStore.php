@@ -112,7 +112,7 @@ final readonly class PostgreSqlOutboxStore implements OutboxStore
      */
     public function abandon(string $id): int
     {
-        if (preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $id) !== 1) {
+        if (preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i', $id) !== 1) {
             return 0;
         }
         $statement = $this->pdo->prepare(
