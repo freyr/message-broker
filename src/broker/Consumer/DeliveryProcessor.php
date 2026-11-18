@@ -178,8 +178,7 @@ final class DeliveryProcessor
         if ($incoming === null) {
             $messageId = $this->deadLetterRaw($delivery, $error);
         } else {
-            $this->deadLetterIncoming($delivery, $incoming, $error);
-            $messageId = $incoming->messageId;
+            $messageId = $this->deadLetterIncoming($delivery, $incoming, $error);
         }
 
         $context = [
@@ -284,7 +283,7 @@ final class DeliveryProcessor
             $messageId = $delivery->fallbackMessageId ?? 'unknown-'.Uuid::v7()->toString();
         }
 
-        $this->storeDeadLetter(
+        return $this->storeDeadLetter(
             source: $delivery->source,
             messageId: $messageId,
             messageName: $messageName,
@@ -292,12 +291,11 @@ final class DeliveryProcessor
             headers: $delivery->headers,
             error: $error,
             attempt: $delivery->attempt,
-        );
-
-        return $messageId;
+        )->messageId;
     }
 
-    private function deadLetterIncoming(Delivery $delivery, IncomingMessage $incoming, Throwable $error): void
+    /** @return string the message id of the stored row */
+    private function deadLetterIncoming(Delivery $delivery, IncomingMessage $incoming, Throwable $error): string
     {
         // Store the reconstructed canonical document, not the wire bytes:
         // readable in dlq:show and replayable through the outbox regardless
@@ -314,7 +312,7 @@ final class DeliveryProcessor
             // dead-letter write.
         ], JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
 
-        $this->storeDeadLetter(
+        return $this->storeDeadLetter(
             source: $delivery->source,
             messageId: $incoming->messageId,
             messageName: $incoming->messageName,
@@ -322,10 +320,14 @@ final class DeliveryProcessor
             headers: $incoming->headers,
             error: $error,
             attempt: $delivery->attempt,
-        );
+        )->messageId;
     }
 
-    /** @param array<string, mixed> $headers */
+    /**
+     * @param array<string, mixed> $headers
+     *
+     * @return DeadLetter the stored dead letter: its texts are the valid, cut form of the arguments
+     */
     private function storeDeadLetter(
         string $source,
         string $messageId,
@@ -334,8 +336,8 @@ final class DeliveryProcessor
         array $headers,
         Throwable $error,
         int $attempt,
-    ): void {
-        $this->deadLetters->store(DeadLetter::fromFailure(
+    ): DeadLetter {
+        $deadLetter = DeadLetter::fromFailure(
             source: $source,
             messageId: $messageId,
             messageName: $messageName,
@@ -343,12 +345,15 @@ final class DeliveryProcessor
             headers: $headers,
             error: $error,
             attempts: $attempt,
-        ));
+        );
+        $this->deadLetters->store($deadLetter);
 
         $this->events?->record(BrokerEvents::DEAD_LETTERED, [
-            'source' => $source,
-            'message_id' => $messageId,
-            'message_name' => $messageName,
+            'source' => $deadLetter->source,
+            'message_id' => $deadLetter->messageId,
+            'message_name' => $deadLetter->messageName,
         ]);
+
+        return $deadLetter;
     }
 }

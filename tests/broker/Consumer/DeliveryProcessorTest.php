@@ -371,6 +371,24 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame('DeadLetter', $this->errorHandler->calls[0]['context']['action']);
     }
 
+    public function testTheDeadLetteredEventOfAFailedHandlerCarriesTheIdOfTheStoredRow(): void
+    {
+        $this->failingDispatch = self::failure('final failure');
+
+        $this->processor(maxAttempts: 3)->process($this->delivery(str_repeat('m', 300), attempt: 3), $this->control);
+
+        $storedId = str_repeat('m', 255);
+        self::assertSame($storedId, $this->deadLetters()[0]->messageId);
+        self::assertSame([[
+            'event' => BrokerEvents::DEAD_LETTERED,
+            'context' => [
+                'source' => self::SOURCE,
+                'message_id' => $storedId,
+                'message_name' => 'order.placed',
+            ],
+        ]], $this->events->records);
+    }
+
     public function testDeadLetterDocumentSubstitutesInvalidUtf8InsteadOfFailing(): void
     {
         $this->failingDispatch = self::failure('final failure');
@@ -785,6 +803,62 @@ final class DeliveryProcessorTest extends TestCase
         self::assertGeneratedUnknownId($messageId);
         self::assertSame($messageId, $this->logger->records[0]['context']['message_id'], 'the log names the stored id');
         self::assertSame($messageId, $this->errorHandler->calls[0]['context']['message_id']);
+    }
+
+    public function testARawDeadLetterAtTheLimitReportsTheIdOfTheStoredRow(): void
+    {
+        $this->processor(maxDeliveries: 2)->process(
+            $this->delivery(
+                withEnvelope: false,
+                body: '{{{not json',
+                fallbackMessageId: str_repeat('p', 300),
+                deliveryCount: 2,
+            ),
+            $this->control,
+        );
+
+        $storedId = str_repeat('p', 255);
+        self::assertSame($storedId, $this->deadLetters()[0]->messageId);
+        self::assertSame($storedId, $this->logger->records[0]['context']['message_id']);
+        self::assertSame($storedId, $this->errorHandler->calls[0]['context']['message_id']);
+        self::assertSame([[
+            'event' => BrokerEvents::DEAD_LETTERED,
+            'context' => [
+                'source' => self::SOURCE,
+                'message_id' => $storedId,
+                'message_name' => 'unknown',
+            ],
+        ]], $this->events->records);
+    }
+
+    public function testACanonicalDeadLetterAtTheLimitReportsTheIdAndNameOfTheStoredRow(): void
+    {
+        $this->processor(maxDeliveries: 2)->process(
+            new Delivery(
+                '{"order_id":"o-1"}',
+                MetadataHeader::envelope(str_repeat('m', 300), "order.\x00placed", 1_765_476_000_123),
+                1,
+                self::SOURCE,
+                null,
+                2,
+            ),
+            $this->control,
+        );
+
+        $storedId = str_repeat('m', 255);
+        $letter = $this->deadLetters()[0];
+        self::assertSame($storedId, $letter->messageId);
+        self::assertSame("order.\u{FFFD}placed", $letter->messageName);
+        self::assertSame($storedId, $this->logger->records[0]['context']['message_id']);
+        self::assertSame($storedId, $this->errorHandler->calls[0]['context']['message_id']);
+        self::assertSame([[
+            'event' => BrokerEvents::DEAD_LETTERED,
+            'context' => [
+                'source' => self::SOURCE,
+                'message_id' => $storedId,
+                'message_name' => "order.\u{FFFD}placed",
+            ],
+        ]], $this->events->records);
     }
 
     public function testTheLimitReportsToTheLoggerAndTheErrorHandlerWithTheSameContext(): void
