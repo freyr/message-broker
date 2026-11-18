@@ -131,7 +131,11 @@ final class AbandonedAtMigrationTest extends FunctionalTestCase
             self::$pdo->exec(sprintf(
                 "INSERT INTO outbox_messages (id, lane, message_name, body, headers, created_at, available_at, attempts)
                  VALUES ('01900000-0000-7000-8000-0000000000%s', 'migration', 'm', '\\x7b7d', '{}', '%s', '%s', 0)",
-                ['-10' => 'a1', '-9' => 'a2', '-8' => 'a3'][(string) $offset],
+                [
+                    '-10' => 'a1',
+                    '-9' => 'a2',
+                    '-8' => 'a3',
+                ][(string) $offset],
                 $day->format('Y-m-d 10:00:00'),
                 $day->format('Y-m-d 10:00:00'),
             ));
