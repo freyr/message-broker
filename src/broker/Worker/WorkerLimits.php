@@ -25,7 +25,12 @@ final readonly class WorkerLimits
         public ?int $maxMemoryBytes = null,
         public ?int $maxFailures = null,
     ) {
-        foreach (['maxMessages' => $maxMessages, 'maxSeconds' => $maxSeconds, 'maxMemoryBytes' => $maxMemoryBytes, 'maxFailures' => $maxFailures] as $name => $value) {
+        foreach ([
+            'maxMessages' => $maxMessages,
+            'maxSeconds' => $maxSeconds,
+            'maxMemoryBytes' => $maxMemoryBytes,
+            'maxFailures' => $maxFailures,
+        ] as $name => $value) {
             if ($value !== null && $value < 1) {
                 throw new InvalidArgumentException("\${$name} must be 1 or more, {$value} given");
             }

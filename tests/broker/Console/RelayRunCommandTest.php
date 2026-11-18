@@ -70,15 +70,33 @@ final class RelayRunCommandTest extends TestCase
     /** @return iterable<string, array{array<string, string>, string}> */
     public static function invalidOptions(): iterable
     {
-        yield 'limit zero' => [['--limit' => '0'], '--limit'];
-        yield 'limit negative' => [['--limit' => '-3'], '--limit'];
-        yield 'limit text' => [['--limit' => 'many'], '--limit'];
-        yield 'limit fraction' => [['--limit' => '1.5'], '--limit'];
-        yield 'time limit zero' => [['--time-limit' => '0'], '--time-limit'];
-        yield 'time limit unit' => [['--time-limit' => '10s'], '--time-limit'];
-        yield 'memory limit zero' => [['--memory-limit' => '0'], '--memory-limit'];
-        yield 'memory limit unit' => [['--memory-limit' => '12X'], '--memory-limit'];
-        yield 'memory limit empty' => [['--memory-limit' => ''], '--memory-limit'];
+        yield 'limit zero' => [[
+            '--limit' => '0',
+        ], '--limit'];
+        yield 'limit negative' => [[
+            '--limit' => '-3',
+        ], '--limit'];
+        yield 'limit text' => [[
+            '--limit' => 'many',
+        ], '--limit'];
+        yield 'limit fraction' => [[
+            '--limit' => '1.5',
+        ], '--limit'];
+        yield 'time limit zero' => [[
+            '--time-limit' => '0',
+        ], '--time-limit'];
+        yield 'time limit unit' => [[
+            '--time-limit' => '10s',
+        ], '--time-limit'];
+        yield 'memory limit zero' => [[
+            '--memory-limit' => '0',
+        ], '--memory-limit'];
+        yield 'memory limit unit' => [[
+            '--memory-limit' => '12X',
+        ], '--memory-limit'];
+        yield 'memory limit empty' => [[
+            '--memory-limit' => '',
+        ], '--memory-limit'];
     }
 
     /** @param array<string, string> $options */
@@ -87,7 +105,9 @@ final class RelayRunCommandTest extends TestCase
     {
         $tester = $this->tester();
 
-        $status = $tester->execute(['lane' => 'orders'] + $options);
+        $status = $tester->execute([
+            'lane' => 'orders',
+        ] + $options);
 
         self::assertSame(Command::INVALID, $status);
         self::assertSame([], $this->received);

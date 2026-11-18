@@ -121,7 +121,7 @@ final class RelayRunCommand extends Command
         }
         if (!is_string($value) || preg_match('/^[1-9]\d*$/', $value) !== 1) {
             throw new InvalidArgumentException(
-                "Invalid value for --{$name}: '" . (is_string($value) ? $value : '') . "' — expected an integer, 1 or more",
+                "Invalid value for --{$name}: '".(is_string($value) ? $value : '')."' — expected an integer, 1 or more",
             );
         }
 

@@ -46,6 +46,8 @@ final class WorkerLimitsTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage("\${$field} must be 1 or more, {$value} given");
 
-        new WorkerLimits(...[$field => $value]);
+        new WorkerLimits(...[
+            $field => $value,
+        ]);
     }
 }

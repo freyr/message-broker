@@ -19,10 +19,10 @@ final readonly class ByteSize
         }
 
         return (int) $matches[1] * match (strtoupper($matches[2])) {
-            '' => 1,
             'K' => 1_024,
             'M' => 1_048_576,
             'G' => 1_073_741_824,
+            default => 1,
         };
     }
 }
