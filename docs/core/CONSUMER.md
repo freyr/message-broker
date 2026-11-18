@@ -36,6 +36,39 @@ malformed message keeps the raw bytes and is not replayable. A dead letter of
 a failed handler keeps the decoded message and is replayable (see
 [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md)).
 
+## The fields of a dead letter
+
+A raw dead letter (a malformed message, or a message at the delivery limit that
+the deserializer cannot read) gets its message ID from the first source that
+exists:
+
+1. The `x-message-id` header of the envelope.
+2. The message ID of the transport (`Delivery::$fallbackMessageId`).
+3. A generated ID: `unknown-` and a UUID v7, for example
+   `unknown-019a8f2e-6b1c-7d3a-9e4f-2a6b8c0d1e3f`. Each dead letter gets a new
+   value, so two messages with no ID never share one row. The `DEAD_LETTERED`
+   event, the log and the `ErrorHandler` context give the same value.
+
+The log of a transient deserialize failure writes no row, so its `message_id`
+stays `unknown` when the delivery has no ID.
+
+Each `DeadLetter` holds text that each store can keep. The constructor of
+`DeadLetter\DeadLetter` (and thus `DeadLetter::fromFailure()`) applies three
+rules:
+
+- `source`, `messageId`, `messageName`, `errorClass`, `errorMessage`,
+  `errorTrace`, each header key and each string header value (nested too)
+  become valid UTF-8. Each invalid byte sequence becomes U+FFFD.
+- A NUL character in the same fields becomes U+FFFD. PostgreSQL refuses a NUL
+  in a text column and in JSONB.
+- `source`, `messageId`, `messageName` and `errorClass` are cut to 255
+  characters (the size of their `VARCHAR(255)` columns).
+
+The body stays the exact bytes. A value that obeys the rules does not change.
+Thus a header with invalid UTF-8, a NUL character or a name above 255
+characters no longer makes the dead letter write fail at each delivery. The
+cost: the invalid bytes of a binary header value are not kept exactly.
+
 ## Delivery limit
 
 A message that stops the process (for example, the handler runs out of memory,
