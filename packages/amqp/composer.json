@@ -16,13 +16,13 @@
     "require": {
         "php": ">=8.4",
         "freyr/message-broker": "^0.7",
-        "php-amqplib/php-amqplib": "^3.7.2"
+        "php-amqplib/php-amqplib": "^3.7.2",
+        "psr/log": "^3.0"
     },
     "require-dev": {
         "freyr/message-broker-postgresql": "^0.7",
         "infection/infection": "^0.35.11",
         "phpunit/phpunit": "^13.4",
-        "psr/log": "^3.0",
         "symfony/clock": "^8.1",
         "symfony/uid": "^7.4|^8.1"
     },

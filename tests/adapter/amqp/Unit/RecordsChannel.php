@@ -50,7 +50,13 @@ trait RecordsChannel
 
     private bool $nackOnConfirm = false;
 
-    private bool $cancelled = false;
+    private bool $confirmTimesOut = false;
+
+    /** @var list<list<mixed>> basic_cancel, basic_reject and basic_nack, in the order of the calls */
+    private array $returnCalls = [];
+
+    /** @var array<string, \Throwable> a method name => the error that the call throws */
+    private array $failures = [];
 
     private string $consumedQueue = '';
 
@@ -63,9 +69,11 @@ trait RecordsChannel
         $this->channel = $this->createStub(AMQPChannel::class);
 
         $this->channel->method('basic_qos')->willReturnCallback(function (...$args): void {
+            $this->failIfConfigured('basic_qos');
             $this->qosCalls[] = $args;
         });
         $this->channel->method('basic_consume')->willReturnCallback(function (...$args): string {
+            $this->failIfConfigured('basic_consume');
             foreach ($args as $arg) {
                 if ($arg instanceof \Closure) {
                     $this->callback = $arg;
@@ -80,6 +88,7 @@ trait RecordsChannel
         );
         $this->channel->method('wait')->willReturnCallback(function (...$args) {
             $this->waitTimeouts[] = $args;
+            $this->failIfConfigured('wait');
             if ($this->pending === []) {
                 throw new AMQPTimeoutException('idle');
             }
@@ -87,8 +96,17 @@ trait RecordsChannel
 
             return null;
         });
-        $this->channel->method('basic_cancel')->willReturnCallback(function (): void {
-            $this->cancelled = true;
+        $this->channel->method('basic_cancel')->willReturnCallback(function (...$args): void {
+            $this->returnCalls[] = ['basic_cancel', ...$args];
+            $this->failIfConfigured('basic_cancel');
+        });
+        $this->channel->method('basic_reject')->willReturnCallback(function (...$args): void {
+            $this->returnCalls[] = ['basic_reject', ...$args];
+            $this->failIfConfigured('basic_reject');
+        });
+        $this->channel->method('basic_nack')->willReturnCallback(function (...$args): void {
+            $this->returnCalls[] = ['basic_nack', ...$args];
+            $this->failIfConfigured('basic_nack');
         });
         $this->channel->method('basic_ack')->willReturnCallback(function (int $tag): void {
             $this->acked[] = $tag;
@@ -114,10 +132,20 @@ trait RecordsChannel
         );
         $this->channel->method('wait_for_pending_acks')->willReturnCallback(function ($timeout): void {
             $this->pendingAckTimeouts[] = $timeout;
+            if ($this->confirmTimesOut) {
+                throw new AMQPTimeoutException('confirm timeout');
+            }
             if ($this->nackOnConfirm && $this->nackHandler !== null) {
                 ($this->nackHandler)();
             }
         });
+    }
+
+    private function failIfConfigured(string $method): void
+    {
+        if (isset($this->failures[$method])) {
+            throw $this->failures[$method];
+        }
     }
 
     /** @param array<string, mixed> $extraHeaders */
