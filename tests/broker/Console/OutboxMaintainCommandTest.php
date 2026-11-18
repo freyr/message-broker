@@ -105,6 +105,76 @@ final class OutboxMaintainCommandTest extends TestCase
         self::assertStringContainsString('unit-old held 3 unpublished row(s) older than the retention period; they are dropped.', $tester->getDisplay());
     }
 
+    public function testDroppedAbandonedRowsArePrintedOneLineForEachUnitAndTheExitCodeDoesNotChange(): void
+    {
+        $retention = new RecordingOutboxRetention(new RetentionReport(
+            new DateTimeImmutable('2026-03-03 00:00:00 UTC'),
+            ['unit-a', 'unit-b'],
+            [],
+            [],
+            [
+                'unit-a' => 2,
+                'unit-b' => 1,
+            ],
+        ));
+        $tester = new CommandTester(new OutboxMaintainCommand($retention));
+
+        $status = $tester->execute([]);
+
+        self::assertSame(Command::SUCCESS, $status, 'abandoned rows do not fail the command');
+        self::assertSame(
+            "Daily partitions present: unit-a, unit-b.\n"
+            ."Retention cutoff: 2026-03-03 00:00 UTC.\n"
+            ."Dropped unit-a.\n"
+            ."Dropped unit-b.\n"
+            ."unit-a held 2 abandoned row(s); they are dropped.\n"
+            ."unit-b held 1 abandoned row(s); they are dropped.\n",
+            $tester->getDisplay(),
+        );
+    }
+
+    public function testDryRunPrintsTheAbandonedRowsThatWouldBeDropped(): void
+    {
+        $retention = new RecordingOutboxRetention(new RetentionReport(
+            new DateTimeImmutable('2026-03-03 00:00:00 UTC'),
+            ['unit-a'],
+            [],
+            [],
+            [
+                'unit-a' => 5,
+            ],
+        ));
+        $tester = new CommandTester(new OutboxMaintainCommand($retention));
+
+        $status = $tester->execute([
+            '--dry-run' => true,
+        ]);
+
+        self::assertSame(Command::SUCCESS, $status);
+        self::assertStringContainsString("\n[dry-run] unit-a held 5 abandoned row(s); they are dropped.\n", $tester->getDisplay());
+    }
+
+    public function testAKeptUnitStillFailsTheCommandWhenAnotherUnitDroppedAbandonedRows(): void
+    {
+        $retention = new RecordingOutboxRetention(new RetentionReport(
+            new DateTimeImmutable('2026-03-03 00:00:00 UTC'),
+            ['unit-a'],
+            [],
+            [
+                'unit-kept' => 1,
+            ],
+            [
+                'unit-a' => 1,
+            ],
+        ));
+        $tester = new CommandTester(new OutboxMaintainCommand($retention));
+
+        $status = $tester->execute([]);
+
+        self::assertSame(Command::FAILURE, $status);
+        self::assertStringContainsString('unit-a held 1 abandoned row(s); they are dropped.', $tester->getDisplay());
+    }
+
     public function testInvalidOptionsAreRejectedBeforeAnyCall(): void
     {
         $retention = new RecordingOutboxRetention();

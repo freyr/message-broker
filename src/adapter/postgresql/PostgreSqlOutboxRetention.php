@@ -27,8 +27,11 @@ use Symfony\Component\Clock\Clock;
  *    cutoff: DETACH PARTITION ... CONCURRENTLY (no ACCESS EXCLUSIVE lock on
  *    outbox_messages), then DROP TABLE on the detached table. By default an
  *    expired partition that still holds unpublished rows (published_at IS
- *    NULL) is kept and reported, so retention never loses a committed message;
- *    it is dropped on a later run, once its rows are published. With
+ *    NULL AND abandoned_at IS NULL) is kept and reported, so retention never
+ *    loses a committed message;
+ *    it is dropped on a later run, once its rows are published. An abandoned
+ *    row does not keep its partition; the report counts the abandoned rows of
+ *    each partition that is dropped. With
  *    $dropUnpublished the retention period is a hard age limit: the partition
  *    is dropped with its unpublished rows, and the report counts them.
  *
@@ -124,9 +127,10 @@ final readonly class PostgreSqlOutboxRetention implements OutboxRetention
     /**
      * Drop every daily partition that lies wholly before the cutoff (today
      * 00:00 UTC minus $retentionDays). A partition that holds unpublished rows
-     * is kept and reported in RetentionReport::$kept, unless
+     * (not abandoned) is kept and reported in RetentionReport::$kept, unless
      * $dropUnpublished is true; then it is dropped with them and reported in
-     * RetentionReport::$unpublished. Also finishes a detach that an
+     * RetentionReport::$unpublished. The abandoned rows of a partition that is
+     * dropped (or would be) go to RetentionReport::$abandoned. Also finishes a detach that an
      * earlier run did not complete, and drops an expired daily table that an
      * earlier run detached but did not drop (the same rule applies to both).
      *
@@ -151,6 +155,7 @@ final readonly class PostgreSqlOutboxRetention implements OutboxRetention
         $dropped = [];
         $unpublished = [];
         $kept = [];
+        $abandoned = [];
         foreach ($this->dailyTables() as $name => $table) {
             if ($table['day']->modify('+1 day') > $cutoff) {
                 continue; // not wholly expired yet
@@ -187,12 +192,20 @@ final readonly class PostgreSqlOutboxRetention implements OutboxRetention
                         continue;
                     }
                 }
+            }
+            // Detached (or, on a dry run, still attached): count the abandoned
+            // rows that go with the table.
+            $abandonedRows = $this->countRows($name, 'published_at IS NULL AND abandoned_at IS NOT NULL');
+            if ($abandonedRows > 0) {
+                $abandoned[$name] = $abandonedRows;
+            }
+            if (!$dryRun) {
                 $this->pdo->exec("DROP TABLE \"{$name}\"");
             }
             $dropped[] = $name;
         }
 
-        return new RetentionReport($cutoff, $dropped, $unpublished, $kept);
+        return new RetentionReport($cutoff, $dropped, $unpublished, $kept, $abandoned);
     }
 
     private function attach(string $name, DateTimeImmutable $from): void
@@ -273,7 +286,12 @@ final readonly class PostgreSqlOutboxRetention implements OutboxRetention
 
     private function countUnpublished(string $table): int
     {
-        $statement = $this->pdo->query("SELECT COUNT(*) FROM \"{$table}\" WHERE published_at IS NULL");
+        return $this->countRows($table, 'published_at IS NULL AND abandoned_at IS NULL');
+    }
+
+    private function countRows(string $table, string $condition): int
+    {
+        $statement = $this->pdo->query("SELECT COUNT(*) FROM \"{$table}\" WHERE {$condition}");
         $value = $statement === false ? false : $statement->fetchColumn();
 
         return is_numeric($value) ? (int) $value : 0;

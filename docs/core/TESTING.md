@@ -40,6 +40,15 @@ Each factory must return a store that is empty at the start of the test. Some te
 - `TransactionContractTestCase::createDeadLetterStore()` returns a dead letter store on the connection of the transaction. Without it, the tests of the replay mark are skipped. The test of a mark and an outbox insert in one committed transaction needs both hooks.
 - `OutboxPublisherContractTestCase::assertDelivered()` checks that the records arrived on the transport. For example, the AMQP test reads them from a bound queue.
 
+`OutboxStoreContractTestCase` has these cases for `abandon()` and `failing()`:
+
+- An abandoned row is never claimed, also after its `available_at`.
+- `abandon()` returns 1 for one open row, 0 for an id that no row has, and 0 on a repeat.
+- `abandon()` does not mark a published row: publish, then abandon, gives 0.
+- Two rows with the same id and a different `createdAt`: one published and one open gives 1; two open give 2.
+- `failing()` returns only the open rows of the lane with `attempts >= $minAttempts`. It excludes a published row, an abandoned row, a row of a different lane and a row below the minimum. It orders by attempts, then by age, and it keeps to the limit. `bodyBytes` is `strlen()` of the body. A row leaves the list when it is abandoned.
+- `failing()` rejects a `$minAttempts` or a `$limit` below 1 with `InvalidArgumentException`.
+
 `TransactionContractTestCase` calls each factory one time in each test, before the first `begin()`, in this order: `createTransaction()`, `createDeduplicationStore()`, `createOutboxStore()`, `createDeadLetterStore()`. Thus a store can join the transaction in its constructor.
 
 Put the tests that depend on the technology (SQL text, partitions, the headers of an AMQP message) in your own test classes. The contract test cases do not hold them.
@@ -50,7 +59,7 @@ The fakes are correct in-memory implementations of the ports. Each fake passes t
 
 | Fake | Port |
 |---|---|
-| `InMemoryOutboxStore` | `OutboxStore`: it claims, and it applies the `ClaimOutcome`. It keys the rows by (`id`, `createdAt`), as the primary key of the outbox table, so a replay adds a second row with the same id. An id in the outcome applies to each claimed row with that id. `row()` and `isPublished()` use the row of the id with the latest `createdAt`; `unpublishedIds()` gives each id one time |
+| `InMemoryOutboxStore` | `OutboxStore`: it claims, and it applies the `ClaimOutcome`. It keys the rows by (`id`, `createdAt`), as the primary key of the outbox table, so a replay adds a second row with the same id. An id in the outcome applies to each claimed row with that id. `row()`, `isPublished()` and `isAbandoned()` use the row of the id with the latest `createdAt`; `unpublishedIds()` gives each id one time. `abandon()` marks the open rows of an id; the claim, `failing()` and the outcome skip an abandoned row. An abandoned row is not published, so `unpublishedIds()` still lists it. A rollback restores the marks |
 | `InMemoryDeduplicationStore` | `DeduplicationStore` |
 | `InMemoryDeadLetterStore` | `DeadLetterStore` |
 | `InMemoryTransaction` | `Transaction` |

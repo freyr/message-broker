@@ -72,8 +72,40 @@ The relay has no dead-letter path. A worker that crashes after publishing but
 before its claim commits leaves the rows unpublished; the next claim
 republishes them, and consumer-side deduplication absorbs the duplicate. An unpublished row
 stays in the outbox. Retention keeps its partition, even after the retention
-period (default 7 days), until the row is published; only
-`--drop-unpublished` drops it.
+period (default 7 days), until the row is published or abandoned; only
+`--drop-unpublished` drops it otherwise.
+
+## A row that the transport refuses
+
+The relay has no automatic rule for a refused row. It backs off the row from
+its `attempts`, publishes it alone in the next claim, and the worker stops on
+a throw. No broker reply code identifies a permanent refusal, so the relay
+never abandons a row. The operator decides.
+
+Runbook:
+
+1. Find the row. Signs: a worker that stops again and again with the same
+   single ID in the log context (`message_id`, with the `attempts` that grow
+   from one failure to the next), or a row with a high `attempts` in
+   `message-broker:outbox:failing`.
+2. Read the broker error. Examples: 406 with "message size" (the body is above
+   `max_message_size`), 501 `frame_too_large` (the headers do not fit one
+   frame), 404 (the exchange does not exist).
+3. Fix a setup error (a 404, or a 406 of a declaration) and do not abandon the
+   row. The row publishes after the fix.
+4. Abandon the row only when the message itself can never pass:
+   `message-broker:outbox:abandon <id> --reason "..."`. The relay then skips
+   the row, and retention drops it with its partition.
+
+An abandoned row is not published. To undo an abandon, run this SQL while
+retention keeps the partition of the row:
+
+```sql
+UPDATE outbox_messages SET abandoned_at = NULL WHERE id = '<id>' AND published_at IS NULL;
+```
+
+No command undoes an abandon. After retention drops the partition, the
+message is gone.
 
 ## Backoff
 
@@ -145,8 +177,8 @@ channel, all pointed at the same lane name.
 
 ## Operational signal
 
-Watch the age of the oldest unpublished row (`published_at IS NULL`) per
-lane. A single stuck row does not stall a lane, because other rows overtake
+Watch the age of the oldest unpublished row that is not abandoned
+(`published_at IS NULL AND abandoned_at IS NULL`) per lane. A single stuck row does not stall a lane, because other rows overtake
 it, so row age is the signal for a slowly draining lane. Also watch the exit
 code of `message-broker:outbox:maintain`, which is not 0 when it kept a
 partition because of unpublished rows.

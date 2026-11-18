@@ -242,6 +242,85 @@ final class PostgreSqlOutboxRetentionTest extends FunctionalTestCase
         self::assertSame(['outbox_messages_p20260301'], $this->dailyPartitionNames());
     }
 
+    public function testPurgeDropsAnExpiredPartitionWhoseOnlyUnpublishedRowsAreAbandonedAndReportsThem(): void
+    {
+        $this->partitions->ensureCapacity(3, self::day('2026-03-01'));
+        $this->insertAt('2026-03-01 10:00:00', published: true);  // expired, all published → dropped, nothing abandoned
+        $this->insertAt('2026-03-02 10:00:00', abandoned: true);  // expired, abandoned only → dropped, reported
+        $this->insertAt('2026-03-02 11:00:00', abandoned: true);
+        $this->insertAt('2026-03-02 12:00:00', published: true);
+        $this->insertAt('2026-03-04 10:00:00', abandoned: true);  // inside retention → untouched
+
+        $report = $this->partitions->purge(2, today: self::day('2026-03-05'));
+
+        self::assertSame(['outbox_messages_p20260301', 'outbox_messages_p20260302'], $report->dropped);
+        self::assertSame([
+            'outbox_messages_p20260302' => 2,
+        ], $report->abandoned);
+        self::assertSame(2, $report->abandonedRowsDropped());
+        self::assertSame([], $report->kept, 'an abandoned row does not keep its partition');
+        self::assertSame([], $report->unpublished);
+        self::assertSame(['outbox_messages_p20260303', 'outbox_messages_p20260304'], $this->dailyPartitionNames());
+        self::assertSame(0, $this->standaloneDailyTableCount());
+        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
+    }
+
+    public function testPurgeKeepsAPartitionWithAbandonedAndOtherUnpublishedRowsAndCountsOnlyTheOthers(): void
+    {
+        $this->partitions->ensureCapacity(0, self::day('2026-03-01'));
+        $this->insertAt('2026-03-01 10:00:00', abandoned: true);
+        $this->insertAt('2026-03-01 11:00:00', abandoned: true);
+        $this->insertAt('2026-03-01 12:00:00');
+
+        $report = $this->partitions->purge(1, today: self::day('2026-03-05'));
+
+        self::assertSame([], $report->dropped);
+        self::assertSame([
+            'outbox_messages_p20260301' => 1,
+        ], $report->kept);
+        self::assertSame([], $report->abandoned, 'a kept partition drops no abandoned row');
+        self::assertSame(['outbox_messages_p20260301'], $this->dailyPartitionNames());
+        self::assertSame(3, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
+    }
+
+    public function testDryRunReportsTheAbandonedRowsThatWouldBeDropped(): void
+    {
+        $this->partitions->ensureCapacity(0, self::day('2026-03-01'));
+        $this->insertAt('2026-03-01 10:00:00', abandoned: true);
+        $this->insertAt('2026-03-01 11:00:00', published: true);
+
+        $report = $this->partitions->purge(1, dryRun: true, today: self::day('2026-03-05'));
+
+        self::assertSame(['outbox_messages_p20260301'], $report->dropped);
+        self::assertSame([
+            'outbox_messages_p20260301' => 1,
+        ], $report->abandoned);
+        self::assertSame([], $report->kept);
+        self::assertSame(['outbox_messages_p20260301'], $this->dailyPartitionNames(), 'a dry run drops nothing');
+        self::assertSame(2, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
+    }
+
+    public function testPurgeWithDropUnpublishedReportsTheUnpublishedAndTheAbandonedRowsApart(): void
+    {
+        $this->partitions->ensureCapacity(0, self::day('2026-03-01'));
+        $this->insertAt('2026-03-01 10:00:00', abandoned: true);
+        $this->insertAt('2026-03-01 11:00:00');
+        $this->insertAt('2026-03-01 12:00:00');
+        $this->insertAt('2026-03-01 13:00:00', published: true);
+
+        $report = $this->partitions->purge(1, today: self::day('2026-03-05'), dropUnpublished: true);
+
+        self::assertSame(['outbox_messages_p20260301'], $report->dropped);
+        self::assertSame([
+            'outbox_messages_p20260301' => 2,
+        ], $report->unpublished, 'the rows that are not abandoned');
+        self::assertSame([
+            'outbox_messages_p20260301' => 1,
+        ], $report->abandoned);
+        self::assertSame([], $this->dailyPartitionNames());
+        self::assertSame(0, $this->standaloneDailyTableCount());
+    }
+
     public function testPurgeKeepsTheDetachedTableWhenAnUnpublishedRowArrivesBetweenTheCountAndTheDetach(): void
     {
         $this->partitions->ensureCapacity(1, self::day('2026-03-01'));
@@ -284,6 +363,7 @@ final class PostgreSqlOutboxRetentionTest extends FunctionalTestCase
         self::assertSame([
             'outbox_messages_p20260301' => 1,
         ], $report->kept);
+        self::assertSame([], $report->abandoned);
         self::assertSame(0, $this->standaloneDailyTableCount(), 'the table is attached again, not left detached');
         self::assertSame(['outbox_messages_p20260301'], $this->dailyPartitionNames());
         self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM outbox_messages WHERE published_at IS NULL'));
@@ -489,7 +569,7 @@ final class PostgreSqlOutboxRetentionTest extends FunctionalTestCase
         self::assertSame(1, $published, $message);
     }
 
-    private function insertAt(string $createdAtUtc, bool $published = false): void
+    private function insertAt(string $createdAtUtc, bool $published = false, bool $abandoned = false): void
     {
         $createdAt = EpochMillis::fromDateTime(new DateTimeImmutable($createdAtUtc, new DateTimeZone('UTC')));
         $id = Uuid::v7()->toString();
@@ -503,6 +583,9 @@ final class PostgreSqlOutboxRetentionTest extends FunctionalTestCase
         ));
         if ($published) {
             self::$pdo->exec("UPDATE outbox_messages SET published_at = created_at WHERE id = '{$id}'");
+        }
+        if ($abandoned) {
+            self::assertSame(1, $this->store->abandon($id));
         }
     }
 

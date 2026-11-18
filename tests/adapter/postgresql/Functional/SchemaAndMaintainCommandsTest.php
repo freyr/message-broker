@@ -78,6 +78,33 @@ final class SchemaAndMaintainCommandsTest extends FunctionalTestCase
         ));
     }
 
+    public function testANewInstallationHasTheAbandonedAtColumnAndKeepsThePendingIndexPredicate(): void
+    {
+        $column = self::$pdo->query(
+            "SELECT data_type, datetime_precision, is_nullable, column_default FROM information_schema.columns
+             WHERE table_name = 'outbox_messages' AND column_name = 'abandoned_at'",
+        );
+        self::assertNotFalse($column);
+        self::assertSame([
+            'data_type' => 'timestamp without time zone',
+            'datetime_precision' => 3,
+            'is_nullable' => 'YES',
+            'column_default' => null,
+        ], $column->fetch(\PDO::FETCH_ASSOC));
+
+        $today = 'outbox_messages_p'.gmdate('Ymd');
+        self::assertSame(1, self::fetchInt(
+            "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = '{$today}' AND column_name = 'abandoned_at'",
+        ), 'a daily partition has the column too');
+
+        $predicate = self::$pdo->query(
+            "SELECT pg_get_expr(i.indpred, i.indrelid) FROM pg_index i
+             WHERE i.indexrelid = 'idx_outbox_pending'::regclass",
+        );
+        self::assertNotFalse($predicate);
+        self::assertSame('(published_at IS NULL)', $predicate->fetchColumn(), 'the index predicate does not change');
+    }
+
     /** @return iterable<string, array{string}> */
     public static function invalidPremakeDays(): iterable
     {
