@@ -77,9 +77,9 @@ final class RelayRunCommand extends Command
 
         try {
             $limits = new WorkerLimits(
-                maxMessages: self::intOption($input->getOption('limit'), 'limit'),
-                maxSeconds: self::intOption($input->getOption('time-limit'), 'time-limit'),
-                maxMemoryBytes: self::memoryOption($input->getOption('memory-limit')),
+                maxMessages: self::intOption(self::stringOption($input, 'limit'), 'limit'),
+                maxSeconds: self::intOption(self::stringOption($input, 'time-limit'), 'time-limit'),
+                maxMemoryBytes: self::memoryOption(self::stringOption($input, 'memory-limit')),
             );
         } catch (InvalidArgumentException $e) {
             $output->writeln("<error>{$e->getMessage()}</error>");
@@ -114,30 +114,36 @@ final class RelayRunCommand extends Command
         return (new ReflectionFunction(Closure::fromCallable($callable)))->getNumberOfParameters() === 0;
     }
 
-    private static function intOption(mixed $value, string $name): ?int
+    /** An option with a value is a string, or null when it is absent. */
+    private static function stringOption(InputInterface $input, string $name): ?string
+    {
+        $value = $input->getOption($name);
+
+        return is_string($value) ? $value : null;
+    }
+
+    private static function intOption(?string $value, string $name): ?int
     {
         if ($value === null) {
             return null;
         }
-        if (!is_string($value) || preg_match('/^[1-9]\d*$/', $value) !== 1) {
-            throw new InvalidArgumentException(
-                "Invalid value for --{$name}: '".(is_string($value) ? $value : '')."' — expected an integer, 1 or more",
-            );
+        if (preg_match('/^[1-9]\d*$/', $value) !== 1) {
+            throw new InvalidArgumentException("Invalid value for --{$name}: '{$value}' — expected an integer, 1 or more");
         }
 
         return (int) $value;
     }
 
-    private static function memoryOption(mixed $value): ?int
+    private static function memoryOption(?string $value): ?int
     {
         if ($value === null) {
             return null;
         }
 
         try {
-            return ByteSize::toBytes(is_string($value) ? $value : '');
+            return ByteSize::toBytes($value);
         } catch (InvalidArgumentException $e) {
-            throw new InvalidArgumentException("Invalid value for --memory-limit: {$e->getMessage()}", 0, $e);
+            throw new InvalidArgumentException("Invalid value for --memory-limit: {$e->getMessage()}", previous: $e);
         }
     }
 }

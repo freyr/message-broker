@@ -29,6 +29,7 @@ final class RelayRunCommandTest extends TestCase
         ]);
 
         self::assertSame(Command::SUCCESS, $status);
+        self::assertStringContainsString("Relaying lane 'orders' — SIGTERM/SIGINT to stop.", $tester->getDisplay());
         self::assertCount(1, $this->received);
         self::assertSame(5, $this->received[0]->maxMessages);
         self::assertSame(60, $this->received[0]->maxSeconds);
