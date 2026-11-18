@@ -1,5 +1,55 @@
 # Upgrade guide
 
+## From 0.7.x to 0.8.0
+
+This release changes the default behavior of the consumer. The database
+schema and the wire format do not change.
+
+### Delivery limit
+
+`DeliveryProcessor` has a delivery limit of 5 by default (the new last
+constructor parameter `maxDeliveries`).
+
+- On a quorum queue, the sixth delivery after five deliveries that ended with
+  no ack becomes a dead letter with the error `Consumer\DeliveryLimitExceeded`,
+  and the handler does not run.
+- Pass `maxDeliveries: null` to keep the old behavior.
+- Keep the value not higher than `x-delivery-limit` of the queue (a lower value
+  is recommended). When you set `x-delivery-limit` below 5, lower
+  `maxDeliveries` too.
+- A message whose `x-delivery-count` is already at or above `maxDeliveries` at
+  the upgrade becomes a dead letter at its next delivery (the row is
+  replayable). To prevent this, set `maxDeliveries` to `null` or to a higher
+  value for the first run.
+
+```php
+$processor = new DeliveryProcessor(
+    // ... the other arguments do not change
+    maxDeliveries: null, // the behavior of 0.7.x: no delivery limit
+);
+```
+
+### The stop of `AmqpConsumer`
+
+- `AmqpConsumer` returns its unacked deliveries at a stop: a graceful stop
+  adds no count, and a failure adds 1 to the delivery in work only. It sends
+  `basic.cancel`, `basic.reject` (only for the delivery in work, after a
+  failure) and `basic.nack` (tag 0, `multiple`, `requeue`). See
+  [docs/amqp/CONSUMER.md](docs/amqp/CONSUMER.md), *The return rule*.
+- A confirm timeout of the wait-queue publish ends `run()` with the exception,
+  so `message-broker:consume` exits with a failure. In the earlier release it
+  ended `run()` as an idle stop, with exit code 0.
+- `AmqpConsumer` takes an optional `logger` (the new last constructor
+  parameter, a PSR-3 `LoggerInterface`). It receives a failure inside the
+  return.
+
+### Retry policy
+
+`ExponentialRetryPolicy` takes the optional `deadLetterOn` and `discardOn`
+lists of throwable classes (empty by default, so nothing changes when you do
+not pass them). See [docs/core/CONSUMER.md](docs/core/CONSUMER.md), *Error
+class lists*.
+
 ## From 0.6.x to 0.7.0
 
 This release has no backward-compatibility aliases. Change your `use` statements and your wiring code as shown below.

@@ -171,6 +171,7 @@ $consumer = new AmqpConsumer(
         retryPolicy: new ExponentialRetryPolicy(maxAttempts: 5, backoff: Backoff::exponential(initialDelayMs: 1_000, maxDelayMs: 300_000)),
         deadLetters: new PostgreSqlDeadLetterStore($pdo),
         name: 'orders_consumer',
+        maxDeliveries: 5, // the delivery limit (the default); null turns it off
     ),
 );
 $consumer->run(); // blocks
@@ -178,6 +179,14 @@ $consumer->run(); // blocks
 
 `DeliveryProcessor` holds the transport-neutral exactly-once algorithm and
 imports no AMQP class. `AmqpConsumer` is the AMQP loop around it.
+
+`maxDeliveries` is the delivery limit: a message that stopped the process five
+times (five deliveries that ended with no ack) becomes a dead letter with the
+error `DeliveryLimitExceeded`, and the handler does not run again. Only a
+quorum queue gives the delivery count. Keep the value not higher than
+`x-delivery-limit` of the queue. See
+[core/CONSUMER.md](core/CONSUMER.md#delivery-limit) and
+[amqp/CONSUMER.md](amqp/CONSUMER.md#the-return-rule).
 
 `name` scopes deduplication — the same message id delivered to two
 differently-named consumers is processed by both; delivered twice to the
