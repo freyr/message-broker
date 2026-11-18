@@ -17,6 +17,7 @@ use Freyr\MessageBroker\Storage\Transaction;
 use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Symfony\Component\Uid\Uuid;
 use Throwable;
 
 /**
@@ -271,18 +272,16 @@ final class DeliveryProcessor
     private function deadLetterRaw(Delivery $delivery, Throwable $error): string
     {
         // Best-effort triage: prefer the x-message-* envelope headers; fall back
-        // to the transport message id and 'unknown'. Stage-1 raw dead
+        // to the transport message id, and then to a generated 'unknown-<UUID v7>'
+        // so that two messages with no id never share one row. Stage-1 raw dead
         // letters are never replayed, so this only improves dlq:show output.
-        $messageId = 'unknown';
         $messageName = 'unknown';
         try {
             $meta = MetadataHeader::parse($delivery->headers);
             $messageId = $meta['message_id'];
             $messageName = $meta['message_name'];
         } catch (MalformedMessage) {
-            if ($delivery->fallbackMessageId !== null) {
-                $messageId = $delivery->fallbackMessageId;
-            }
+            $messageId = $delivery->fallbackMessageId ?? 'unknown-'.Uuid::v7()->toString();
         }
 
         $this->storeDeadLetter(

@@ -33,6 +33,8 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LogLevel;
 use RuntimeException;
+use Symfony\Component\Uid\Uuid;
+use Symfony\Component\Uid\UuidV7;
 use Throwable;
 
 /**
@@ -125,6 +127,16 @@ final class DeliveryProcessorTest extends TestCase
     private function deadLetters(): array
     {
         return $this->deadLetterStore->list();
+    }
+
+    /** The id of a raw dead letter with no message id: 'unknown-' and a UUID v7. */
+    private static function assertGeneratedUnknownId(string $messageId): void
+    {
+        self::assertStringStartsWith('unknown-', $messageId);
+        $uuid = substr($messageId, strlen('unknown-'));
+        self::assertTrue(Uuid::isValid($uuid), "not a UUID: {$uuid}");
+        self::assertInstanceOf(UuidV7::class, Uuid::fromString($uuid));
+        self::assertSame(Uuid::fromString($uuid)->toRfc4122(), $uuid, 'the canonical lower-case form');
     }
 
     private static function failure(string $message = 'handler failed'): \Closure
@@ -450,7 +462,25 @@ final class DeliveryProcessorTest extends TestCase
     {
         $this->processor()->process($this->delivery(withEnvelope: false), $this->control);
 
-        self::assertSame('unknown', $this->deadLetters()[0]->messageId);
+        self::assertCount(1, $this->deadLetters());
+        $messageId = $this->deadLetters()[0]->messageId;
+        self::assertGeneratedUnknownId($messageId);
+        self::assertSame('unknown', $this->deadLetters()[0]->messageName);
+        self::assertSame($messageId, $this->events->records[0]['context']['message_id'], 'the event carries the stored id');
+    }
+
+    public function testTwoMalformedDeliveriesWithoutAnyIdGiveTwoRowsWithDifferentIds(): void
+    {
+        $processor = $this->processor();
+
+        $processor->process($this->delivery(withEnvelope: false), $this->control);
+        $processor->process($this->delivery(withEnvelope: false), $this->control);
+
+        self::assertCount(2, $this->deadLetters());
+        [$first, $second] = $this->deadLetters();
+        self::assertGeneratedUnknownId($first->messageId);
+        self::assertGeneratedUnknownId($second->messageId);
+        self::assertNotSame($first->messageId, $second->messageId);
     }
 
     public function testTheAttemptOfAMalformedDeliveryIsKept(): void
@@ -740,6 +770,21 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame('prop-id', $this->logger->records[0]['context']['message_id']);
         self::assertCount(1, $this->errorHandler->calls);
         self::assertInstanceOf(DeliveryLimitExceeded::class, $this->errorHandler->calls[0]['error']);
+    }
+
+    public function testARawDeadLetterAtTheLimitWithoutAnyIdUsesAGeneratedUnknownId(): void
+    {
+        $this->processor(maxDeliveries: 2)->process(
+            $this->delivery(withEnvelope: false, body: '{{{not json', deliveryCount: 2),
+            $this->control,
+        );
+
+        self::assertSame(['ack'], $this->control->calls);
+        self::assertCount(1, $this->deadLetters());
+        $messageId = $this->deadLetters()[0]->messageId;
+        self::assertGeneratedUnknownId($messageId);
+        self::assertSame($messageId, $this->logger->records[0]['context']['message_id'], 'the log names the stored id');
+        self::assertSame($messageId, $this->errorHandler->calls[0]['context']['message_id']);
     }
 
     public function testTheLimitReportsToTheLoggerAndTheErrorHandlerWithTheSameContext(): void
