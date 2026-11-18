@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Adapter\PostgreSql\Tests\Functional;
 
+use DateTimeImmutable;
+use DateTimeZone;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxRetention;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Outbox\ClaimOutcome;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
@@ -34,8 +37,21 @@ final class OutboxAbandonedClaimCostTest extends FunctionalTestCase
         FOR UPDATE SKIP LOCKED
         SQL;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        // The rows have a created_at up to 20 s before now: in the first seconds of
+        // a UTC day they belong to the day before. Day before, today and tomorrow.
+        (new PostgreSqlOutboxRetention(self::$pdo))->ensureCapacity(2, (new DateTimeImmutable('today', new DateTimeZone('UTC')))->modify('-1 day'));
+    }
+
     public function testAClaimOf100ReturnsThe100DueRowsBehind1000AbandonedRows(): void
     {
+        $yesterday = 'outbox_messages_p'.(new DateTimeImmutable('today', new DateTimeZone('UTC')))->modify('-1 day')->format('Ymd');
+        self::assertSame(1, self::fetchInt(
+            "SELECT COUNT(*) FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid
+             WHERE i.inhparent = 'outbox_messages'::regclass AND c.relname = '{$yesterday}'",
+        ), 'the partition of the day before exists for the rows of the first seconds of a UTC day');
         $this->insertRows('published', 20_000, "now() - interval '2 hour'");
         $this->insertRows('due', 100, "now() - interval '1 minute'");
         $this->insertRows('old', 1_000, "now() - interval '1 hour'"); // older: at the start of the index range
