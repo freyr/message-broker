@@ -361,9 +361,9 @@ final class AmqpDeadLetterImportTest extends TestCase
                 return $this->inner->stats($filter);
             }
 
-            public function markReplayed(string $id): void
+            public function markReplayed(string $id): bool
             {
-                $this->inner->markReplayed($id);
+                return $this->inner->markReplayed($id);
             }
 
             public function purge(DeadLetterFilter $filter): int

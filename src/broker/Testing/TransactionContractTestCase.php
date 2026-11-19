@@ -151,6 +151,7 @@ abstract class TransactionContractTestCase extends TestCase
         $found = $deadLetters->find($deadLetter->id);
         self::assertNotNull($found, 'the row stored before the transaction stays');
         self::assertNull($found->replayedAt, 'the mark rolls back with the transaction');
+        self::assertTrue($deadLetters->markReplayed($deadLetter->id), 'a new mark after the rollback is set');
     }
 
     public function testAReplayMarkAndAnOutboxInsertInACommittedTransactionBothStay(): void

@@ -61,8 +61,15 @@ interface DeadLetterStore
      */
     public function stats(DeadLetterFilter $filter): array;
 
-    /** Replay keeps the row for audit — marks replayed_at instead of deleting. */
-    public function markReplayed(string $id): void;
+    /**
+     * Replay keeps the row for audit — marks replayed_at instead of deleting.
+     * Conditional: sets the mark only when the row exists and replayed_at is
+     * null, and returns true only when this call set it. An unknown id, a
+     * value that is not a valid id, and a replayed row return false, with no
+     * error and no change (the first replayed_at stays). The replay calls it
+     * in its own transaction, so the mark rolls back with that transaction.
+     */
+    public function markReplayed(string $id): bool;
 
     /**
      * Deletes each matching row; an empty filter deletes every row.

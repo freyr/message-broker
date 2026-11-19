@@ -12,9 +12,11 @@ use Freyr\MessageBroker\Adapter\PostgreSql\PdoTransaction;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeduplicationStore;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
+use Freyr\MessageBroker\BrokerHeader;
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
+use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Observability\BrokerEvents;
@@ -46,6 +48,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
 {
     private const string EXCHANGE = 'mb_e2e';
     private const string QUEUE = 'mb_e2e_q';
+    private const string QUEUE_B = 'mb_e2e_b_q'; // a second consumer group on the same routing key
     private const string LANE = 'e2e';
 
     private static AMQPStreamConnection $amqp;
@@ -57,6 +60,9 @@ final class EndToEndTest extends AmqpFunctionalTestCase
     private Relay $relay; // one long-lived relay per channel, as in production
 
     private bool $handlerFails = false;
+
+    /** The count of the next handler calls that fail. */
+    private int $failuresLeft = 0;
 
     private int $handlerAttempts = 0;
 
@@ -80,6 +86,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
         $channel = self::$amqp->channel();
         $channel->queue_delete(self::isolated(self::QUEUE));
         $channel->queue_delete(self::isolated(self::QUEUE).'.wait.100');
+        $channel->queue_delete(self::isolated(self::QUEUE_B));
         $channel->exchange_delete(self::isolated(self::EXCHANGE));
         $channel->close();
         self::$amqp->close();
@@ -90,6 +97,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
         parent::setUp();
         $this->dispatched = [];
         $this->handlerFails = false;
+        $this->failuresLeft = 0;
         $this->handlerAttempts = 0;
 
         $this->channel = self::$amqp->channel();
@@ -98,6 +106,9 @@ final class EndToEndTest extends AmqpFunctionalTestCase
         $this->channel->queue_declare(self::isolated(self::QUEUE), false, true, false, false);
         $this->channel->queue_bind(self::isolated(self::QUEUE), self::isolated(self::EXCHANGE), 'order.*');
         $this->channel->queue_purge(self::isolated(self::QUEUE));
+        $this->channel->queue_declare(self::isolated(self::QUEUE_B), false, true, false, false);
+        $this->channel->queue_bind(self::isolated(self::QUEUE_B), self::isolated(self::EXCHANGE), 'order.*');
+        $this->channel->queue_purge(self::isolated(self::QUEUE_B));
 
         $this->outbox = new PostgreSqlOutboxStore(self::$pdo);
         $this->producer = new OutboxProducer($this->outbox, new JsonWireFormat(), lane: self::LANE);
@@ -119,19 +130,27 @@ final class EndToEndTest extends AmqpFunctionalTestCase
         $this->relayChannel->close();
     }
 
-    private function consumer(?BrokerEvents $events = null): AmqpConsumer
-    {
+    private function consumer(
+        ?BrokerEvents $events = null,
+        string $queue = self::QUEUE,
+        string $name = 'e2e_consumer',
+    ): AmqpConsumer {
         $dispatch = function (IncomingMessage $incoming): void {
             ++$this->handlerAttempts;
             if ($this->handlerFails) {
                 throw new RuntimeException('temporary downstream outage');
+            }
+            if ($this->failuresLeft > 0) {
+                --$this->failuresLeft;
+
+                throw new RuntimeException('one more outage');
             }
             $this->dispatched[] = $incoming;
         };
 
         return new AmqpConsumer(
             channel: $this->channel,
-            queue: new AmqpQueueConfig(self::isolated(self::QUEUE)),
+            queue: new AmqpQueueConfig(self::isolated($queue)),
             processor: new DeliveryProcessor(
                 deserializer: new JsonDeserializer(),
                 dispatcher: new CallableDispatcher($dispatch),
@@ -142,7 +161,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
                     backoff: Backoff::exponential(initialDelayMs: 100, maxDelayMs: 100),
                 ),
                 deadLetters: $this->deadLetters,
-                name: 'e2e_consumer',
+                name: $name,
                 events: $events,
             ),
         );
@@ -190,7 +209,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
 
         // Downstream recovered: replay rides the outbox + relay again.
         $this->handlerFails = false;
-        $replay = new ReplayService($this->deadLetters, $this->outbox, new JsonWireFormat());
+        $replay = new ReplayService($this->deadLetters, $this->outbox, new PdoTransaction(self::$pdo), new JsonWireFormat());
         $replay->replay($deadLetters[0]->id, lane: self::LANE);
 
         self::assertSame(1, $this->relay->drainOnce());
@@ -248,5 +267,125 @@ final class EndToEndTest extends AmqpFunctionalTestCase
             ->run(messageLimit: 2, idleTimeoutSec: 10);
 
         self::assertContains(BrokerEvents::DEAD_LETTERED, $events->names());
+    }
+
+    public function testAReplayReachesTwoQueuesAndOnlyTheSourceQueueProcessesIt(): void
+    {
+        $message = OrderPlaced::create('o-two-queues', 100);
+        $deadLetter = $this->deadLetterOfQueueA($message);
+        $this->channel->queue_purge(self::isolated(self::QUEUE_B)); // B processed the original message
+
+        $this->replayService()->replay($deadLetter->id, lane: self::LANE);
+        self::assertSame(1, $this->relay->drainOnce());
+
+        $this->consumer()
+            ->run(messageLimit: 1, idleTimeoutSec: 10);
+        self::assertCount(1, $this->dispatched, 'consumer A processes the replay');
+        self::assertSame($message->id, $this->dispatched[0]->messageId);
+
+        $attemptsBefore = $this->handlerAttempts;
+        $eventsB = new RecordingEvents();
+        $this->consumer($eventsB, self::QUEUE_B, 'e2e_consumer_b')
+            ->run(messageLimit: 1, idleTimeoutSec: 10);
+
+        self::assertSame($attemptsBefore, $this->handlerAttempts, 'consumer B calls no handler');
+        self::assertSame([BrokerEvents::REPLAY_SKIPPED], $eventsB->names());
+        self::assertSame([
+            'consumer' => 'e2e_consumer_b',
+            'source' => self::isolated(self::QUEUE_B),
+            'target' => self::isolated(self::QUEUE),
+            'message_id' => $message->id,
+            'message_name' => 'order.placed',
+        ], $eventsB->records[0]['context']);
+        self::assertSame(0, self::fetchInt("SELECT COUNT(*) FROM message_deduplication WHERE consumer = 'e2e_consumer_b'"));
+        self::assertSame(1, self::fetchInt("SELECT COUNT(*) FROM message_deduplication WHERE consumer = 'e2e_consumer'"));
+        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM dead_letters'), 'B writes no dead letter');
+        self::assertSame(0, $this->messagesIn(self::QUEUE_B), 'B acked the replay');
+    }
+
+    public function testAReplayThatFailsOnceKeepsTheTargetThroughTheWaitQueue(): void
+    {
+        $message = OrderPlaced::create('o-retry-replay', 100);
+        $deadLetter = $this->deadLetterOfQueueA($message);
+
+        $this->replayService()->replay($deadLetter->id, lane: self::LANE);
+        self::assertSame(1, $this->relay->drainOnce());
+        $this->failuresLeft = 1;
+        $this->consumer()
+            ->run(messageLimit: 2, idleTimeoutSec: 10);
+
+        self::assertCount(1, $this->dispatched, 'the second delivery is processed');
+        self::assertSame(self::isolated(self::QUEUE), $this->dispatched[0]->headers[BrokerHeader::REPLAY_TARGET] ?? null);
+        self::assertSame(2, $this->dispatched[0]->headers['x-attempt'] ?? null, 'it passed the wait queue');
+        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM dead_letters'));
+    }
+
+    public function testAStaleDeliveryCountOfAQuorumQueueDeadLetterIsNotADeliveryLimitDeadLetter(): void
+    {
+        // A dead letter as a consumer of a quorum queue stores it: the broker
+        // header x-delivery-count is in its headers, above the default limit of 5.
+        $message = OrderPlaced::create('o-quorum', 100);
+        $deadLetter = DeadLetter::fromFailure(
+            source: self::isolated(self::QUEUE),
+            messageId: $message->id,
+            messageName: $message->name,
+            body: (string) json_encode([
+                'metadata' => [
+                    'message_name' => $message->name,
+                    'message_id' => $message->id,
+                    'created_at' => $message->createdAt,
+                ],
+                'payload' => $message->payload(),
+            ]),
+            headers: [
+                'x-delivery-count' => 7,
+                'x-attempt' => 2,
+            ],
+            error: new RuntimeException('handler failed'),
+            attempts: 2,
+        );
+        $this->deadLetters->store($deadLetter);
+
+        $this->replayService()->replay($deadLetter->id, lane: self::LANE);
+        self::assertSame(1, $this->relay->drainOnce());
+        $this->consumer()
+            ->run(messageLimit: 1, idleTimeoutSec: 10);
+
+        self::assertCount(1, $this->dispatched, 'the first delivery of the replay is processed');
+        self::assertArrayNotHasKey('x-delivery-count', $this->dispatched[0]->headers);
+        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM dead_letters'), 'no delivery limit dead letter');
+    }
+
+    /** The message fails twice on queue A (attempt 1, the wait queue, attempt 2) and becomes a dead letter. */
+    private function deadLetterOfQueueA(OrderPlaced $message): DeadLetter
+    {
+        $this->producer->produce($message);
+        self::assertSame(1, $this->relay->drainOnce());
+        $this->handlerFails = true;
+        $this->consumer()
+            ->run(messageLimit: 2, idleTimeoutSec: 10);
+        $this->handlerFails = false;
+        $this->handlerAttempts = 0;
+        // A new consumer puts its channel in confirm mode again: give it a new channel.
+        $this->channel->close();
+        $this->channel = self::$amqp->channel();
+
+        $deadLetters = $this->deadLetters->list(new DeadLetterFilter());
+        self::assertCount(1, $deadLetters);
+        self::assertSame(self::isolated(self::QUEUE), $deadLetters[0]->source);
+
+        return $deadLetters[0];
+    }
+
+    private function replayService(): ReplayService
+    {
+        return new ReplayService($this->deadLetters, $this->outbox, new PdoTransaction(self::$pdo), new JsonWireFormat());
+    }
+
+    private function messagesIn(string $queue): int
+    {
+        [, $count] = $this->channel->queue_declare(self::isolated($queue), true);
+
+        return (int) $count;
     }
 }

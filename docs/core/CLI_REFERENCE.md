@@ -217,23 +217,41 @@ and stack trace.
 ## `message-broker:dlq:replay [<id>] [--all]`
 
 Re-enqueues one or many dead letters back into the outbox; redelivery rides
-the normal relay path. The command inserts a new outbox row with the original
-message id and a new `created_at`. See [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md) for the
-worked dry-run-then-force workflow.
+the normal relay path. Each replay is one transaction: the replay mark, then
+a new outbox row with the original message id, a new `created_at` and the
+header `x-replay-target` (the `source` of the dead letter), then the commit.
+See [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md) for the worked dry-run-then-force
+workflow, the refusals and the replay to one consumer.
 
 **Constructor:** `new DlqReplayCommand(ReplayService $replay, DeadLetterStore $store, int $batchSize = 500)`
 
-A batch replay (`--all`) drains the DLQ `$batchSize` rows at a time, so memory
-stays flat regardless of how many dead letters match.
+A batch replay (`--all`) works in rounds of at most `$batchSize` ids, oldest
+first, so memory stays flat regardless of how many dead letters match: the
+run keeps only the ids of the rows that it skipped or that failed.
 
 | Argument/Option | Description |
 | --- | --- |
 | `id` (argument, optional) | A single dead letter id. Omit and pass `--all` for a batch replay. |
-| `--all` | Replay every dead letter that matches the filter options and is not replayed. The command always adds `--not-replayed`; `--replayed` with `--all` ends with exit code 2. |
+| `--all` | Replay every dead letter that matches the filter options, is not replayed and failed before the start of the run (or before `--until` when it is earlier). The command always adds `--not-replayed`; `--replayed` with `--all` ends with exit code 2. The default adds `--replayable`; `--not-replayable` replaces it. |
 | The filter options | With `--all`: see [Dead letter filter options](#dead-letter-filter-options). |
+| `--limit` | With `--all`: the maximum number of rows that the run handles (replayed, skipped or failed). A positive integer. |
+| `--rate` | With `--all`: the maximum number of replays that start in one second. A positive integer; no limit when absent. |
 | `--lane` | The outbox lane the replayed message is re-enqueued into (default `default`). |
-| `--dry-run` | Show what would be replayed (count, and the first 5 candidates for `--all`); change nothing. |
+| `--dry-run` | Show what would be replayed and change nothing. One id: the checks of the replay ("would replay", or the refusal). `--all`: the count (at most `--limit`) and the first 5 candidates. |
 | `--force` | Required to run `--all` non-interactively (no TTY); a single-id replay never prompts. |
+
+The last line of `--all` gives four counts, for example
+`Replayed 120, skipped 3 (not replayable), skipped 1 (already replayed), failed 0 into lane 'orders'.`
+
+| Case | Exit code |
+| --- | --- |
+| One id replayed | 0 |
+| One id refused: not found, already replayed, not replayable (one line with the id and the reason) | 1 |
+| One id, unexpected error | the exception propagates; non-zero |
+| `--all`, no row failed (a skip is not a failure) | 0 |
+| `--all`, one or more rows failed with an unexpected error | 1 |
+| `--all` not confirmed, or no `--force` without a terminal | 1 |
+| A bad option combination or value (`--limit` or `--rate` that is not a positive integer, `--replayed` with `--all`, a bad filter option) | 2 |
 
 ## `message-broker:dlq:purge`
 

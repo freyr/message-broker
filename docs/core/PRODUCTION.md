@@ -97,7 +97,16 @@ There is no built-in metrics interface. Instead, inject:
   `NullLogger` is silent.
 - **A `BrokerEvents` listener** — an optional lifecycle hook fired on the
   lifecycle transitions: `PRODUCED`, `RELAYED`, `DISPATCHED`, `DEDUPLICATED`,
-  `RETRIED`, `DISCARDED`, `DEAD_LETTERED`, `REPLAYED`, `ABANDONED`.
+  `RETRIED`, `DISCARDED`, `DEAD_LETTERED`, `REPLAYED`, `REPLAY_SKIPPED`,
+  `ABANDONED`.
+  `REPLAYED` (`message.replayed`) comes after the commit of a replay; its
+  context is `message_id`, `message_name`, `lane` and `target` (the `source`
+  of the dead letter). `REPLAY_SKIPPED` (`message.replay_skipped`) comes from
+  each consumer that acks a replay for a different queue; its context is
+  `consumer`, `source`, `target`, `message_id` and `message_name`. In normal
+  operation each replay gives one `REPLAY_SKIPPED` for each other queue that
+  binds the routing key; skips with no processing on any queue show a target
+  that no consumer serves (see [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md)).
   `ABANDONED` (`message.abandoned`) comes from `message-broker:outbox:abandon`
   when it marks one or more rows; its context is `message_id`, `count` and
   `reason` (a string or `null`).

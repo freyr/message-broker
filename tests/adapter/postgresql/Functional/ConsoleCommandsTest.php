@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Adapter\PostgreSql\Tests\Functional;
 
+use Freyr\MessageBroker\Adapter\PostgreSql\PdoTransaction;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeduplicationStore;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
@@ -22,6 +23,7 @@ use Freyr\MessageBroker\Time\EpochMillis;
 use RuntimeException;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
+use Symfony\Component\Uid\Uuid;
 
 final class ConsoleCommandsTest extends FunctionalTestCase
 {
@@ -124,7 +126,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $replay = new CommandTester(new DlqReplayCommand(
             new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
                 self::$pdo,
-            ), new JsonWireFormat()),
+            ), new PdoTransaction(self::$pdo), new JsonWireFormat()),
             $this->deadLetters,
         ));
         $replay->execute([
@@ -168,7 +170,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $replay = new CommandTester(new DlqReplayCommand(
             new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
                 self::$pdo,
-            ), new JsonWireFormat()),
+            ), new PdoTransaction(self::$pdo), new JsonWireFormat()),
             $this->deadLetters,
         ));
         $status = $replay->execute([
@@ -189,7 +191,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $replay = new CommandTester(new DlqReplayCommand(
             new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
                 self::$pdo,
-            ), new JsonWireFormat()),
+            ), new PdoTransaction(self::$pdo), new JsonWireFormat()),
             $this->deadLetters,
         ));
         $replay->execute([
@@ -211,7 +213,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $replay = new CommandTester(new DlqReplayCommand(
             new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
                 self::$pdo,
-            ), new JsonWireFormat()),
+            ), new PdoTransaction(self::$pdo), new JsonWireFormat()),
             $this->deadLetters,
         ));
         $replay->execute([
@@ -223,7 +225,68 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         ]);
 
         $replay->assertCommandIsSuccessful();
+        self::assertSame(
+            "Replayed 1, skipped 0 (not replayable), skipped 0 (already replayed), failed 0 into lane 'orders'.\n",
+            $replay->getDisplay(),
+        );
         self::assertSame(1, self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE lane = 'orders'"));
+    }
+
+    public function testReplayAllReplaysTheGoodRowsAndSkipsARawBodyAmongThem(): void
+    {
+        $this->seedDeadLetter('01900000-0000-7000-8000-0000000000d1', 'order.placed');
+        $raw = $this->seedDeadLetter('01900000-0000-7000-8000-0000000000d2', 'order.placed', body: 'raw bytes');
+        $this->seedDeadLetter('01900000-0000-7000-8000-0000000000d3', 'order.placed');
+        $this->seedDeadLetter('01900000-0000-7000-8000-0000000000d4', 'order.placed');
+
+        $replay = new CommandTester(new DlqReplayCommand(
+            new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
+                self::$pdo,
+            ), new PdoTransaction(self::$pdo), new JsonWireFormat()),
+            $this->deadLetters,
+            batchSize: 2,
+        ));
+        $status = $replay->execute([
+            '--all' => true,
+            '--force' => true,
+            '--lane' => 'orders',
+        ], [
+            'interactive' => false,
+        ]);
+
+        self::assertSame(Command::SUCCESS, $status, 'a skip is not a failure');
+        self::assertSame(
+            "Skipped: Dead letter '{$raw->id}' is not replayable: body is not a replayable wire document "
+            ."(stage-1 dead letters store raw bytes and are not replayable).\n"
+            ."Replayed 3, skipped 1 (not replayable), skipped 0 (already replayed), failed 0 into lane 'orders'.\n",
+            $replay->getDisplay(),
+        );
+        self::assertSame(3, self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE lane = 'orders'"));
+        self::assertSame(
+            1,
+            self::fetchInt("SELECT COUNT(*) FROM dead_letters WHERE replayed_at IS NULL AND message_id = '01900000-0000-7000-8000-0000000000d2'"),
+            'the raw row stays open',
+        );
+    }
+
+    public function testReplayOfAReplayedRowFailsAndInsertsNothing(): void
+    {
+        $deadLetter = $this->seedDeadLetter('01900000-0000-7000-8000-0000000000d5', 'order.placed');
+        $this->deadLetters->markReplayed($deadLetter->id);
+
+        $replay = new CommandTester(new DlqReplayCommand(
+            new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
+                self::$pdo,
+            ), new PdoTransaction(self::$pdo), new JsonWireFormat()),
+            $this->deadLetters,
+        ));
+        $status = $replay->execute([
+            'id' => $deadLetter->id,
+        ]);
+
+        self::assertSame(Command::FAILURE, $status);
+        self::assertSame("Dead letter '{$deadLetter->id}' is already replayed.\n", $replay->getDisplay());
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
     }
 
     public function testPurgeFailsClosedWithoutForceButDryRunPreviews(): void
@@ -306,7 +369,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $replay = new CommandTester(new DlqReplayCommand(
             new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
                 self::$pdo,
-            ), new JsonWireFormat()),
+            ), new PdoTransaction(self::$pdo), new JsonWireFormat()),
             $this->deadLetters,
             batchSize: 1,
         ));
@@ -319,7 +382,10 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         ]);
 
         $replay->assertCommandIsSuccessful();
-        self::assertStringContainsString('Replayed 2', $replay->getDisplay());
+        self::assertSame(
+            "Replayed 2, skipped 0 (not replayable), skipped 0 (already replayed), failed 0 into lane 'orders'.\n",
+            $replay->getDisplay(),
+        );
         self::assertSame(2, self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE lane = 'orders'"));
         self::assertSame(
             0,
@@ -380,13 +446,18 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         self::assertSame(2, self::fetchInt('SELECT COUNT(*) FROM dead_letters'));
     }
 
-    private function seedDeadLetter(string $id, string $name): DeadLetter
+    /**
+     * A dead letter that failed one second ago: a bulk replay reads only the
+     * rows that failed before the start of its run.
+     */
+    private function seedDeadLetter(string $id, string $name, ?string $body = null): DeadLetter
     {
-        $deadLetter = DeadLetter::fromFailure(
+        $deadLetter = new DeadLetter(
+            id: Uuid::v7()->toString(),
             source: 'orders_q',
             messageId: $id,
             messageName: $name,
-            body: (string) json_encode([
+            body: $body ?? (string) json_encode([
                 'metadata' => [
                     'message_id' => $id,
                     'message_name' => $name,
@@ -397,8 +468,11 @@ final class ConsoleCommandsTest extends FunctionalTestCase
                 ],
             ]),
             headers: [],
-            error: new RuntimeException('boom'),
+            errorClass: RuntimeException::class,
+            errorMessage: 'boom',
+            errorTrace: '#0 trace',
             attempts: 5,
+            failedAt: EpochMillis::now() - 1_000,
         );
         $this->deadLetters->store($deadLetter);
 

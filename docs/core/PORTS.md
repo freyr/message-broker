@@ -15,7 +15,7 @@ ports and extends the contract test cases of the test kit (see
 | `Storage\SchemaInstaller` | Create the tables, or return their DDL. | `PostgreSqlSchemaInstaller` (PostgreSQL adapter) |
 | `Storage\Transaction` | Begin, commit and roll back the consumer transaction. | `PdoTransaction` (PostgreSQL adapter); `InMemoryTransaction` (test kit) |
 | `Consumer\DeduplicationStore` | Record that a consumer processed a message. Prune old entries. | `PostgreSqlDeduplicationStore` (PostgreSQL adapter); `InMemoryDeduplicationStore` (test kit) |
-| `DeadLetter\DeadLetterStore` | Store a dead letter (idempotent by `id`; one open row for each message ID and source). Find one. List, count, purge, get the IDs (`ids()`) and group (`stats()`) the rows that match a `DeadLetterFilter`. Mark a row as replayed. | `PostgreSqlDeadLetterStore` (PostgreSQL adapter); `InMemoryDeadLetterStore` (test kit) |
+| `DeadLetter\DeadLetterStore` | Store a dead letter (idempotent by `id`; one open row for each message ID and source). Find one. List, count, purge, get the IDs (`ids()`) and group (`stats()`) the rows that match a `DeadLetterFilter`. Mark an open row as replayed (`markReplayed()`, conditional, returns `bool`). | `PostgreSqlDeadLetterStore` (PostgreSQL adapter); `InMemoryDeadLetterStore` (test kit) |
 | `Consumer\DeliveryControl` | Ack one delivery, or schedule its retry. | `AmqpDeliveryControl` (AMQP adapter); `RecordingDeliveryControl` (test kit) |
 | `Consumer\MessageDispatcher` | Run the handler of an incoming message. | `CallableDispatcher` (core); your own adapter to a command bus |
 | `Retry\RetryPolicy` | Decide to retry, dead-letter or discard a failed delivery. | `ExponentialRetryPolicy` and `RetryPolicyMap` (core); your own policy |
@@ -32,6 +32,14 @@ ports and extends the contract test cases of the test kit (see
   and gets the message name, error class, error message, error trace,
   attempts, `failedAt`, body, headers and `replayable` of the new dead letter.
   With no open row, it adds a row with the `id` of the dead letter.
+- `markReplayed(string $id): bool` is conditional: it sets `replayedAt` only
+  when the row exists and `replayedAt` is null, and returns `true` only when
+  this call set the mark. An unknown ID, a value that is not a valid ID (the
+  PostgreSQL store sends no query for a value that is not a UUID) and a
+  replayed row give `false`, with no error, and the first `replayedAt` stays.
+  The PostgreSQL store runs `UPDATE ... WHERE id = :id AND replayed_at IS
+  NULL` and returns `rowCount() === 1`; the row lock makes a second
+  transaction wait, and under `READ COMMITTED` it then gets `false`.
 - `list(DeadLetterFilter $filter, int $limit = 100, int $offset = 0)`: the
   matching rows, newest first (`failedAt` descending, then `id` descending).
 - `count(DeadLetterFilter $filter)`: the count of the rows that `list()` gives
@@ -44,6 +52,15 @@ ports and extends the contract test cases of the test kit (see
   `failedAt`), count descending, then by name, source and error class.
 - `purge(DeadLetterFilter $filter)`: deletes each matching row and returns the
   count. An empty filter deletes every row.
+
+`DeadLetter\ReplayService` takes `(DeadLetterStore $deadLetters, OutboxStore
+$outbox, Transaction $transaction, WireFormat $wireFormat, ?BrokerEvents
+$events = null)`. The three ports must work on one connection: the replay
+marks the row, inserts the outbox row and commits in one transaction of the
+`Transaction` port (see [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md) for the
+two-connection limit). `replay()` throws `DeadLetterNotFound`,
+`AlreadyReplayed` or `NotReplayable` for a refusal; each extends
+`RuntimeException`. `check()` runs the same checks and changes nothing.
 
 `DeadLetter\DeadLetterFilter` has nine optional criteria (`null` means no
 condition), which combine with AND: `messageName`, `source`, `errorClass`,
