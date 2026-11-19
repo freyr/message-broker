@@ -951,7 +951,10 @@ final class DeliveryProcessorTest extends TestCase
                 return [];
             }
 
-            public function markReplayed(string $id): void {}
+            public function markReplayed(string $id): bool
+            {
+                return false;
+            }
 
             public function purge(DeadLetterFilter $filter): int
             {

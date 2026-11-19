@@ -12,6 +12,9 @@ use Freyr\MessageBroker\Time\EpochMillis;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Clock\Clock;
+use Symfony\Component\Clock\MockClock;
+use Symfony\Component\Clock\NativeClock;
 use Symfony\Component\Uid\Uuid;
 
 /**
@@ -432,6 +435,74 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         self::assertSame($replayed->body, $found->body);
         self::assertNull($this->store()->find($other->id)?->replayedAt);
         self::assertSame(2, $this->store()->count(new DeadLetterFilter()));
+    }
+
+    public function testMarkReplayedOfAnOpenRowReturnsTrueAndSetsTheMarkAndKeepsTheOtherFields(): void
+    {
+        $deadLetter = $this->deadLetter(messageId: 'm-1', headers: [
+            'x-flag' => 'v',
+        ]);
+        $this->store()->store($deadLetter);
+        $before = $this->store()->find($deadLetter->id);
+        self::assertNotNull($before);
+        $now = intdiv(EpochMillis::now(), 1000) * 1000 + 250;
+
+        Clock::set(new MockClock(EpochMillis::toDateTime($now)));
+        try {
+            self::assertTrue($this->store()->markReplayed($deadLetter->id));
+        } finally {
+            Clock::set(new NativeClock());
+        }
+
+        $found = $this->store()->find($deadLetter->id);
+        self::assertNotNull($found);
+        self::assertSame($now, $found->replayedAt);
+        self::assertEquals(
+            [$before->id, $before->source, $before->messageId, $before->messageName, $before->body, $before->headers,
+                $before->errorClass, $before->errorMessage, $before->errorTrace, $before->attempts, $before->failedAt,
+                $before->replayable],
+            [$found->id, $found->source, $found->messageId, $found->messageName, $found->body, $found->headers,
+                $found->errorClass, $found->errorMessage, $found->errorTrace, $found->attempts, $found->failedAt,
+                $found->replayable],
+            'the other fields stay',
+        );
+    }
+
+    public function testASecondMarkReplayedReturnsFalseAndKeepsTheFirstMark(): void
+    {
+        $deadLetter = $this->deadLetter();
+        $this->store()->store($deadLetter);
+        $first = intdiv(EpochMillis::now(), 1000) * 1000 + 100;
+        $clock = new MockClock(EpochMillis::toDateTime($first));
+
+        Clock::set($clock);
+        try {
+            self::assertTrue($this->store()->markReplayed($deadLetter->id));
+            $clock->sleep(5);
+            self::assertFalse($this->store()->markReplayed($deadLetter->id), 'the row is replayed');
+        } finally {
+            Clock::set(new NativeClock());
+        }
+
+        self::assertSame($first, $this->store()->find($deadLetter->id)?->replayedAt, 'the first mark stays');
+    }
+
+    public function testMarkReplayedOfAnUnknownIdReturnsFalse(): void
+    {
+        $deadLetter = $this->deadLetter();
+        $this->store()->store($deadLetter);
+
+        self::assertFalse($this->store()->markReplayed(self::newId()));
+        self::assertNull($this->store()->find($deadLetter->id)?->replayedAt, 'no other row changes');
+    }
+
+    public function testMarkReplayedOfAValueThatIsNotAUuidReturnsFalseWithNoError(): void
+    {
+        $deadLetter = $this->deadLetter();
+        $this->store()->store($deadLetter);
+
+        self::assertFalse($this->store()->markReplayed('not-a-uuid'));
+        self::assertNull($this->store()->find($deadLetter->id)?->replayedAt);
     }
 
     public function testPurgeWithoutFiltersRemovesEveryRowAndReturnsTheCount(): void

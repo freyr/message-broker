@@ -170,13 +170,27 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
     }
 
     /** Replay keeps the row for audit — marks replayed_at instead of deleting. */
-    public function markReplayed(string $id): void
+    /**
+     * The conditional update takes the row lock: a second transaction that
+     * marks the same row waits, and after the commit of the first it finds
+     * replayed_at set and changes no row (READ COMMITTED). A value that is
+     * not a UUID is "no row", with no query (the guard of find()).
+     */
+    public function markReplayed(string $id): bool
     {
-        $statement = $this->pdo->prepare('UPDATE dead_letters SET replayed_at = :replayed_at WHERE id = :id');
+        if (!Uuid::isValid($id)) {
+            return false;
+        }
+
+        $statement = $this->pdo->prepare(
+            'UPDATE dead_letters SET replayed_at = :replayed_at WHERE id = :id AND replayed_at IS NULL',
+        );
         $statement->execute([
             'replayed_at' => EpochMillis::toDateTime(EpochMillis::now())->format(self::DATETIME_FORMAT),
             'id' => $id,
         ]);
+
+        return $statement->rowCount() === 1;
     }
 
     public function purge(DeadLetterFilter $filter): int

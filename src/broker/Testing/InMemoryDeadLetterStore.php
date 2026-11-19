@@ -146,11 +146,11 @@ final class InMemoryDeadLetterStore implements DeadLetterStore, TransactionParti
         return $stats;
     }
 
-    public function markReplayed(string $id): void
+    public function markReplayed(string $id): bool
     {
         $item = $this->items[$id] ?? null;
-        if ($item === null) {
-            return;
+        if ($item === null || $item->replayedAt !== null) {
+            return false;
         }
         $this->items[$id] = new DeadLetter(
             $item->id,
@@ -167,6 +167,8 @@ final class InMemoryDeadLetterStore implements DeadLetterStore, TransactionParti
             EpochMillis::now(),
             $item->replayable,
         );
+
+        return true;
     }
 
     public function purge(DeadLetterFilter $filter): int
