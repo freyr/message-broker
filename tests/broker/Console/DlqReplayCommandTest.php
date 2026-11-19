@@ -10,11 +10,13 @@ use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Testing\InMemoryDeadLetterStore;
+use Freyr\MessageBroker\Testing\InMemoryDeliveryStore;
 use Freyr\MessageBroker\Testing\InMemoryTransaction;
 use Freyr\MessageBroker\Tests\Fixtures\DeadLetterFactory;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingDeadLetterStore;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingOutboxStore;
 use Freyr\MessageBroker\Time\EpochMillis;
+use Freyr\MessageBroker\Webhook\DeliveryRecord;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -582,6 +584,65 @@ final class DlqReplayCommandTest extends TestCase
         ]);
 
         self::assertEquals($before, $this->clock->now());
+    }
+
+    public function testDryRunOfAWebhookDeadLetterWithABodyThatIsNotACanonicalDocumentPassesAndChangesNothing(): void
+    {
+        $this->store->add(DeadLetterFactory::make('dl-1', source: 'webhook:crm', body: self::RAW));
+        $deliveries = new InMemoryDeliveryStore();
+        $tester = $this->webhookTester($deliveries);
+
+        $status = $tester->execute([
+            'id' => 'dl-1',
+            '--dry-run' => true,
+        ]);
+
+        self::assertSame(Command::SUCCESS, $status);
+        self::assertStringStartsWith('[dry-run] would replay dl-1', $tester->getDisplay());
+        self::assertSame([], $deliveries->records());
+        self::assertSame([], $this->outbox->inserted);
+        self::assertNull($this->store->find('dl-1')?->replayedAt);
+    }
+
+    public function testReplayOfAWebhookDeadLetterInsertsOneDeliveryRowForTheLaneOfTheSourceAndNoOutboxRow(): void
+    {
+        $this->store->add(DeadLetterFactory::make('dl-1', source: 'webhook:crm', body: self::RAW));
+        $deliveries = new InMemoryDeliveryStore();
+        $tester = $this->webhookTester($deliveries);
+
+        $status = $tester->execute([
+            'id' => 'dl-1',
+            '--lane' => 'orders',
+        ]);
+
+        self::assertSame(Command::SUCCESS, $status);
+        self::assertSame(['crm'], array_map(static fn (DeliveryRecord $r): string => $r->lane, $deliveries->records()));
+        self::assertSame(self::RAW, $deliveries->records()[0]->body);
+        self::assertSame([], $this->outbox->inserted);
+    }
+
+    public function testReplayOfAWebhookDeadLetterWithNoDeliveryStoreFailsAsNotReplayable(): void
+    {
+        $this->store->add(DeadLetterFactory::make('dl-1', source: 'webhook:crm'));
+        $tester = $this->tester();
+
+        $status = $tester->execute([
+            'id' => 'dl-1',
+        ]);
+
+        self::assertSame(Command::FAILURE, $status);
+        self::assertSame(
+            "Dead letter 'dl-1' is not replayable: the replay service has no delivery store for a webhook dead letter.\n",
+            $tester->getDisplay(),
+        );
+        self::assertSame([], $this->outbox->inserted);
+    }
+
+    private function webhookTester(InMemoryDeliveryStore $deliveries): CommandTester
+    {
+        $replay = new ReplayService($this->replayStore, $this->outbox, new InMemoryTransaction(), new JsonWireFormat(), deliveries: $deliveries);
+
+        return new CommandTester(new DlqReplayCommand($replay, $this->store));
     }
 
     private function seedRefusedRows(): void

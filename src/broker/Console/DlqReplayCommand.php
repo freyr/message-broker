@@ -25,7 +25,9 @@ use Throwable;
 
 /**
  * Replays one dead letter, or each matching dead letter with --all. Each
- * replay is its own transaction ({@see ReplayService}).
+ * replay is its own transaction ({@see ReplayService}). A webhook dead letter
+ * (source "webhook:<lane>") goes to a new delivery row for the lane of its
+ * source; --lane has no effect on it, and the output names the --lane value.
  *
  * --all reads only open rows (replayed = false), with replayable = true unless
  * --not-replayable is given, and only rows that failed before the start of
@@ -55,7 +57,7 @@ final class DlqReplayCommand extends Command
         $this
             ->addArgument('id', InputArgument::OPTIONAL, 'Dead letter id (omit with --all)')
             ->addOption('all', null, InputOption::VALUE_NONE, 'Replay every matching dead letter that is not replayed')
-            ->addOption('lane', null, InputOption::VALUE_REQUIRED, 'Target outbox lane', 'default')
+            ->addOption('lane', null, InputOption::VALUE_REQUIRED, 'Target outbox lane (no effect on a webhook dead letter)', 'default')
             ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'With --all: the maximum number of rows that the run handles')
             ->addOption('rate', null, InputOption::VALUE_REQUIRED, 'With --all: the maximum number of replays that start in one second')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Show what would be replayed; change nothing')

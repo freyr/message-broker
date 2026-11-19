@@ -4,17 +4,24 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Fixtures;
 
+use Closure;
 use Freyr\MessageBroker\Testing\InMemoryDeliveryStore;
 use Freyr\MessageBroker\Webhook\DeliveryStore;
 use Throwable;
 
 /**
  * A delivery store over an in-memory store that throws a chosen error from
- * claim() or complete(), as a database that fails, or whose complete()
- * changes nothing, as a store whose lease check skips each row.
+ * insert(), claim() or complete(), as a database that fails, or whose
+ * complete() changes nothing, as a store whose lease check skips each row.
+ * Each insert() call is reported to $log.
  */
 final class FailingDeliveryStore implements DeliveryStore
 {
+    public ?Throwable $insertError = null;
+
+    /** @var (Closure(string): void)|null receives 'insert' at the start of each insert() */
+    public ?Closure $log = null;
+
     public ?Throwable $claimError = null;
 
     public ?Throwable $completeError = null;
@@ -27,6 +34,12 @@ final class FailingDeliveryStore implements DeliveryStore
 
     public function insert(array $records): void
     {
+        if ($this->log !== null) {
+            ($this->log)('insert');
+        }
+        if ($this->insertError !== null) {
+            throw $this->insertError;
+        }
         $this->inner->insert($records);
     }
 

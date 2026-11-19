@@ -11,6 +11,11 @@ use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Serializer\WireFormat;
 use Freyr\MessageBroker\Storage\Transaction;
 use Freyr\MessageBroker\Time\EpochMillis;
+use Freyr\MessageBroker\Webhook\DeliveryLoop;
+use Freyr\MessageBroker\Webhook\DeliveryRecord;
+use Freyr\MessageBroker\Webhook\DeliveryStore;
+use InvalidArgumentException;
+use Symfony\Component\Uid\Uuid;
 use Throwable;
 
 /**
@@ -35,9 +40,19 @@ use Throwable;
  * consumer of that queue processes the replay. The class keeps the last
  * created_at that it used, so it is not readonly.
  *
+ * A webhook dead letter (source "webhook:<lane>") goes to the delivery store
+ * instead: a new delivery row for that lane, with the message id, the message
+ * name and the body bytes of the dead letter (no decode), attempts 0, and the
+ * headers minus the strip list of BrokerHeader, with no x-replay-target. The
+ * lane argument has no effect on it. The same transaction holds the
+ * conditional markReplayed() first and the delivery insert second, so the
+ * delivery store must work on the connection of the transaction too. A
+ * service with no delivery store refuses a webhook dead letter.
+ *
  * Refusals: DeadLetterNotFound, AlreadyReplayed (replayed_at is set, or
  * another process set it first), NotReplayable (the mark replayable = false,
- * or a body that is not the canonical document). Each other throwable
+ * a body that is not the canonical document, or for a webhook dead letter: no
+ * delivery store, or a source with no valid lane). Each other throwable
  * propagates after the rollback.
  */
 final class ReplayService
@@ -51,6 +66,7 @@ final class ReplayService
         private readonly Transaction $transaction,
         private readonly WireFormat $wireFormat,
         private readonly ?BrokerEvents $events = null,
+        private readonly ?DeliveryStore $deliveries = null,
     ) {}
 
     /**
@@ -60,7 +76,16 @@ final class ReplayService
      */
     public function replay(string $deadLetterId, string $lane = 'default'): void
     {
-        [$deadLetter, $messageName, $payload] = $this->replayable($deadLetterId);
+        $deadLetter = $this->open($deadLetterId);
+        if (self::isWebhook($deadLetter)) {
+            [$deliveries, $delivery] = $this->delivery($deadLetter);
+            $this->markAndInsert($deadLetter, static fn () => $deliveries->insert([$delivery]));
+            $this->recordReplayed($deadLetter, $deadLetter->messageName, $delivery->lane);
+
+            return;
+        }
+
+        [$messageName, $payload] = $this->decode($deadLetter);
 
         // The original id keeps consumer dedup state consistent. The original
         // outbox row may still exist (published, waiting for retention); the
@@ -74,33 +99,8 @@ final class ReplayService
             createdAt: $this->nextCreatedAt(),
         );
 
-        $this->transaction->begin();
-        try {
-            // The mark is the first write: with two connections and the
-            // transaction on the dead letter connection, a stop leaves an
-            // outbox row and an open dead letter (a repeat), never a lost replay.
-            if (!$this->deadLetters->markReplayed($deadLetter->id)) {
-                throw new AlreadyReplayed($deadLetter->id);
-            }
-            $this->outbox->insert($record);
-            $this->transaction->commit();
-        } catch (Throwable $error) {
-            try {
-                $this->transaction->rollBack();
-            } catch (Throwable) {
-                // The first error is the one to report; a failed rollback
-                // means the connection is gone and the database rolls back.
-            }
-
-            throw $error;
-        }
-
-        $this->events?->record(BrokerEvents::REPLAYED, [
-            'message_id' => $deadLetter->messageId,
-            'message_name' => $messageName,
-            'lane' => $lane,
-            'target' => $deadLetter->source,
-        ]);
+        $this->markAndInsert($deadLetter, fn () => $this->outbox->insert($record));
+        $this->recordReplayed($deadLetter, $messageName, $lane);
     }
 
     /**
@@ -112,7 +112,12 @@ final class ReplayService
      */
     public function check(string $deadLetterId): void
     {
-        $this->replayable($deadLetterId);
+        $deadLetter = $this->open($deadLetterId);
+        if (self::isWebhook($deadLetter)) {
+            $this->delivery($deadLetter);
+        } else {
+            $this->decode($deadLetter);
+        }
     }
 
     /**
@@ -126,9 +131,50 @@ final class ReplayService
     }
 
     /**
-     * @return array{0: DeadLetter, 1: string, 2: array<string, mixed>} [deadLetter, messageName, payload]
+     * One replay transaction: the conditional mark first, then the insert,
+     * then the commit; a rollback on each throwable.
+     *
+     * @param callable(): void $insert
      */
-    private function replayable(string $deadLetterId): array
+    private function markAndInsert(DeadLetter $deadLetter, callable $insert): void
+    {
+        $this->transaction->begin();
+        try {
+            // The mark is the first write: with two connections and the
+            // transaction on the dead letter connection, a stop leaves a new
+            // row and an open dead letter (a repeat), never a lost replay.
+            if (!$this->deadLetters->markReplayed($deadLetter->id)) {
+                throw new AlreadyReplayed($deadLetter->id);
+            }
+            $insert();
+            $this->transaction->commit();
+        } catch (Throwable $error) {
+            try {
+                $this->transaction->rollBack();
+            } catch (Throwable) {
+                // The first error is the one to report; a failed rollback
+                // means the connection is gone and the database rolls back.
+            }
+
+            throw $error;
+        }
+    }
+
+    private function recordReplayed(DeadLetter $deadLetter, string $messageName, string $lane): void
+    {
+        $this->events?->record(BrokerEvents::REPLAYED, [
+            'message_id' => $deadLetter->messageId,
+            'message_name' => $messageName,
+            'lane' => $lane,
+            'target' => $deadLetter->source,
+        ]);
+    }
+
+    /**
+     * The checks of each replay that read no body: found, not replayed, not
+     * marked not replayable.
+     */
+    private function open(string $deadLetterId): DeadLetter
     {
         $deadLetter = $this->deadLetters->find($deadLetterId) ?? throw new DeadLetterNotFound($deadLetterId);
         if ($deadLetter->replayedAt !== null) {
@@ -138,7 +184,39 @@ final class ReplayService
             throw new NotReplayable($deadLetter->id, 'marked not replayable');
         }
 
-        return [$deadLetter, ...$this->decode($deadLetter)];
+        return $deadLetter;
+    }
+
+    private static function isWebhook(DeadLetter $deadLetter): bool
+    {
+        return str_starts_with($deadLetter->source, DeliveryLoop::SOURCE_PREFIX);
+    }
+
+    /**
+     * The delivery store and the new delivery row of a webhook dead letter,
+     * for the lane of its source. Its own id and a created_at of now give the
+     * row its own primary key.
+     *
+     * @return array{0: DeliveryStore, 1: DeliveryRecord}
+     */
+    private function delivery(DeadLetter $deadLetter): array
+    {
+        $deliveries = $this->deliveries
+            ?? throw new NotReplayable($deadLetter->id, 'the replay service has no delivery store for a webhook dead letter');
+
+        try {
+            return [$deliveries, new DeliveryRecord(
+                id: Uuid::v7()->toString(),
+                messageId: $deadLetter->messageId,
+                lane: substr($deadLetter->source, strlen(DeliveryLoop::SOURCE_PREFIX)),
+                messageName: $deadLetter->messageName,
+                body: $deadLetter->body,
+                headers: BrokerHeader::withoutReplayStrip($deadLetter->headers),
+                createdAt: EpochMillis::now(),
+            )];
+        } catch (InvalidArgumentException $error) {
+            throw new NotReplayable($deadLetter->id, "the source has no valid lane: {$error->getMessage()}");
+        }
     }
 
     /**
