@@ -28,6 +28,10 @@ signature of `AmqpConsumer::run()`. It changes no schema.
 - `DeliveryProcessor` takes a `DeadLetterSink` as `deadLetters` (the table or
   a queue of the transport); a `DeadLetterStore` still fits, so no change is
   necessary.
+- Upgrade the process that runs `message-broker:dlq:import` before a consumer
+  uses `AmqpDeadLetterSink`: an older import ignores the header
+  `x-dead-letter`. For a rollback, see `docs/amqp/DEAD_LETTERS.md`, "Upgrade
+  and rollback order".
 
 ## From 0.10.x to 0.11.0
 

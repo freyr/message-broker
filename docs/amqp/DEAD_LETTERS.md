@@ -63,6 +63,18 @@ php-amqplib. Then the processor does not ack the delivery: the consumer stops,
 and the delivery returns to the work queue. A nack that arrives late, for an
 earlier message whose confirm timed out, does not fail a later `store()`.
 
+A return is not matched to its message: the sink clears its return flag before
+each publish. Thus a `basic.return` of an earlier message that arrives after
+the confirm timeout of its `store()` can fail a later `store()`. This failure
+loses no dead letter: the processor does not ack the delivery, and the delivery
+comes again. But the later `store()` already published its own dead letter,
+and the broker routed and confirmed it. The delivery returns to the work queue
+with one more delivery count. When a later delivery of that message succeeds,
+the dead letter queue still holds a dead letter of a processed message, and the
+import writes a row for it. A replay of that row keeps the message ID: it is a
+duplicate that the deduplication of the consumer absorbs while its
+deduplication row exists.
+
 The error message and the error trace in `x-dead-letter` are cut to 1024 and
 16384 bytes, because all headers of an AMQP message must fit one frame (131064
 bytes). A larger header closes the connection. The row that the import writes
@@ -76,10 +88,15 @@ Give the sink a channel that no other publisher uses. At its first `store()`,
 the sink puts the channel in confirm mode and sets the nack handler and the
 return listener of the channel. A channel has one of each:
 `WaitQueuePublisher` keeps its own nack handler on the consumer channel, and a
-sink on that channel replaces it, so a nack of a retry becomes invisible. A
-second channel on the connection of the consumer is sufficient: php-amqplib
-reads the frames of the sink channel while the consumer channel waits inside
-its callback (the functional round trip test shows it).
+sink on that channel replaces it, so a nack of a retry becomes invisible.
+Also, each `confirm_select()` sets the delivery tag counter of the php-amqplib
+channel back to 1, and the broker continues its own count. When a second
+publisher puts the same channel in confirm mode and publishes on it, the
+counts do not agree (measured: `Server ack'ed unknown delivery_tag "2"`). Thus
+each publisher with confirms needs its own channel. A second channel on the
+connection of the consumer is sufficient: php-amqplib reads the frames of the
+sink channel while the consumer channel waits inside its callback (the
+functional round trip test shows it).
 
 ### The mandatory flag
 
@@ -109,6 +126,29 @@ $channel->wait_for_pending_acks_returns(5);
 // $returned must be false, and the message must be in orders_q.dlq. Remove it
 // before the first import: the import would store it as a row of the queue.
 ```
+
+### Upgrade and rollback order
+
+The import of release 0.11.0 and earlier ignores the header `x-dead-letter`.
+Upgrade the process that runs `message-broker:dlq:import` to 0.11.1 or later
+before a consumer uses `AmqpDeadLetterSink`.
+
+To go back from a queue sink to a release before 0.11.1, keep this order:
+
+1. Change each consumer back to the `dead_letters` table (the default sink),
+   and deploy. No new sink message arrives.
+2. Run `message-broker:dlq:import` of the current release for each dead letter
+   queue that a sink wrote to, until the queue is empty. Each row keeps the
+   handler error and its `replayable` mark.
+3. Deploy the older release.
+
+When the order is not kept, an import that ignores `x-dead-letter` sees a sink
+message as a message with no move (it has no `x-death` entry of a move). The
+row gets the dead letter queue as `source`, `MovedByTransport` as the error
+class, an empty trace and `replayable` false. The error columns do not hold
+the handler error. It stays only in the header `x-dead-letter` in the column
+`headers` of the row (`message-broker:dlq:show` prints it). The row cannot be
+replayed.
 
 ## Import
 
@@ -161,6 +201,10 @@ message, the newest entry first. The import takes the newest entry whose
 - The `time` field is an AMQP timestamp with second precision; php-amqplib
   decodes it to a `\DateTime`. It becomes epoch milliseconds (seconds × 1000).
   With no time, the row gets the time of the import.
+- In the column `headers` of the row, the `time` field of each `x-death`
+  entry is the JSON form of the `\DateTime`: an object with the keys `date`,
+  `timezone_type` and `timezone`. A row of the table sink and a row of the
+  queue sink (after the import) hold the same form.
 - An entry with no string `queue`, no string `reason` or no integer `count` is
   skipped.
 
