@@ -38,12 +38,21 @@ The normal flow has these steps:
 5. When the dispatcher throws, it rolls back. When the rollback fails (a dead
    connection), the error propagates and the delivery is redelivered. Otherwise
    the retry policy decides: `Retry` (a delayed, confirmed redelivery, then
-   ack), `DeadLetter` (a row in `dead_letters`, then ack) or `Discard` (ack).
+   ack), `DeadLetter` (a dead letter through the sink, then ack) or `Discard` (ack).
 
 Every path that returns normally has acked the delivery. A dead letter of a
 malformed message keeps the raw bytes and is not replayable. A dead letter of
 a failed handler keeps the decoded message and is replayable (see
 [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md)).
+
+Each dead letter of the processor (the delivery limit, a malformed message, a
+`DeadLetter` decision) goes to the one sink of the consumer, the
+`DeadLetterSink` that the processor takes as `deadLetters`: the `dead_letters`
+table (a `DeadLetterStore`, the default) or a queue of the transport (for AMQP,
+`AmqpDeadLetterSink`, see [../amqp/DEAD_LETTERS.md](../amqp/DEAD_LETTERS.md)).
+The processor acks only after `store()` returns. A sink that throws leaves the
+delivery unacked and gives no event `message.dead_lettered`. The processor
+never rejects or nacks a delivery as a result of a handler failure.
 
 ## The fields of a dead letter
 

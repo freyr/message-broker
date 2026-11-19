@@ -1,5 +1,11 @@
 # Upgrade guide
 
+## From 0.11.0 to 0.11.1
+
+- `DeliveryProcessor` takes a `DeadLetterSink` as `deadLetters` (the table or
+  a queue of the transport); a `DeadLetterStore` still fits, so no change is
+  necessary.
+
 ## From 0.10.x to 0.11.0
 
 This release makes the replay of a dead letter atomic, refuses replayed and
