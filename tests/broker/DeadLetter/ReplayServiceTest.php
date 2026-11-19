@@ -10,6 +10,7 @@ use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\NotReplayable;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Observability\BrokerEvents;
+use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Storage\Transaction;
@@ -21,9 +22,13 @@ use Freyr\MessageBroker\Testing\RecordingTransaction;
 use Freyr\MessageBroker\Tests\Fixtures\DeadLetterFactory;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingDeadLetterStore;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingOutboxStore;
+use Freyr\MessageBroker\Time\EpochMillis;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
+use Symfony\Component\Clock\Clock;
+use Symfony\Component\Clock\MockClock;
+use Symfony\Component\Clock\NativeClock;
 use Throwable;
 
 final class ReplayServiceTest extends TestCase
@@ -32,6 +37,11 @@ final class ReplayServiceTest extends TestCase
     private InMemoryDeadLetterStore $store;
     private InMemoryOutboxStore $outbox;
     private RecordingEvents $events;
+
+    protected function tearDown(): void
+    {
+        Clock::set(new NativeClock());
+    }
 
     protected function setUp(): void
     {
@@ -68,8 +78,64 @@ final class ReplayServiceTest extends TestCase
                 'message_id' => 'm-42',
                 'message_name' => 'order.placed',
                 'lane' => 'orders',
+                'target' => 'orders_q',
             ],
         ]], $this->events->records);
+    }
+
+    public function testTheOutboxRowHasTheReplayTargetAndNoneOfTheStripListHeaders(): void
+    {
+        $this->store->add(DeadLetterFactory::make('dl-1', source: 'payments_q', messageId: 'm-42', headers: [
+            'correlation_id' => 'c-1',
+            'x-attempt' => 3,
+            'x-message-id' => 'stale-id',
+            'x-message-name' => 'stale.name',
+            'x-created-at' => 1,
+            'x-replay-target' => 'old_q',
+            'x-delivery-count' => 7,
+            'x-death' => [[
+                'queue' => 'old_q',
+            ]],
+            'x-first-death-queue' => 'old_q',
+            'x-first-death-reason' => 'rejected',
+            'x-last-death-queue' => 'old_q',
+            'x-dead-letter' => '{"stale":true}',
+            'x-deathly' => 'kept: only the exact name x-death is stripped',
+            'trace-x-first-death-' => 'kept: the prefix must start the name',
+        ]));
+
+        $this->service()->replay('dl-1');
+
+        self::assertSame([
+            'correlation_id' => 'c-1',
+            'x-deathly' => 'kept: only the exact name x-death is stripped',
+            'trace-x-first-death-' => 'kept: the prefix must start the name',
+            'x-replay-target' => 'payments_q',
+        ], $this->outbox->row('m-42')->headers);
+        self::assertSame(7, $this->store->find('dl-1')?->headers['x-delivery-count'], 'the dead letter keeps its headers');
+    }
+
+    public function testTwoReplaysOfOneMessageIdInOneMillisecondGetDifferentCreatedAt(): void
+    {
+        $clock = new MockClock('2026-06-15 12:00:00.250 UTC');
+        Clock::set($clock);
+        $now = EpochMillis::now();
+        $this->store->add(DeadLetterFactory::make('dl-a', source: 'orders_q', messageId: 'm-1'));
+        $this->store->add(DeadLetterFactory::make('dl-b', source: 'billing_q', messageId: 'm-1'));
+        $this->store->add(DeadLetterFactory::make('dl-c', source: 'audit_q', messageId: 'm-1'));
+        $outbox = new RecordingOutboxStore();
+        $service = $this->service(outbox: $outbox);
+
+        $service->replay('dl-a');
+        $service->replay('dl-b');
+        $clock->sleep(1);
+        $service->replay('dl-c');
+
+        self::assertSame(
+            [$now, $now + 1, $now + 1000],
+            array_map(static fn (OutboxRecord $r): int => $r->createdAt, $outbox->inserted),
+            'the later of now and the last value + 1 ms',
+        );
     }
 
     public function testAReplayedRowIsAlreadyReplayedAndNoTransactionStarts(): void

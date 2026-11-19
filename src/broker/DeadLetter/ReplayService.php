@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\DeadLetter;
 
+use Freyr\MessageBroker\BrokerHeader;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\OutboxStore;
-use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Serializer\WireFormat;
 use Freyr\MessageBroker\Storage\Transaction;
 use Freyr\MessageBroker\Time\EpochMillis;
@@ -30,6 +30,11 @@ use Throwable;
  * (a stop then repeats a replay, and never loses one). Do not call replay()
  * inside a transaction that is open on the same connection.
  *
+ * The outbox row has the headers of the dead letter minus the strip list of
+ * BrokerHeader, plus x-replay-target = the source of the dead letter: only the
+ * consumer of that queue processes the replay. The class keeps the last
+ * created_at that it used, so it is not readonly.
+ *
  * Refusals: DeadLetterNotFound, AlreadyReplayed (replayed_at is set, or
  * another process set it first), NotReplayable (the mark replayable = false,
  * or a body that is not the canonical document). Each other throwable
@@ -37,6 +42,9 @@ use Throwable;
  */
 final class ReplayService
 {
+    /** The created_at of the last outbox row of this service, epoch ms. */
+    private int $lastCreatedAt = 0;
+
     public function __construct(
         private readonly DeadLetterStore $deadLetters,
         private readonly OutboxStore $outbox,
@@ -62,8 +70,8 @@ final class ReplayService
             lane: $lane,
             messageName: $messageName,
             body: $this->wireFormat->encode($messageName, $payload),
-            headers: $this->cleanHeadersForReplay($deadLetter->headers),
-            createdAt: EpochMillis::now(),
+            headers: BrokerHeader::forReplay($deadLetter->headers, $deadLetter->source),
+            createdAt: $this->nextCreatedAt(),
         );
 
         $this->transaction->begin();
@@ -91,6 +99,7 @@ final class ReplayService
             'message_id' => $deadLetter->messageId,
             'message_name' => $messageName,
             'lane' => $lane,
+            'target' => $deadLetter->source,
         ]);
     }
 
@@ -107,6 +116,16 @@ final class ReplayService
     }
 
     /**
+     * The later of now and the last value + 1 ms: two replays of one message
+     * id in one millisecond (one message failed on two queues) get two
+     * primary keys (id, created_at) in the outbox.
+     */
+    private function nextCreatedAt(): int
+    {
+        return $this->lastCreatedAt = max(EpochMillis::now(), $this->lastCreatedAt + 1);
+    }
+
+    /**
      * @return array{0: DeadLetter, 1: string, 2: array<string, mixed>} [deadLetter, messageName, payload]
      */
     private function replayable(string $deadLetterId): array
@@ -120,29 +139,6 @@ final class ReplayService
         }
 
         return [$deadLetter, ...$this->decode($deadLetter)];
-    }
-
-    /**
-     * Strip headers that must not carry over to a replayed outbox record:
-     *
-     * - x-attempt: dropping it resets the full retry budget for the replay.
-     * - x-message-id / x-message-name / x-created-at: the envelope is re-derived
-     *   from the DLQ document and re-exploded by the relay. The relay would
-     *   overwrite stale copies anyway (its explode wins on key collision), but
-     *   dropping them here keeps the replayed row's produce-time headers clean.
-     *
-     * All other headers (e.g. correlation_id) are preserved so traceability
-     * context flows through the replay.
-     *
-     * @param array<string, mixed> $headers
-     *
-     * @return array<string, mixed>
-     */
-    private function cleanHeadersForReplay(array $headers): array
-    {
-        $strip = ['x-attempt', MetadataHeader::MESSAGE_ID, MetadataHeader::MESSAGE_NAME, MetadataHeader::CREATED_AT];
-
-        return array_diff_key($headers, array_flip($strip));
     }
 
     /**
