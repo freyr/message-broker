@@ -10,7 +10,6 @@ use Freyr\MessageBroker\Webhook\DeliveryCompletion;
 use Freyr\MessageBroker\Webhook\DeliveryCompletionKind;
 use Freyr\MessageBroker\Webhook\DeliveryRecord;
 use Freyr\MessageBroker\Webhook\DeliveryStore;
-use LogicException;
 use PDO;
 use Throwable;
 
@@ -123,9 +122,6 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
 
     public function insert(array $records): void
     {
-        if ($records === []) {
-            return;
-        }
         $statement = $this->pdo->prepare(<<<'SQL'
             INSERT INTO webhook_deliveries
                 (id, message_id, lane, message_name, body, headers, created_at, available_at, attempts)
@@ -149,12 +145,9 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
 
     public function claim(array $lanes, int $limitForEachLane, int $total, int $leaseMs): array
     {
-        if ($lanes === []) {
-            return [];
-        }
-        $lanes = array_values(array_unique($lanes));
         $statement = $this->pdo->prepare(self::CLAIM_SQL);
-        $statement->bindValue('lanes', json_encode($lanes, JSON_THROW_ON_ERROR));
+        // A lane that is two times in the list counts one time.
+        $statement->bindValue('lanes', json_encode(array_values(array_unique($lanes)), JSON_THROW_ON_ERROR));
         $statement->bindValue('limit_for_each_lane', $limitForEachLane, PDO::PARAM_INT);
         $statement->bindValue('total', $total, PDO::PARAM_INT);
         $statement->bindValue('lease_ms', $leaseMs, PDO::PARAM_INT);
@@ -162,9 +155,6 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
 
         /** @var list<Row> $rows */
         $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
-        // RETURNING has no order: the order of the lane list.
-        $position = array_flip($lanes);
-        usort($rows, static fn (array $a, array $b): int => $position[$a['lane']] <=> $position[$b['lane']]);
 
         return array_map(self::claimed(...), $rows);
     }
@@ -175,9 +165,6 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
         foreach ($outcomes as $outcome) {
             // The first outcome of a row wins, as when each outcome ran in turn.
             $first[$outcome->claimed->delivery->id] ??= $outcome;
-        }
-        if ($first === []) {
-            return [];
         }
 
         $this->pdo->beginTransaction();
@@ -192,9 +179,10 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
 
             $deadLetters = new PostgreSqlDeadLetterStore($this->pdo);
             foreach ($first as $id => $outcome) {
-                if ($outcome->kind === DeliveryCompletionKind::Dead && isset($changed[$id])) {
-                    // The open row rule: one open dead letter for each message ID and source.
-                    $deadLetters->store($outcome->deadLetter ?? throw new LogicException('A dead outcome has a dead letter.'));
+                // Only a dead outcome has a dead letter. The open row rule: one
+                // open dead letter for each message ID and source.
+                if ($outcome->deadLetter !== null && isset($changed[$id])) {
+                    $deadLetters->store($outcome->deadLetter);
                 }
             }
 
@@ -251,7 +239,7 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
     /** @param Row $row */
     private static function claimed(array $row): ClaimedDelivery
     {
-        $headers = json_decode($row['headers'], true, 512, JSON_THROW_ON_ERROR);
+        $headers = json_decode($row['headers'], true, flags: JSON_THROW_ON_ERROR);
         /** @var array<string, mixed> $headers the column holds the JSON object of the insert */
         $record = new DeliveryRecord(
             id: $row['id'],

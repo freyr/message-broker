@@ -188,10 +188,10 @@ final readonly class PostgreSqlDeliveryRetention implements DeliveryRetention
 
     private function countUnfinished(string $table): int
     {
-        $statement = $this->pdo->query("SELECT COUNT(*) FROM \"{$table}\" WHERE completed_at IS NULL");
-        $value = $statement === false ? false : $statement->fetchColumn();
+        $statement = $this->pdo->prepare("SELECT COUNT(*) FROM \"{$table}\" WHERE completed_at IS NULL");
+        $statement->execute();
 
-        return is_numeric($value) ? (int) $value : 0;
+        return (int) $statement->fetchColumn();
     }
 
     private static function attachDdl(string $name, DateTimeImmutable $from): string

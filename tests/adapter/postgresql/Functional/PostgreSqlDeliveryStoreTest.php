@@ -102,14 +102,35 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
         self::assertContains('Function Scan', array_column($nodes, 'Node Type'), 'the loop over the lane list');
     }
 
-    public function testAClaimWithALaneTwiceInTheListClaimsEachRowOnce(): void
+    public function testALaneTwiceInTheListCountsOneTimeAlsoForTheTotal(): void
     {
-        $rows = [$this->record(), $this->record()];
-        $this->store->insert($rows);
+        $ours = [$this->record(), $this->record()];
+        $other = $this->record(lane: 'store_other');
+        $this->store->insert([...$ours, $other]);
 
-        $claimed = $this->store->claim([self::LANE, self::LANE], 10, 10, self::LEASE_MS);
+        $claimed = $this->store->claim([self::LANE, self::LANE, 'store_other'], 2, 3, self::LEASE_MS);
 
-        self::assertEqualsCanonicalizing(self::ids($rows), self::claimedIds($claimed));
+        self::assertEqualsCanonicalizing([...self::ids($ours), $other->id], self::claimedIds($claimed));
+    }
+
+    public function testCompleteReturnsAListOfTheChangedRowsInTheOrderOfTheOutcomes(): void
+    {
+        $late = $this->record();
+        $first = $this->record();
+        $second = $this->record();
+        $this->store->insert([$late]);
+        $old = $this->store->claim([self::LANE], 10, 10, 0)[0];
+        $this->claimOne();
+        $this->store->insert([$first, $second]);
+        [$a, $b] = self::byId($this->store->claim([self::LANE], 10, 10, self::LEASE_MS), [$first->id, $second->id]);
+
+        $changed = $this->store->complete([
+            DeliveryCompletion::delivered($old),
+            DeliveryCompletion::delivered($b),
+            DeliveryCompletion::retry($a, EpochMillis::now() + 60_000),
+        ]);
+
+        self::assertSame([$second->id, $first->id], $changed);
     }
 
     public function testALaneWithQuotesCommasAndBracesIsClaimed(): void
