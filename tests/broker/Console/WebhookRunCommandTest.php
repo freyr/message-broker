@@ -92,7 +92,7 @@ final class WebhookRunCommandTest extends TestCase
         $tester = new CommandTester($this->command($base));
 
         $status = $tester->execute([
-            '--lane' => ['crm', 'erp', 'crm'],
+            '--lane' => ['crm', 'crm', 'erp'],
             '--batch-size' => '10',
             '--lane-limit' => '3',
         ]);
