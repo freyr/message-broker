@@ -1,5 +1,28 @@
 # Upgrade guide
 
+## From 0.11.x to 0.12.0
+
+This release adds worker limits to `message-broker:consume` and changes the
+signature of `AmqpConsumer::run()`. It changes no schema.
+
+- **BREAKING:** `AmqpConsumer::run()` takes a `WorkerLimits` instead of
+  `messageLimit`: `run(?WorkerLimits $limits = null, ?int $idleTimeoutSec =
+  null)`. Replace `run(messageLimit: 5)` with
+  `run(new WorkerLimits(maxMessages: 5))`, and `run(5, 10)` with
+  `run(new WorkerLimits(maxMessages: 5), 10)`. `run()` with no argument and
+  `run(idleTimeoutSec: 10)` do not change.
+- To use the new command options (`--limit`, `--time-limit`, `--memory-limit`,
+  `--failure-limit`), change each registered callable to
+  `static fn (WorkerLimits $limits) => $consumer->run($limits)` (and the same
+  for relays: `static fn (WorkerLimits $limits) => $relay->run($limits)`). A
+  callable with no parameter still runs, with no limit; the command prints a
+  warning when a limit option is set.
+- A limit stop exits with code `0`. The supervisor must start a new process
+  after each exit, exit code `0` included (see `docs/core/PRODUCTION.md`,
+  "Worker limits").
+- `DeliveryProcessor::process()` returns a `DeliveryOutcome` instead of `void`.
+  A caller that ignores the return value needs no change.
+
 ## From 0.11.0 to 0.11.1
 
 - `DeliveryProcessor` takes a `DeadLetterSink` as `deadLetters` (the table or

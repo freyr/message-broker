@@ -162,12 +162,42 @@ start a new process after each exit, exit code `0` included. See
 Runs a registered consumer. Blocks until stopped.
 
 **Constructor:** `new ConsumeCommand(array $consumers)` —
-`array<string, callable(): void>` keyed by consumer name.
+`array<string, callable(WorkerLimits): void>` keyed by consumer name. The
+command builds one `Freyr\MessageBroker\Worker\WorkerLimits` from the limit
+options and passes it to the callable, which gives it to `AmqpConsumer::run()`:
+
+```php
+new ConsumeCommand(['orders' => static fn (WorkerLimits $limits) => $consumer->run($limits)]);
+```
+
+A callable with no parameter still runs, but the limits then have no effect;
+when a limit option is set, the command prints a warning.
 
 | Argument/Option | Description |
 | --- | --- |
 | `name` (argument, required) | The registered consumer name. |
+| `--limit=<n>` | Stop after `<n>` deliveries (integer, 1 or more). Each delivery that the processor ended counts, whatever its outcome (also a duplicate and a malformed message). The stop is exact. |
+| `--time-limit=<seconds>` | Stop after `<seconds>` seconds since the start (integer, 1 or more). The consumer checks the limit after each delivery, and no wait for a delivery is longer than the time that is left, so the stop comes up to one delivery late. |
+| `--memory-limit=<size>` | Stop when `memory_get_usage(true)` reaches `<size>`, in the format of the relay option above; 1 or more. Set it below the PHP `memory_limit`. |
+| `--failure-limit=<n>` | Stop after `<n>` handler failures in this run (integer, 1 or more): deliveries that the retry policy retried, dead-lettered or discarded. It is a total, not a sequence of consecutive failures. A duplicate, a malformed message and a delivery over the delivery limit do not count. |
 | `--require-signals` | Fail immediately at startup if `ext-pcntl` is unavailable (see the relay option above for the effect of a missing extension). |
+
+A limit is checked between deliveries, never inside one: after the processor
+committed and acked the delivery, and after a wait with no delivery. A limit
+stop is a graceful stop, as SIGTERM is: the consumer logs one `info` line
+("Worker limit reached; the worker stops"), returns its unacked deliveries with
+no delivery count (see [the return rule](../amqp/CONSUMER.md)) and `run()`
+returns. With no limit option, the consumer runs until a signal or a failure, as
+before.
+
+Exit codes: `0` after the callable returned, also after a limit stop; `1` with
+`--require-signals` and no `ext-pcntl`; `2` for an unknown consumer or an
+invalid option value (the callable does not run). A failure of a delivery is
+not caught: the process ends with an error, and the supervisor restarts it.
+
+**Supervisor rule.** A limit stop exits with code `0`, so the supervisor must
+start a new process after each exit, exit code `0` included. See
+[Worker limits in PRODUCTION.md](PRODUCTION.md#worker-limits).
 
 ## Dead letter filter options
 
