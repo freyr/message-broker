@@ -66,7 +66,7 @@ final readonly class ResponseClassifier
 
     public function transportError(Throwable $error, int $requestMs): DeliveryResult
     {
-        return DeliveryResult::failed($requestMs, \sprintf('%s (%s)', $error::class, self::category($error)));
+        return DeliveryResult::failed($requestMs, \sprintf('%s (%s)', $error::class, $this->category($error)));
     }
 
     /** A request that is still open at the deadline of the send() call. */
@@ -114,15 +114,15 @@ final readonly class ResponseClassifier
         return DeliveryResult::refused(self::REASON_INVALID_DESTINATION, 0, $text);
     }
 
-    /** The same rule as NoPrivateNetworkHttpClient with its default subnets. */
+    /**
+     * The default list of NoPrivateNetworkHttpClient. Its extra quick check
+     * (the private and reserved ranges of filter_var()) blocks no address
+     * that this list does not hold.
+     */
     private static function isPrivateIp(string $host): bool
     {
-        if (filter_var($host, \FILTER_VALIDATE_IP) === false) {
-            return false;
-        }
-
-        return filter_var($host, \FILTER_VALIDATE_IP, \FILTER_FLAG_NO_PRIV_RANGE | \FILTER_FLAG_NO_RES_RANGE) === false
-            || IpUtils::checkIp($host, IpUtils::PRIVATE_SUBNETS);
+        // checkIp() is false for a host name.
+        return IpUtils::checkIp($host, IpUtils::PRIVATE_SUBNETS);
     }
 
     private static function statusText(int $status, string $body): string
@@ -156,7 +156,7 @@ final readonly class ResponseClassifier
      * message, with each quoted part (the URL, the host) removed first. The
      * message itself is never part of a result.
      */
-    private static function category(Throwable $error): string
+    public function category(Throwable $error): string
     {
         if ($error instanceof TimeoutExceptionInterface) {
             return self::CATEGORY_TIMEOUT;
