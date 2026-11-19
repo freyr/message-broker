@@ -8,13 +8,15 @@ use DateTimeImmutable;
 use DateTimeZone;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryRetention;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliverySchemaInstaller;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryStore;
+use Freyr\MessageBroker\Console\WebhookAbandonCommand;
 use Freyr\MessageBroker\Console\WebhookMaintainCommand;
 use Freyr\MessageBroker\Console\WebhookSetupCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\Uid\Uuid;
 
-/** message-broker:webhook:setup and message-broker:webhook:maintain on the PostgreSQL adapter. */
+/** message-broker:webhook:setup, message-broker:webhook:maintain and message-broker:webhook:abandon on the PostgreSQL adapter. */
 final class WebhookCommandsTest extends FunctionalTestCase
 {
     public function testSetupCreatesTheTableAndThePartitionsAhead(): void
@@ -89,14 +91,56 @@ final class WebhookCommandsTest extends FunctionalTestCase
         self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM webhook_deliveries'));
     }
 
-    private static function insertAt(string $createdAtUtc, bool $finished): void
+    public function testAbandonEndsTheOldRowsSoThatMaintainDropsTheirPartition(): void
+    {
+        $old = self::utcDay('-30 day');
+        $before = $old->modify('+1 day')->format('Y-m-d');
+        (new PostgreSqlDeliveryRetention(self::$pdo))->ensureCapacity(1, $old);
+        self::insertAt($old->format('Y-m-d 10:00:00'), finished: false);
+        self::insertAt($old->format('Y-m-d 11:00:00'), finished: false, lane: 'removed');
+        self::insertAt($old->format('Y-m-d 12:00:00'), finished: false, lane: 'removed');
+        self::insertAt($old->format('Y-m-d 13:00:00'), finished: true);
+        $maintain = new CommandTester(new WebhookMaintainCommand(new PostgreSqlDeliveryRetention(self::$pdo)));
+        self::assertSame(Command::FAILURE, $maintain->execute([]), 'the partition holds unfinished rows: it is kept');
+
+        $store = new PostgreSqlDeliveryStore(self::$pdo);
+        $dryRun = new CommandTester(new WebhookAbandonCommand($store));
+        self::assertSame(Command::SUCCESS, $dryRun->execute([
+            '--before' => $before,
+            '--dry-run' => true,
+        ]));
+        self::assertSame(3, self::fetchInt('SELECT COUNT(*) FROM webhook_deliveries WHERE completed_at IS NULL'), 'the dry run changes nothing');
+        $run = new CommandTester(new WebhookAbandonCommand($store, batchSize: 1));
+        self::assertSame(Command::SUCCESS, $run->execute([
+            '--before' => $before,
+        ]));
+
+        self::assertSame(
+            "Unfinished deliveries created before {$before} 00:00:00.000 UTC:\n"
+            ."commands: 1 row(s) abandoned.\n"
+            ."removed: 2 row(s) abandoned.\n"
+            ."Total: 3 row(s) abandoned.\n",
+            $run->getDisplay(),
+        );
+        self::assertSame(
+            str_replace(['[dry-run] ', 'would be abandoned'], ['', 'abandoned'], $dryRun->getDisplay()),
+            $run->getDisplay(),
+            'the run moves the counts of the dry run',
+        );
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM webhook_deliveries WHERE completed_at IS NULL'));
+        self::assertSame(3, self::fetchInt("SELECT COUNT(*) FROM dead_letters WHERE error_class = 'abandoned'"));
+        self::assertSame(Command::SUCCESS, $maintain->execute([]), 'each row is finished: the partition is dropped');
+        self::assertNotContains('webhook_deliveries_p'.$old->format('Ymd'), self::partitionNames());
+    }
+
+    private static function insertAt(string $createdAtUtc, bool $finished, string $lane = 'commands'): void
     {
         $id = Uuid::v7()->toString();
         $completedAt = $finished ? "'{$createdAtUtc}'" : 'NULL';
         $outcome = $finished ? '1' : 'NULL';
         self::$pdo->exec(
             "INSERT INTO webhook_deliveries (id, message_id, lane, message_name, body, headers, created_at, available_at, completed_at, outcome)
-             VALUES ('{$id}', '{$id}', 'commands', 'order.placed', '\\x7b7d', '{}', '{$createdAtUtc}', '{$createdAtUtc}', {$completedAt}, {$outcome})",
+             VALUES ('{$id}', '{$id}', '{$lane}', 'order.placed', '\\x7b7d', '{}', '{$createdAtUtc}', '{$createdAtUtc}', {$completedAt}, {$outcome})",
         );
     }
 

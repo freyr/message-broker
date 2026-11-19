@@ -12,6 +12,7 @@ use Freyr\MessageBroker\Webhook\DeliveryDeadLetter;
 use Freyr\MessageBroker\Webhook\DeliveryRecord;
 use Freyr\MessageBroker\Webhook\DeliveryStore;
 use PDO;
+use PDOStatement;
 use Throwable;
 
 /**
@@ -125,6 +126,19 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
         RETURNING
         SQL.' '.self::COLUMNS;
 
+    /**
+     * The rows that ABANDON_SQL would take, counted for each lane; COLLATE "C"
+     * gives the byte order of the lane names.
+     */
+    private const string COUNT_UNFINISHED_SQL = <<<'SQL'
+        SELECT c.lane, COUNT(*) AS row_count
+        FROM webhook_deliveries c
+        WHERE c.completed_at IS NULL AND c.created_at < CAST(:before AS TIMESTAMP(3))
+          AND (CAST(:lanes AS JSONB) IS NULL OR c.lane IN (SELECT jsonb_array_elements_text(CAST(:lanes AS JSONB))))
+        GROUP BY c.lane
+        ORDER BY c.lane COLLATE "C"
+        SQL;
+
     public function __construct(
         private PDO $pdo,
     ) {}
@@ -211,13 +225,7 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
 
         try {
             $statement = $this->pdo->prepare(self::ABANDON_SQL);
-            $statement->bindValue('before', self::timestamp($before));
-            if ($lanes === null) {
-                $statement->bindValue('lanes', null, PDO::PARAM_NULL);
-            } else {
-                // An empty list matches no lane; a lane twice in the list counts one time (IN).
-                $statement->bindValue('lanes', json_encode($lanes, JSON_THROW_ON_ERROR));
-            }
+            self::bindBeforeAndLanes($statement, $before, $lanes);
             $statement->bindValue('limit', $limit, PDO::PARAM_INT);
             $statement->execute();
             /** @var list<Row> $rows */
@@ -238,6 +246,28 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
         }
 
         return count($rows);
+    }
+
+    public function countUnfinished(int $before, ?array $lanes): array
+    {
+        $statement = $this->pdo->prepare(self::COUNT_UNFINISHED_SQL);
+        self::bindBeforeAndLanes($statement, $before, $lanes);
+        $statement->execute();
+
+        /** @var array<string, int> */
+        return $statement->fetchAll(PDO::FETCH_KEY_PAIR);
+    }
+
+    /** @param list<string>|null $lanes */
+    private static function bindBeforeAndLanes(PDOStatement $statement, int $before, ?array $lanes): void
+    {
+        $statement->bindValue('before', self::timestamp($before));
+        if ($lanes === null) {
+            $statement->bindValue('lanes', null, PDO::PARAM_NULL);
+        } else {
+            // An empty list matches no lane; a lane twice in the list counts one time (IN).
+            $statement->bindValue('lanes', json_encode($lanes, JSON_THROW_ON_ERROR));
+        }
     }
 
     /** @return array{id: string, created_at: string, lease: string, attempts: int, available_at: ?string, outcome: ?int} */

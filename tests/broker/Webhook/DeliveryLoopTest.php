@@ -238,6 +238,24 @@ final class DeliveryLoopTest extends TestCase
         self::assertSame([], $this->events->records);
     }
 
+    public function testARowThatTheOperatorAbandonsDuringTheSendStaysFinishedWhenTheWorkerWritesItsResult(): void
+    {
+        $this->subscribe('crm');
+        $row = $this->insert('crm', attempts: 2);
+        // The operator abandons the leased row while the request runs.
+        $this->sender->onSend = function (): void {
+            self::assertSame(1, $this->store->abandon($this->now, null, 10));
+        };
+
+        self::assertSame(0, $this->loop()->deliverOnce());
+
+        self::assertSame([$row->id], $this->sender->sentIds(), 'the worker still sends its request');
+        self::assertSame(DeliveryCompletionKind::Dead, $this->store->outcome($row->id));
+        self::assertSame(2, $this->store->row($row->id)->attempts, 'the result write changed no row');
+        self::assertSame('abandoned', $this->onlyDeadLetter()->errorClass);
+        self::assertSame([], $this->events->records, 'no delivered event for a row that the store did not change');
+    }
+
     public function testOnlyTheRowsThatTheStoreChangedCountAsDelivered(): void
     {
         $this->subscribe('crm');

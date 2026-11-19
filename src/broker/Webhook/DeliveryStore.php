@@ -98,4 +98,18 @@ interface DeliveryStore
      * @return int the number of rows that this call abandoned
      */
     public function abandon(int $before, ?array $lanes, int $limit): int;
+
+    /**
+     * Count, with no change, the unfinished rows with created_at earlier
+     * than $before, for each lane of the given lanes (null: of all lanes; an
+     * empty list: of no lane): the rows that abandon() with the same
+     * arguments would take. A lane with no such row is not in the result.
+     *
+     * @param int $before epoch milliseconds
+     * @param list<string>|null $lanes null = all lanes
+     *
+     * @return array<string, int> lane => row count, in the byte order of the lane names
+     *                            (PHP turns a numeric lane name into an int key; cast it back to string)
+     */
+    public function countUnfinished(int $before, ?array $lanes): array;
 }

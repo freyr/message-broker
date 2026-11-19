@@ -11,7 +11,8 @@ use Throwable;
 
 /**
  * A delivery store over an in-memory store that throws a chosen error from
- * insert(), claim() or complete(), as a database that fails.
+ * insert(), claim() or complete(), as a database that fails. It records the
+ * arguments of each abandon() call.
  * Each insert() call is reported to $log.
  */
 final class FailingDeliveryStore implements DeliveryStore
@@ -24,6 +25,9 @@ final class FailingDeliveryStore implements DeliveryStore
     public ?Throwable $claimError = null;
 
     public ?Throwable $completeError = null;
+
+    /** @var list<array{int, list<string>|null, int}> the arguments of each abandon(): before, lanes, limit */
+    public array $abandonCalls = [];
 
     public function __construct(
         public readonly InMemoryDeliveryStore $inner = new InMemoryDeliveryStore(),
@@ -60,6 +64,13 @@ final class FailingDeliveryStore implements DeliveryStore
 
     public function abandon(int $before, ?array $lanes, int $limit): int
     {
+        $this->abandonCalls[] = [$before, $lanes, $limit];
+
         return $this->inner->abandon($before, $lanes, $limit);
+    }
+
+    public function countUnfinished(int $before, ?array $lanes): array
+    {
+        return $this->inner->countUnfinished($before, $lanes);
     }
 }

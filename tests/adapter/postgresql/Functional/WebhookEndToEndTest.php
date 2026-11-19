@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Adapter\PostgreSql\Tests\Functional;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use Freyr\MessageBroker\Adapter\PostgreSql\PdoTransaction;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeadLetterStore;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryRetention;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryStore;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Console\DlqListCommand;
 use Freyr\MessageBroker\Console\DlqReplayCommand;
 use Freyr\MessageBroker\Console\DlqShowCommand;
+use Freyr\MessageBroker\Console\WebhookAbandonCommand;
 use Freyr\MessageBroker\Console\WebhookRunCommand;
 use Freyr\MessageBroker\DeadLetter\AlreadyReplayed;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
@@ -20,6 +24,7 @@ use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Testing\FakeDeliverySender;
 use Freyr\MessageBroker\Testing\InMemorySubscriptionProvider;
 use Freyr\MessageBroker\Testing\OrderPlaced;
+use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Webhook\DefaultDeliveryRetryPolicy;
 use Freyr\MessageBroker\Webhook\DeliveryLoop;
 use Freyr\MessageBroker\Webhook\DeliveryLoopConfig;
@@ -153,6 +158,69 @@ final class WebhookEndToEndTest extends FunctionalTestCase
         ]);
         self::assertSame([$new[0]['id']], $healthy->sentIds());
         self::assertSame(1, self::fetchInt("SELECT outcome FROM webhook_deliveries WHERE id = '{$new[0]['id']}'"));
+    }
+
+    public function testARowOfThirtyDaysAgoStaysDueAndIsDelivered(): void
+    {
+        $old = (new DateTimeImmutable('today', new DateTimeZone('UTC')))->modify('-30 day');
+        (new PostgreSqlDeliveryRetention(self::$pdo))->ensureCapacity(0, $old);
+        $createdAt = $old->format('Y-m-d 10:00:00');
+        self::$pdo->exec(
+            "INSERT INTO webhook_deliveries (id, message_id, lane, message_name, body, headers, created_at, available_at)
+             VALUES (gen_random_uuid(), gen_random_uuid(), 'crm', 'order.placed', '\\x7b7d', '{}', '{$createdAt}', '{$createdAt}')",
+        );
+        $sender = new FakeDeliverySender(maxSendMs: 1);
+
+        $this->loop($sender)->run(new WorkerLimits(maxMessages: 1));
+
+        self::assertCount(1, $sender->sentIds());
+        self::assertSame(1, self::onlyRow()['outcome'], 'delivered: a delivery has no time limit');
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM dead_letters'));
+    }
+
+    public function testAnAbandonedRowGivesADeadLetterThatDlqReplaySendsAgainToItsLane(): void
+    {
+        $this->produce();
+        $abandon = new CommandTester(new WebhookAbandonCommand($this->deliveries));
+        self::assertSame(Command::SUCCESS, $abandon->execute([
+            '--before' => (new DateTimeImmutable('tomorrow', new DateTimeZone('UTC')))->format('Y-m-d'),
+        ]));
+
+        self::assertSame(2, self::onlyRow()['outcome'], 'the row is dead');
+        $deadLetter = $this->onlyDeadLetter();
+        self::assertSame('webhook:crm', $deadLetter->source);
+        self::assertSame('abandoned', $deadLetter->errorClass);
+        self::assertSame(0, $deadLetter->attempts);
+
+        $replay = new CommandTester(new DlqReplayCommand($this->replayService(), $this->deadLetters));
+        self::assertSame(Command::SUCCESS, $replay->execute([
+            'id' => $deadLetter->id,
+        ]));
+
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'), 'no outbox row');
+        $new = self::rows('SELECT * FROM webhook_deliveries WHERE completed_at IS NULL');
+        self::assertCount(1, $new, 'one new delivery row');
+        self::assertSame('crm', $new[0]['lane']);
+        self::assertSame($deadLetter->messageId, $new[0]['message_id']);
+        self::assertSame($deadLetter->body, self::bodyOf($new[0]['body']));
+    }
+
+    public function testARowThatTheOperatorAbandonsWhileAWorkerHoldsItsLeaseStaysFinished(): void
+    {
+        $this->produce();
+        $sender = new FakeDeliverySender(maxSendMs: 1);
+        $sender->onSend = function (): void {
+            self::assertSame(1, $this->deliveries->abandon(EpochMillis::now() + 60_000, null, 10));
+        };
+        $loop = new DeliveryLoop($this->deliveries, $sender, $this->subscriptions, config: new DeliveryLoopConfig(leaseMs: 60_000, idleSleepMs: 1));
+
+        self::assertSame(0, $loop->deliverOnce(), 'the result write changes no row');
+
+        self::assertCount(1, $sender->sentIds(), 'the worker sent its request');
+        $row = self::onlyRow();
+        self::assertSame(2, $row['outcome'], 'the row stays dead');
+        self::assertSame(0, $row['attempts']);
+        self::assertSame('abandoned', $this->onlyDeadLetter()->errorClass);
     }
 
     public function testASecondReplayOfAWebhookDeadLetterIsAlreadyReplayedAndInsertsNoRow(): void

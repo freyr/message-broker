@@ -16,7 +16,7 @@ use LogicException;
  * In-memory delivery store that implements the contract of
  * {@see DeliveryStore}: the claim with a lease (available_at = now + lease),
  * the row limit for each lane and the total, the lease check of complete(),
- * and the abandon of old rows. The dead letters of complete() and abandon()
+ * the abandon of old rows and their count. The dead letters of complete() and abandon()
  * go to an
  * {@see InMemoryDeadLetterStore} through store(), which keeps one open row
  * for each pair of message ID and source.
@@ -135,6 +135,20 @@ final class InMemoryDeliveryStore implements DeliveryStore, TransactionParticipa
         }
 
         return $count;
+    }
+
+    public function countUnfinished(int $before, ?array $lanes): array
+    {
+        $counts = [];
+        foreach ($this->rows as $row) {
+            if (isset($this->finished[$row->id]) || $row->createdAt >= $before || ($lanes !== null && !in_array($row->lane, $lanes, true))) {
+                continue;
+            }
+            $counts[$row->lane] = ($counts[$row->lane] ?? 0) + 1;
+        }
+        ksort($counts, SORT_STRING);
+
+        return $counts;
     }
 
     /** The dead letter store that complete() and abandon() write to. */

@@ -511,6 +511,52 @@ abstract class DeliveryStoreContractTestCase extends TestCase
         self::assertSame('abandoned', $all[0]->errorClass, 'only the dead letter of the abandon');
     }
 
+    public function testTheCountOfUnfinishedRowsGivesTheRowsBeforeTheDateOfEachGivenLaneAndChangesNothing(): void
+    {
+        $now = EpochMillis::now();
+        $before = $now - 30_000;
+        $leased = $this->record(createdAt: $now - 50_000);
+        $this->store()->insert([
+            $leased,
+            $this->record(createdAt: $before - 1),
+            $this->record(lane: self::OTHER_LANE, createdAt: $now - 40_000),
+            $this->record(lane: self::THIRD_LANE, createdAt: $now - 50_000),
+            $this->record(createdAt: $before),
+            $this->record(lane: self::OTHER_LANE, createdAt: $now - 5_000),
+        ]);
+        $finished = $this->record(lane: self::OTHER_LANE, createdAt: $now - 50_000);
+        $this->store()->insert([$finished]);
+        $this->store()->complete([DeliveryCompletion::delivered(self::byId($this->claim([self::OTHER_LANE]), [$finished->id])[0])]);
+        $this->store()->claim([self::LANE], 1, 1, self::LEASE_MS);
+
+        $counts = $this->store()->countUnfinished($before, [self::OTHER_LANE, self::LANE]);
+
+        self::assertSame([
+            self::LANE => 2,
+            self::OTHER_LANE => 1,
+        ], $counts, 'in the order of the lane names; a leased row counts; a finished row and a row at the date do not');
+        self::assertSame(3, $this->store()->abandon($before, [self::LANE, self::OTHER_LANE], 10), 'the count is what an abandon then moves');
+    }
+
+    public function testTheCountOfUnfinishedRowsWithNoLaneListGivesEachLaneAndWithAnEmptyListNone(): void
+    {
+        $now = EpochMillis::now();
+        $this->store()->insert([
+            $this->record(lane: self::THIRD_LANE, createdAt: $now - 50_000),
+            $this->record(createdAt: $now - 50_000),
+            $this->record(lane: self::OTHER_LANE, createdAt: $now - 50_000),
+            $this->record(lane: self::OTHER_LANE, createdAt: $now - 50_000),
+        ]);
+
+        self::assertSame([
+            self::LANE => 1,
+            self::OTHER_LANE => 2,
+            self::THIRD_LANE => 1,
+        ], $this->store()->countUnfinished($now, null));
+        self::assertSame([], $this->store()->countUnfinished($now, []));
+        self::assertSame([], $this->store()->countUnfinished($now - 60_000, null), 'no row before the date');
+    }
+
     protected function store(): DeliveryStore
     {
         return $this->store ??= $this->createStore();
