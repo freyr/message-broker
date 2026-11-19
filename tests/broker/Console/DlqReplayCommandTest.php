@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Console;
 
 use Freyr\MessageBroker\Console\DlqReplayCommand;
+use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Testing\InMemoryDeadLetterStore;
@@ -104,9 +105,14 @@ final class DlqReplayCommandTest extends TestCase
             $tester->getDisplay(),
         );
         self::assertSame([], $this->outbox->inserted);
-        self::assertSame(false, $this->store->callsOf('count')[0]['replayed']);
-        self::assertSame(5, $this->store->callsOf('list')[0]['limit']);
-        self::assertSame(false, $this->store->callsOf('list')[0]['replayed']);
+        self::assertEquals([[
+            'filter' => new DeadLetterFilter(replayed: false),
+        ]], $this->store->callsOf('count'));
+        self::assertEquals([[
+            'filter' => new DeadLetterFilter(replayed: false),
+            'limit' => 5,
+            'offset' => 0,
+        ]], $this->store->callsOf('list'));
     }
 
     public function testAllPassesTheFiltersToCountAndList(): void
@@ -122,17 +128,16 @@ final class DlqReplayCommandTest extends TestCase
             '--since' => '2h',
         ]);
 
-        $expected = [
-            'messageName' => 'order.placed',
-            'source' => 'orders_q',
-            'sinceMs' => EpochMillis::now() - 7_200_000,
-            'replayed' => false,
-        ];
-        self::assertSame([$expected], $this->store->callsOf('count'));
-        $listCall = $this->store->callsOf('list')[0];
-        self::assertSame('order.placed', $listCall['messageName']);
-        self::assertSame('orders_q', $listCall['source']);
-        self::assertSame($expected['sinceMs'], $listCall['sinceMs']);
+        $expected = new DeadLetterFilter(
+            messageName: 'order.placed',
+            source: 'orders_q',
+            failedFromMs: EpochMillis::now() - 7_200_000,
+            replayed: false,
+        );
+        self::assertEquals([[
+            'filter' => $expected,
+        ]], $this->store->callsOf('count'));
+        self::assertEquals($expected, $this->store->callsOf('list')[0]['filter']);
         self::assertCount(1, $this->outbox->inserted);
     }
 

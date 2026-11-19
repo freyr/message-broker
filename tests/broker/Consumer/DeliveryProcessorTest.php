@@ -11,6 +11,7 @@ use Freyr\MessageBroker\Consumer\DeliveryLimitExceeded;
 use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Retry\Backoff;
@@ -127,7 +128,7 @@ final class DeliveryProcessorTest extends TestCase
     /** @return list<DeadLetter> */
     private function deadLetters(): array
     {
-        return $this->deadLetterStore->list();
+        return $this->deadLetterStore->list(new DeadLetterFilter());
     }
 
     /** The id of a raw dead letter with no message id: 'unknown-' and a UUID v7. */
@@ -978,29 +979,29 @@ final class DeliveryProcessorTest extends TestCase
                 return null;
             }
 
-            public function list(
-                ?string $messageName = null,
-                ?string $source = null,
-                ?int $sinceMs = null,
-                int $limit = 100,
-                int $offset = 0,
-                ?bool $replayed = null,
-            ): array {
+            public function list(DeadLetterFilter $filter, int $limit = 100, int $offset = 0): array
+            {
                 return [];
             }
 
-            public function count(
-                ?string $messageName = null,
-                ?string $source = null,
-                ?int $sinceMs = null,
-                ?bool $replayed = null,
-            ): int {
+            public function count(DeadLetterFilter $filter): int
+            {
                 return 0;
+            }
+
+            public function ids(DeadLetterFilter $filter, int $limit): array
+            {
+                return [];
+            }
+
+            public function stats(DeadLetterFilter $filter): array
+            {
+                return [];
             }
 
             public function markReplayed(string $id): void {}
 
-            public function purge(?string $messageName = null, ?string $source = null, ?int $olderThanMs = null): int
+            public function purge(DeadLetterFilter $filter): int
             {
                 return 0;
             }

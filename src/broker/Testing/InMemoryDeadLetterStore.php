@@ -5,13 +5,17 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Testing;
 
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterStat;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\Time\EpochMillis;
+use InvalidArgumentException;
 
 /**
- * In-memory DeadLetterStore that applies the contract filters (list, count,
- * purge) and records the arguments of every call, so a command test can
- * assert what the command asked for. Pass an {@see InMemoryTransaction} to
+ * In-memory DeadLetterStore that applies the contract filter (list, count,
+ * ids, stats, purge) and records the arguments of every call (the filter
+ * object as 'filter'), so a command test can assert what the command asked
+ * for. Pass an {@see InMemoryTransaction} to
  * make the changes roll back with it.
  */
 final class InMemoryDeadLetterStore implements DeadLetterStore, TransactionParticipant
@@ -74,34 +78,72 @@ final class InMemoryDeadLetterStore implements DeadLetterStore, TransactionParti
         return $this->items[$id] ?? null;
     }
 
-    public function list(
-        ?string $messageName = null,
-        ?string $source = null,
-        ?int $sinceMs = null,
-        int $limit = 100,
-        int $offset = 0,
-        ?bool $replayed = null,
-    ): array {
+    public function list(DeadLetterFilter $filter, int $limit = 100, int $offset = 0): array
+    {
         $this->calls[] = [
             'method' => 'list',
-            'args' => compact('messageName', 'source', 'sinceMs', 'limit', 'offset', 'replayed'),
+            'args' => compact('filter', 'limit', 'offset'),
         ];
 
-        return array_slice($this->matching($messageName, $source, $sinceMs, $replayed), $offset, $limit);
+        return array_slice(array_reverse($this->matching($filter)), $offset, $limit);
     }
 
-    public function count(
-        ?string $messageName = null,
-        ?string $source = null,
-        ?int $sinceMs = null,
-        ?bool $replayed = null,
-    ): int {
+    public function count(DeadLetterFilter $filter): int
+    {
         $this->calls[] = [
             'method' => 'count',
-            'args' => compact('messageName', 'source', 'sinceMs', 'replayed'),
+            'args' => compact('filter'),
         ];
 
-        return count($this->matching($messageName, $source, $sinceMs, $replayed));
+        return count($this->matching($filter));
+    }
+
+    public function ids(DeadLetterFilter $filter, int $limit): array
+    {
+        if ($limit < 1) {
+            throw new InvalidArgumentException("limit must be at least 1, got {$limit}");
+        }
+        $this->calls[] = [
+            'method' => 'ids',
+            'args' => compact('filter', 'limit'),
+        ];
+
+        return array_map(
+            static fn (DeadLetter $d): string => $d->id,
+            array_slice($this->matching($filter), 0, $limit),
+        );
+    }
+
+    public function stats(DeadLetterFilter $filter): array
+    {
+        $this->calls[] = [
+            'method' => 'stats',
+            'args' => compact('filter'),
+        ];
+
+        /** @var array<string, DeadLetterStat> $groups */
+        $groups = [];
+        foreach ($this->matching($filter) as $d) {
+            $key = json_encode([$d->messageName, $d->source, $d->errorClass], JSON_THROW_ON_ERROR);
+            $group = $groups[$key] ?? null;
+            // matching() is oldest first: the first row of a group is its oldest, the last its newest
+            $groups[$key] = new DeadLetterStat(
+                $d->messageName,
+                $d->source,
+                $d->errorClass,
+                ($group->count ?? 0) + 1,
+                $group->oldestFailedAt ?? $d->failedAt,
+                $d->failedAt,
+            );
+        }
+        $stats = array_values($groups);
+        usort(
+            $stats,
+            static fn (DeadLetterStat $a, DeadLetterStat $b): int => [$b->count, $a->messageName, $a->source, $a->errorClass]
+                <=> [$a->count, $b->messageName, $b->source, $b->errorClass],
+        );
+
+        return $stats;
     }
 
     public function markReplayed(string $id): void
@@ -127,25 +169,24 @@ final class InMemoryDeadLetterStore implements DeadLetterStore, TransactionParti
         );
     }
 
-    public function purge(?string $messageName = null, ?string $source = null, ?int $olderThanMs = null): int
+    public function purge(DeadLetterFilter $filter): int
     {
         $this->calls[] = [
             'method' => 'purge',
-            'args' => compact('messageName', 'source', 'olderThanMs'),
+            'args' => compact('filter'),
         ];
 
         $before = count($this->items);
-        $this->items = array_filter(
-            $this->items,
-            static fn (DeadLetter $d): bool => !(($messageName === null || $d->messageName === $messageName)
-                && ($source === null || $d->source === $source)
-                && ($olderThanMs === null || $d->failedAt < $olderThanMs)),
-        );
+        $this->items = array_filter($this->items, static fn (DeadLetter $d): bool => !self::matches($d, $filter));
 
         return $before - count($this->items);
     }
 
-    /** @return list<array<string, mixed>> the recorded arguments of every call to one method */
+    /**
+     * @return list<array<string, mixed>> the recorded arguments of every call to one method: the
+     *                                    filter object as 'filter', and 'limit' and 'offset' where the
+     *                                    method takes them
+     */
     public function callsOf(string $method): array
     {
         return array_values(array_map(
@@ -165,21 +206,31 @@ final class InMemoryDeadLetterStore implements DeadLetterStore, TransactionParti
         $this->items = $snapshot;
     }
 
-    /** @return list<DeadLetter> */
-    private function matching(?string $messageName, ?string $source, ?int $sinceMs, ?bool $replayed): array
+    /** @return list<DeadLetter> the matching items, oldest first (failedAt, then id ascending) */
+    private function matching(DeadLetterFilter $filter): array
     {
-        $matching = array_filter(
+        $matching = array_values(array_filter(
             $this->items,
-            static fn (DeadLetter $d): bool => ($messageName === null || $d->messageName === $messageName)
-                && ($source === null || $d->source === $source)
-                && ($sinceMs === null || $d->failedAt >= $sinceMs)
-                && ($replayed === null || ($d->replayedAt !== null) === $replayed),
-        );
+            static fn (DeadLetter $d): bool => self::matches($d, $filter),
+        ));
         usort(
             $matching,
-            static fn (DeadLetter $a, DeadLetter $b): int => [$b->failedAt, $b->id] <=> [$a->failedAt, $a->id],
+            static fn (DeadLetter $a, DeadLetter $b): int => [$a->failedAt, $a->id] <=> [$b->failedAt, $b->id],
         );
 
         return $matching;
+    }
+
+    private static function matches(DeadLetter $d, DeadLetterFilter $filter): bool
+    {
+        return ($filter->messageName === null || $d->messageName === $filter->messageName)
+            && ($filter->source === null || $d->source === $filter->source)
+            && ($filter->errorClass === null || $d->errorClass === $filter->errorClass)
+            && ($filter->messageId === null || $d->messageId === $filter->messageId)
+            && ($filter->failedFromMs === null || $d->failedAt >= $filter->failedFromMs)
+            && ($filter->failedUntilMs === null || $d->failedAt < $filter->failedUntilMs)
+            && ($filter->minAttempts === null || $d->attempts >= $filter->minAttempts)
+            && ($filter->replayed === null || ($d->replayedAt !== null) === $filter->replayed)
+            && ($filter->replayable === null || $d->replayable === $filter->replayable);
     }
 }

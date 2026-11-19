@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Console;
 
+use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -44,7 +45,7 @@ final class DlqPurgeCommand extends Command
         $olderThanMs = is_string($olderThan) ? EpochMillis::now() - Duration::toMilliseconds($olderThan) : null;
 
         // count ignores older-than; the actual delete applies it. Good enough for a preview headline.
-        $matching = $this->store->count(messageName: $messageName, source: $sourceFilter);
+        $matching = $this->store->count(new DeadLetterFilter(messageName: $messageName, source: $sourceFilter));
 
         if ($input->getOption('dry-run') === true) {
             $output->writeln("<info>[dry-run] would delete up to {$matching} dead letters.</info>");
@@ -69,7 +70,11 @@ final class DlqPurgeCommand extends Command
             }
         }
 
-        $purged = $this->store->purge(messageName: $messageName, source: $sourceFilter, olderThanMs: $olderThanMs);
+        $purged = $this->store->purge(new DeadLetterFilter(
+            messageName: $messageName,
+            source: $sourceFilter,
+            failedUntilMs: $olderThanMs,
+        ));
         $output->writeln("<info>Purged {$purged} dead letters.</info>");
 
         return Command::SUCCESS;

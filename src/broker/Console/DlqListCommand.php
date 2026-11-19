@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Console;
 
+use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -41,9 +42,11 @@ final class DlqListCommand extends Command
         $offset = $input->getOption('offset');
 
         $deadLetters = $this->store->list(
-            messageName: is_string($name) ? $name : null,
-            source: is_string($source) ? $source : null,
-            sinceMs: is_string($since) ? EpochMillis::now() - Duration::toMilliseconds($since) : null,
+            new DeadLetterFilter(
+                messageName: is_string($name) ? $name : null,
+                source: is_string($source) ? $source : null,
+                failedFromMs: is_string($since) ? EpochMillis::now() - Duration::toMilliseconds($since) : null,
+            ),
             limit: is_numeric($limit) ? (int) $limit : 100,
             offset: is_numeric($offset) ? (int) $offset : 0,
         );

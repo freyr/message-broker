@@ -15,6 +15,7 @@ use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
+use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\OutboxProducer;
@@ -183,7 +184,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
 
         self::assertSame(2, $this->handlerAttempts);
         self::assertCount(0, $this->dispatched);
-        $deadLetters = $this->deadLetters->list();
+        $deadLetters = $this->deadLetters->list(new DeadLetterFilter());
         self::assertCount(1, $deadLetters);
         self::assertSame($message->id, $deadLetters[0]->messageId);
 

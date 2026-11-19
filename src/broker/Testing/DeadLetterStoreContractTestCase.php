@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Testing;
 
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterStat;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\Time\EpochMillis;
+use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Uid\Uuid;
 
@@ -160,7 +164,7 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
 
         $this->store()->store($second);
 
-        self::assertSame(1, $this->store()->count(), 'one open row for the pair');
+        self::assertSame(1, $this->store()->count(new DeadLetterFilter()), 'one open row for the pair');
         self::assertNull($this->store()->find($second->id), 'the id of the second dead letter is discarded');
         $found = $this->store()->find($first->id);
         self::assertNotNull($found);
@@ -189,7 +193,7 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
 
         $this->store()->store($again);
 
-        self::assertSame(2, $this->store()->count());
+        self::assertSame(2, $this->store()->count(new DeadLetterFilter()));
         $kept = $this->store()->find($replayed->id);
         self::assertNotNull($kept?->replayedAt, 'the replayed row stays as it was');
         self::assertSame($replayed->failedAt, $kept->failedAt);
@@ -233,7 +237,7 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         $this->store()->store($samePair);
         $this->store()->store($otherPair);
 
-        self::assertSame(1, $this->store()->count());
+        self::assertSame(1, $this->store()->count(new DeadLetterFilter()));
         $found = $this->store()->find($first->id);
         self::assertNotNull($found);
         self::assertSame('orders_q', $found->source);
@@ -254,7 +258,7 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
 
         $this->store()->store($deadLetter);
 
-        self::assertSame(1, $this->store()->count(), 'no second row');
+        self::assertSame(1, $this->store()->count(new DeadLetterFilter()), 'no second row');
         self::assertNotNull($replayedAt);
         self::assertSame($replayedAt, $this->store()->find($deadLetter->id)?->replayedAt);
     }
@@ -267,7 +271,7 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         $this->store()->store($orders);
         $this->store()->store($billing);
 
-        self::assertSame(2, $this->store()->count());
+        self::assertSame(2, $this->store()->count(new DeadLetterFilter()));
         self::assertSame('orders_q', $this->store()->find($orders->id)?->source);
         self::assertSame('billing_q', $this->store()->find($billing->id)?->source);
     }
@@ -280,7 +284,7 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         $this->store()->store($first);
         $this->store()->store($second);
 
-        self::assertSame(2, $this->store()->count());
+        self::assertSame(2, $this->store()->count(new DeadLetterFilter()));
         self::assertSame('m-1', $this->store()->find($first->id)?->messageId);
         self::assertSame('m-2', $this->store()->find($second->id)?->messageId);
     }
@@ -295,7 +299,7 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
 
         $this->store()->store($this->deadLetter(messageId: 'm-1', replayable: true));
         self::assertTrue($this->store()->find($canonical->id)?->replayable, 'false to true');
-        self::assertSame(1, $this->store()->count());
+        self::assertSame(1, $this->store()->count(new DeadLetterFilter()));
     }
 
     public function testFindOfAnUnknownIdReturnsNull(): void
@@ -316,7 +320,7 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
 
         self::assertSame(
             [$newest->id, $middle->id, $oldest->id],
-            self::ids($this->store()->list()),
+            self::ids($this->store()->list(new DeadLetterFilter())),
         );
     }
 
@@ -329,15 +333,15 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
             $this->store()->store($deadLetter);
         }
 
-        self::assertSame([$billing->id, $placed->id], self::ids($this->store()->list(messageName: 'order.placed')));
-        self::assertSame([$cancelled->id, $placed->id], self::ids($this->store()->list(source: 'orders_q')));
+        self::assertSame([$billing->id, $placed->id], self::ids($this->store()->list(new DeadLetterFilter(messageName: 'order.placed'))));
+        self::assertSame([$cancelled->id, $placed->id], self::ids($this->store()->list(new DeadLetterFilter(source: 'orders_q'))));
         self::assertSame(
             [$placed->id],
-            self::ids($this->store()->list(messageName: 'order.placed', source: 'orders_q')),
+            self::ids($this->store()->list(new DeadLetterFilter(messageName: 'order.placed', source: 'orders_q'))),
             'the filters combine with AND',
         );
-        self::assertSame([], $this->store()->list(messageName: 'unknown.event'));
-        self::assertCount(3, $this->store()->list(), 'no filter sees every row');
+        self::assertSame([], $this->store()->list(new DeadLetterFilter(messageName: 'unknown.event')));
+        self::assertCount(3, $this->store()->list(new DeadLetterFilter()), 'no filter sees every row');
     }
 
     public function testListFiltersByALowerFailedAtBound(): void
@@ -347,9 +351,9 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         $this->store()->store($old);
         $this->store()->store($recent);
 
-        self::assertSame([$recent->id], self::ids($this->store()->list(sinceMs: self::at(-2_000))));
-        self::assertSame([$recent->id, $old->id], self::ids($this->store()->list(sinceMs: self::at(-4_000))));
-        self::assertSame([], $this->store()->list(sinceMs: self::at(0)));
+        self::assertSame([$recent->id], self::ids($this->store()->list(new DeadLetterFilter(failedFromMs: self::at(-2_000)))));
+        self::assertSame([$recent->id, $old->id], self::ids($this->store()->list(new DeadLetterFilter(failedFromMs: self::at(-4_000)))));
+        self::assertSame([], $this->store()->list(new DeadLetterFilter(failedFromMs: self::at(0))));
     }
 
     public function testListFiltersByReplayState(): void
@@ -362,10 +366,10 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         }
         $this->store()->markReplayed($replayed->id);
 
-        self::assertSame([$pendingTwo->id, $pendingOne->id], self::ids($this->store()->list(replayed: false)));
-        self::assertSame([$replayed->id], self::ids($this->store()->list(replayed: true)));
-        self::assertCount(3, $this->store()->list(), 'no filter sees both states');
-        self::assertCount(3, $this->store()->list(replayed: null));
+        self::assertSame([$pendingTwo->id, $pendingOne->id], self::ids($this->store()->list(new DeadLetterFilter(replayed: false))));
+        self::assertSame([$replayed->id], self::ids($this->store()->list(new DeadLetterFilter(replayed: true))));
+        self::assertCount(3, $this->store()->list(new DeadLetterFilter()), 'no filter sees both states');
+        self::assertCount(3, $this->store()->list(new DeadLetterFilter(replayed: null)));
     }
 
     public function testListPagesWithLimitAndOffset(): void
@@ -377,10 +381,10 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         }
         [$a, $b, $c, $d, $e] = self::ids($rows);
 
-        self::assertSame([$e, $d], self::ids($this->store()->list(limit: 2, offset: 0)));
-        self::assertSame([$c, $b], self::ids($this->store()->list(limit: 2, offset: 2)));
-        self::assertSame([$a], self::ids($this->store()->list(limit: 2, offset: 4)));
-        self::assertSame([], $this->store()->list(limit: 2, offset: 10));
+        self::assertSame([$e, $d], self::ids($this->store()->list(new DeadLetterFilter(), limit: 2, offset: 0)));
+        self::assertSame([$c, $b], self::ids($this->store()->list(new DeadLetterFilter(), limit: 2, offset: 2)));
+        self::assertSame([$a], self::ids($this->store()->list(new DeadLetterFilter(), limit: 2, offset: 4)));
+        self::assertSame([], $this->store()->list(new DeadLetterFilter(), limit: 2, offset: 10));
     }
 
     public function testListReturnsAtMostOneHundredRowsByDefault(): void
@@ -389,8 +393,8 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
             $this->store()->store($this->deadLetter(failedAt: self::at(-1_000 + $i)));
         }
 
-        self::assertCount(100, $this->store()->list());
-        self::assertCount(101, $this->store()->list(limit: 101));
+        self::assertCount(100, $this->store()->list(new DeadLetterFilter()));
+        self::assertCount(101, $this->store()->list(new DeadLetterFilter(), limit: 101));
     }
 
     public function testCountAppliesTheFiltersOfListAndIgnoresPaging(): void
@@ -401,15 +405,15 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         $this->store()->store($this->deadLetter(messageName: 'order.cancelled', source: 'orders_q', failedAt: self::at(-100)));
         $this->store()->markReplayed($replayed->id);
 
-        self::assertSame(3, $this->store()->count());
-        self::assertSame(2, $this->store()->count(messageName: 'order.placed'));
-        self::assertSame(2, $this->store()->count(source: 'orders_q'));
-        self::assertSame(2, $this->store()->count(sinceMs: self::at(-250)));
-        self::assertSame(1, $this->store()->count(replayed: true));
-        self::assertSame(2, $this->store()->count(replayed: false));
-        self::assertSame(3, $this->store()->count(replayed: null));
-        self::assertSame(1, $this->store()->count(messageName: 'order.placed', source: 'orders_q'), 'filters combine with AND');
-        self::assertSame(0, $this->store()->count(messageName: 'unknown.event'));
+        self::assertSame(3, $this->store()->count(new DeadLetterFilter()));
+        self::assertSame(2, $this->store()->count(new DeadLetterFilter(messageName: 'order.placed')));
+        self::assertSame(2, $this->store()->count(new DeadLetterFilter(source: 'orders_q')));
+        self::assertSame(2, $this->store()->count(new DeadLetterFilter(failedFromMs: self::at(-250))));
+        self::assertSame(1, $this->store()->count(new DeadLetterFilter(replayed: true)));
+        self::assertSame(2, $this->store()->count(new DeadLetterFilter(replayed: false)));
+        self::assertSame(3, $this->store()->count(new DeadLetterFilter(replayed: null)));
+        self::assertSame(1, $this->store()->count(new DeadLetterFilter(messageName: 'order.placed', source: 'orders_q')), 'filters combine with AND');
+        self::assertSame(0, $this->store()->count(new DeadLetterFilter(messageName: 'unknown.event')));
     }
 
     public function testMarkReplayedKeepsTheRowForAuditAndTouchesOnlyThatRow(): void
@@ -427,7 +431,7 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         self::assertSame('m-1', $found->messageId, 'and keeps its fields');
         self::assertSame($replayed->body, $found->body);
         self::assertNull($this->store()->find($other->id)?->replayedAt);
-        self::assertSame(2, $this->store()->count());
+        self::assertSame(2, $this->store()->count(new DeadLetterFilter()));
     }
 
     public function testPurgeWithoutFiltersRemovesEveryRowAndReturnsTheCount(): void
@@ -437,9 +441,9 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         $this->store()->store($this->deadLetter(failedAt: self::at(-100)));
         $this->store()->markReplayed($replayed->id);
 
-        self::assertSame(2, $this->store()->purge());
-        self::assertSame([], $this->store()->list());
-        self::assertSame(0, $this->store()->purge(), 'nothing is left to remove');
+        self::assertSame(2, $this->store()->purge(new DeadLetterFilter()));
+        self::assertSame([], $this->store()->list(new DeadLetterFilter()));
+        self::assertSame(0, $this->store()->purge(new DeadLetterFilter()), 'nothing is left to remove');
     }
 
     public function testPurgeRemovesOnlyTheRowsThatMatchEveryFilter(): void
@@ -452,24 +456,309 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
             $this->store()->store($deadLetter);
         }
 
-        self::assertSame(0, $this->store()->purge(messageName: 'unknown.event'), 'no match, no removal');
-        self::assertSame(4, $this->store()->count());
+        self::assertSame(0, $this->store()->purge(new DeadLetterFilter(messageName: 'unknown.event')), 'no match, no removal');
+        self::assertSame(4, $this->store()->count(new DeadLetterFilter()));
 
-        self::assertSame(1, $this->store()->purge(messageName: 'order.cancelled'));
+        self::assertSame(1, $this->store()->purge(new DeadLetterFilter(messageName: 'order.cancelled')));
         self::assertNull($this->store()->find($cancelled->id));
 
-        self::assertSame(1, $this->store()->purge(source: 'billing_q'));
+        self::assertSame(1, $this->store()->purge(new DeadLetterFilter(source: 'billing_q')));
         self::assertNull($this->store()->find($billing->id));
 
-        self::assertSame(0, $this->store()->purge(olderThanMs: self::at(-4_000)), 'nothing is that old');
+        self::assertSame(0, $this->store()->purge(new DeadLetterFilter(failedUntilMs: self::at(-4_000))), 'nothing is that old');
         self::assertSame(
             1,
-            $this->store()->purge(messageName: 'order.placed', source: 'orders_q', olderThanMs: self::at(-2_000)),
+            $this->store()->purge(new DeadLetterFilter(messageName: 'order.placed', source: 'orders_q', failedUntilMs: self::at(-2_000))),
             'the three filters combine with AND',
         );
-        self::assertSame([$placedRecent->id], self::ids($this->store()->list()), 'the recent row stays');
-        self::assertSame(1, $this->store()->purge(olderThanMs: self::at(0)));
-        self::assertSame(0, $this->store()->count());
+        self::assertSame([$placedRecent->id], self::ids($this->store()->list(new DeadLetterFilter())), 'the recent row stays');
+        self::assertSame(1, $this->store()->purge(new DeadLetterFilter(failedUntilMs: self::at(0))));
+        self::assertSame(0, $this->store()->count(new DeadLetterFilter()));
+    }
+
+    public function testTheMessageNameFilterSelectsAnEqualName(): void
+    {
+        $placed = $this->deadLetter(messageName: 'order.placed', failedAt: self::at(-200));
+        $cancelled = $this->deadLetter(messageName: 'order.cancelled', failedAt: self::at(-100));
+        $this->storeAll($placed, $cancelled);
+
+        $this->assertSelects(new DeadLetterFilter(messageName: 'order.placed'), [$placed->id], [$cancelled->id]);
+    }
+
+    public function testTheSourceFilterSelectsAnEqualSource(): void
+    {
+        $orders = $this->deadLetter(source: 'orders_q', failedAt: self::at(-200));
+        $billing = $this->deadLetter(source: 'billing_q', failedAt: self::at(-100));
+        $this->storeAll($orders, $billing);
+
+        $this->assertSelects(new DeadLetterFilter(source: 'billing_q'), [$billing->id], [$orders->id]);
+    }
+
+    public function testTheErrorClassFilterSelectsAnEqualClassName(): void
+    {
+        $runtime = $this->deadLetter(errorClass: 'RuntimeException', failedAt: self::at(-300));
+        $logic = $this->deadLetter(errorClass: 'LogicException', failedAt: self::at(-200));
+        $prefix = $this->deadLetter(errorClass: 'LogicExceptionAndMore', failedAt: self::at(-100));
+        $this->storeAll($runtime, $logic, $prefix);
+
+        $this->assertSelects(
+            new DeadLetterFilter(errorClass: 'LogicException'),
+            [$logic->id],
+            [$prefix->id, $runtime->id],
+        );
+    }
+
+    public function testTheMessageIdFilterSelectsAnEqualMessageId(): void
+    {
+        $first = $this->deadLetter(messageId: 'm-1', failedAt: self::at(-200));
+        $second = $this->deadLetter(messageId: 'm-2', failedAt: self::at(-100));
+        $this->storeAll($first, $second);
+
+        $this->assertSelects(new DeadLetterFilter(messageId: 'm-1'), [$first->id], [$second->id]);
+    }
+
+    public function testTheFailedFromBoundIsInclusive(): void
+    {
+        $bound = self::at(-100);
+        $before = $this->deadLetter(failedAt: $bound - 1);
+        $at = $this->deadLetter(failedAt: $bound);
+        $after = $this->deadLetter(failedAt: $bound + 1);
+        $this->storeAll($before, $at, $after);
+
+        $this->assertSelects(new DeadLetterFilter(failedFromMs: $bound), [$after->id, $at->id], [$before->id]);
+    }
+
+    public function testTheFailedUntilBoundIsExclusive(): void
+    {
+        $bound = self::at(-100);
+        $before = $this->deadLetter(failedAt: $bound - 1);
+        $at = $this->deadLetter(failedAt: $bound);
+        $after = $this->deadLetter(failedAt: $bound + 1);
+        $this->storeAll($before, $at, $after);
+
+        $this->assertSelects(new DeadLetterFilter(failedUntilMs: $bound), [$before->id], [$after->id, $at->id]);
+    }
+
+    public function testTheMinAttemptsFilterIsInclusive(): void
+    {
+        $two = $this->deadLetter(attempts: 2, failedAt: self::at(-300));
+        $three = $this->deadLetter(attempts: 3, failedAt: self::at(-200));
+        $four = $this->deadLetter(attempts: 4, failedAt: self::at(-100));
+        $this->storeAll($two, $three, $four);
+
+        $this->assertSelects(new DeadLetterFilter(minAttempts: 3), [$four->id, $three->id], [$two->id]);
+    }
+
+    /** @return iterable<string, array{bool|null, list<string>, list<string>}> */
+    public static function stateFilters(): iterable
+    {
+        yield 'true' => [true, ['first'], ['second']];
+        yield 'false' => [false, ['second'], ['first']];
+        yield 'null' => [null, ['second', 'first'], []];
+    }
+
+    /**
+     * @param list<string> $selected
+     * @param list<string> $kept
+     */
+    #[DataProvider('stateFilters')]
+    public function testTheReplayedFilter(?bool $replayed, array $selected, array $kept): void
+    {
+        $rows = [
+            'first' => $this->deadLetter(failedAt: self::at(-200)),
+            'second' => $this->deadLetter(failedAt: self::at(-100)),
+        ];
+        $this->storeAll(...array_values($rows));
+        $this->store()->markReplayed($rows['first']->id);
+
+        $this->assertSelects(
+            new DeadLetterFilter(replayed: $replayed),
+            self::idsOf($rows, $selected),
+            self::idsOf($rows, $kept),
+        );
+    }
+
+    /**
+     * @param list<string> $selected
+     * @param list<string> $kept
+     */
+    #[DataProvider('stateFilters')]
+    public function testTheReplayableFilter(?bool $replayable, array $selected, array $kept): void
+    {
+        $rows = [
+            'first' => $this->deadLetter(failedAt: self::at(-200), replayable: true),
+            'second' => $this->deadLetter(failedAt: self::at(-100), replayable: false),
+        ];
+        $this->storeAll(...array_values($rows));
+
+        $this->assertSelects(
+            new DeadLetterFilter(replayable: $replayable),
+            self::idsOf($rows, $selected),
+            self::idsOf($rows, $kept),
+        );
+    }
+
+    /**
+     * Each other row differs from the match in one criterion only. The rows
+     * of one pair are replayed one after the other (a replayed row is outside
+     * the open pair rule), so the filter selects replayed rows.
+     */
+    public function testAllCriteriaCombineWithAnd(): void
+    {
+        $from = self::at(-1_000);
+        $until = self::at(-100);
+        $row = fn (
+            string $messageName = 'order.placed',
+            string $source = 'orders_q',
+            string $messageId = 'm-match',
+            string $errorClass = 'LogicException',
+            int $attempts = 5,
+            ?int $failedAt = null,
+            bool $replayable = false,
+        ): DeadLetter => $this->deadLetter(
+            messageName: $messageName,
+            source: $source,
+            failedAt: $failedAt ?? $from + 10,
+            messageId: $messageId,
+            replayable: $replayable,
+            errorClass: $errorClass,
+            attempts: $attempts,
+        );
+        $match = $row();
+        $replayedOthers = [
+            $row(messageName: 'order.cancelled'),
+            $row(source: 'billing_q'),
+            $row(errorClass: 'RuntimeException'),
+            $row(messageId: 'm-other'),
+            $row(failedAt: $from - 1),
+            $row(failedAt: $until),
+            $row(attempts: 4),
+            $row(replayable: true),
+        ];
+        foreach ([$match, ...$replayedOthers] as $deadLetter) {
+            $this->store()->store($deadLetter);
+            $this->store()->markReplayed($deadLetter->id);
+        }
+        $open = $row(failedAt: $from + 20);
+        $this->store()->store($open);
+        $filter = new DeadLetterFilter(
+            messageName: 'order.placed',
+            source: 'orders_q',
+            errorClass: 'LogicException',
+            messageId: 'm-match',
+            failedFromMs: $from,
+            failedUntilMs: $until,
+            minAttempts: 5,
+            replayed: true,
+            replayable: false,
+        );
+
+        self::assertSame([$match->id], self::ids($this->store()->list($filter)));
+        self::assertSame(1, $this->store()->count($filter));
+        self::assertSame([$match->id], $this->store()->ids($filter, 100));
+        self::assertSame(1, $this->store()->purge($filter));
+        self::assertSame(9, $this->store()->count(new DeadLetterFilter()));
+        self::assertNull($this->store()->find($match->id));
+    }
+
+    public function testIdsAreOldestFirstAndThenByIdAscending(): void
+    {
+        $rows = [
+            $this->deadLetter(id: '01900000-0000-7000-8000-000000000003', failedAt: self::at(-300)),
+            $this->deadLetter(id: '01900000-0000-7000-8000-000000000002', failedAt: self::at(-100)),
+            $this->deadLetter(id: '01900000-0000-7000-8000-000000000001', failedAt: self::at(-100)),
+        ];
+        $this->storeAll(...$rows);
+
+        self::assertSame(
+            ['01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000002'],
+            $this->store()->ids(new DeadLetterFilter(), 10),
+        );
+        self::assertSame(
+            ['01900000-0000-7000-8000-000000000002', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003'],
+            self::ids($this->store()->list(new DeadLetterFilter())),
+            'list is the reverse: newest first, then by id descending',
+        );
+    }
+
+    public function testIdsReturnAtMostTheLimitAndApplyTheFilter(): void
+    {
+        $first = $this->deadLetter(source: 'orders_q', failedAt: self::at(-400));
+        $second = $this->deadLetter(source: 'orders_q', failedAt: self::at(-300));
+        $billing = $this->deadLetter(source: 'billing_q', failedAt: self::at(-200));
+        $third = $this->deadLetter(source: 'orders_q', failedAt: self::at(-100));
+        $this->storeAll($first, $second, $billing, $third);
+
+        self::assertSame([$first->id, $second->id], $this->store()->ids(new DeadLetterFilter(source: 'orders_q'), 2));
+        self::assertSame([$first->id], $this->store()->ids(new DeadLetterFilter(source: 'orders_q'), 1));
+        self::assertSame(
+            [$first->id, $second->id, $third->id],
+            $this->store()->ids(new DeadLetterFilter(source: 'orders_q'), 3),
+        );
+        self::assertSame([], $this->store()->ids(new DeadLetterFilter(source: 'unknown_q'), 10), 'no match');
+    }
+
+    /** @return iterable<string, array{int}> */
+    public static function limitsBelowOne(): iterable
+    {
+        yield 'zero' => [0];
+        yield 'negative' => [-1];
+    }
+
+    #[DataProvider('limitsBelowOne')]
+    public function testIdsWithALimitBelowOneThrow(int $limit): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("limit must be at least 1, got {$limit}");
+
+        $this->store()->ids(new DeadLetterFilter(), $limit);
+    }
+
+    public function testStatsGiveOneEntryForEachGroupWithTheCountAndTheOldestAndNewestFailure(): void
+    {
+        $oldest = $this->deadLetter(messageName: 'order.placed', failedAt: self::at(-300));
+        $other = $this->deadLetter(messageName: 'order.cancelled', failedAt: self::at(-200));
+        $newest = $this->deadLetter(messageName: 'order.placed', failedAt: self::at(-100));
+        $this->storeAll($oldest, $other, $newest);
+
+        self::assertEquals([
+            new DeadLetterStat('order.placed', 'orders_q', 'RuntimeException', 2, $oldest->failedAt, $newest->failedAt),
+            new DeadLetterStat('order.cancelled', 'orders_q', 'RuntimeException', 1, $other->failedAt, $other->failedAt),
+        ], $this->store()->stats(new DeadLetterFilter()));
+    }
+
+    public function testStatsOfGroupsWithEqualCountsAreByMessageNameThenSourceThenErrorClass(): void
+    {
+        $at = self::at(-100);
+        $this->storeAll(
+            $this->deadLetter(messageName: 'b.event', source: 'a_q', errorClass: 'LogicException', failedAt: $at),
+            $this->deadLetter(messageName: 'a.event', source: 'b_q', errorClass: 'LogicException', failedAt: $at),
+            $this->deadLetter(messageName: 'a.event', source: 'a_q', errorClass: 'RuntimeException', failedAt: $at),
+            $this->deadLetter(messageName: 'a.event', source: 'a_q', errorClass: 'LogicException', failedAt: $at),
+        );
+
+        self::assertEquals([
+            new DeadLetterStat('a.event', 'a_q', 'LogicException', 1, $at, $at),
+            new DeadLetterStat('a.event', 'a_q', 'RuntimeException', 1, $at, $at),
+            new DeadLetterStat('a.event', 'b_q', 'LogicException', 1, $at, $at),
+            new DeadLetterStat('b.event', 'a_q', 'LogicException', 1, $at, $at),
+        ], $this->store()->stats(new DeadLetterFilter()));
+    }
+
+    public function testStatsApplyTheFilter(): void
+    {
+        $orders = $this->deadLetter(source: 'orders_q', failedAt: self::at(-200));
+        $this->storeAll($orders, $this->deadLetter(source: 'billing_q'), $this->deadLetter(source: 'billing_q'));
+
+        self::assertEquals([
+            new DeadLetterStat('order.placed', 'orders_q', 'RuntimeException', 1, $orders->failedAt, $orders->failedAt),
+        ], $this->store()->stats(new DeadLetterFilter(source: 'orders_q')));
+        self::assertSame([], $this->store()->stats(new DeadLetterFilter(source: 'unknown_q')));
+    }
+
+    public function testStatsOfAnEmptyStoreAreEmpty(): void
+    {
+        self::assertSame([], $this->store()->stats(new DeadLetterFilter()));
     }
 
     final protected function store(): DeadLetterStore
@@ -485,21 +774,58 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         ?string $messageId = null,
         array $headers = [],
         bool $replayable = true,
+        ?string $id = null,
+        string $errorClass = 'RuntimeException',
+        int $attempts = 3,
     ): DeadLetter {
         return new DeadLetter(
-            id: self::newId(),
+            id: $id ?? self::newId(),
             source: $source,
             messageId: $messageId ?? 'msg-'.self::newId(), // a new message by default: no upsert
             messageName: $messageName,
             body: '{"some":"bytes"}',
             headers: $headers,
-            errorClass: 'RuntimeException',
+            errorClass: $errorClass,
             errorMessage: 'boom',
             errorTrace: '#0 trace-line',
-            attempts: 3,
+            attempts: $attempts,
             failedAt: $failedAt ?? self::at(-10),
             replayable: $replayable,
         );
+    }
+
+    private function storeAll(DeadLetter ...$deadLetters): void
+    {
+        foreach ($deadLetters as $deadLetter) {
+            $this->store()->store($deadLetter);
+        }
+    }
+
+    /**
+     * The filter selects the same rows in list (newest first), count, ids
+     * (oldest first) and purge; the purge keeps the other rows.
+     *
+     * @param list<string> $selected the ids of the matching rows, newest first
+     * @param list<string> $kept     the ids of the other rows, newest first
+     */
+    private function assertSelects(DeadLetterFilter $filter, array $selected, array $kept): void
+    {
+        self::assertSame($selected, self::ids($this->store()->list($filter)), 'list');
+        self::assertSame(count($selected), $this->store()->count($filter), 'count');
+        self::assertSame(array_reverse($selected), $this->store()->ids($filter, 100), 'ids');
+        self::assertSame(count($selected), $this->store()->purge($filter), 'purge');
+        self::assertSame($kept, self::ids($this->store()->list(new DeadLetterFilter())), 'the purge keeps the other rows');
+    }
+
+    /**
+     * @param array<string, DeadLetter> $rows
+     * @param list<string>              $names
+     *
+     * @return list<string>
+     */
+    private static function idsOf(array $rows, array $names): array
+    {
+        return array_map(static fn (string $name): string => $rows[$name]->id, $names);
     }
 
     /** An instant that lies the given number of seconds from now (negative: in the past). */

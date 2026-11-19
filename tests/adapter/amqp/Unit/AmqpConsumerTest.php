@@ -10,6 +10,7 @@ use Freyr\MessageBroker\Adapter\Amqp\WaitQueuePublisher;
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
+use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
 use Freyr\MessageBroker\Retry\RetryDecision;
@@ -246,7 +247,7 @@ final class AmqpConsumerTest extends TestCase
 
         self::assertSame([1], $this->acked);
         self::assertCount(1, $this->pending);
-        self::assertCount(1, $this->deadLetterStore->list());
+        self::assertCount(1, $this->deadLetterStore->list(new DeadLetterFilter()));
     }
 
     public function testARetriedDeliveryCountsTowardTheMessageLimit(): void
@@ -275,7 +276,7 @@ final class AmqpConsumerTest extends TestCase
 
         self::assertSame([1], $this->acked);
         self::assertCount(1, $this->pending);
-        self::assertCount(1, $this->deadLetterStore->list());
+        self::assertCount(1, $this->deadLetterStore->list(new DeadLetterFilter()));
     }
 
     public function testADiscardedDeliveryCountsTowardTheMessageLimit(): void
@@ -310,7 +311,7 @@ final class AmqpConsumerTest extends TestCase
         self::assertSame(2, $this->published[0]['message']->get('application_headers')->getNativeData()['x-attempt']);
         self::assertSame([9], $this->pendingAckTimeouts, 'the republish is confirmed before the ack');
         self::assertSame([4], $this->acked);
-        self::assertSame([], $this->deadLetterStore->list());
+        self::assertSame([], $this->deadLetterStore->list(new DeadLetterFilter()));
     }
 
     public function testTheConfirmTimeoutDefaultsToFiveSeconds(): void

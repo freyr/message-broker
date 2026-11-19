@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Console;
 
 use Freyr\MessageBroker\Console\DlqListCommand;
+use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\Testing\InMemoryDeadLetterStore;
 use Freyr\MessageBroker\Tests\Fixtures\DeadLetterFactory;
 use Freyr\MessageBroker\Time\EpochMillis;
@@ -43,13 +44,10 @@ final class DlqListCommandTest extends TestCase
     {
         $this->tester->execute([]);
 
-        self::assertSame([[
-            'messageName' => null,
-            'source' => null,
-            'sinceMs' => null,
+        self::assertEquals([[
+            'filter' => new DeadLetterFilter(),
             'limit' => 100,
             'offset' => 0,
-            'replayed' => null,
         ]], $this->store->callsOf('list'));
     }
 
@@ -63,13 +61,14 @@ final class DlqListCommandTest extends TestCase
             '--offset' => '3',
         ]);
 
-        self::assertSame([[
-            'messageName' => 'order.placed',
-            'source' => 'orders_q',
-            'sinceMs' => EpochMillis::now() - 86_400_000,
+        self::assertEquals([[
+            'filter' => new DeadLetterFilter(
+                messageName: 'order.placed',
+                source: 'orders_q',
+                failedFromMs: EpochMillis::now() - 86_400_000,
+            ),
             'limit' => 7,
             'offset' => 3,
-            'replayed' => null,
         ]], $this->store->callsOf('list'));
     }
 

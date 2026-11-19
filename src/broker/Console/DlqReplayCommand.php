@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Console;
 
+use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Time\EpochMillis;
@@ -79,22 +80,17 @@ final class DlqReplayCommand extends Command
         $sourceFilter = is_string($source) ? $source : null;
         $sinceMs = is_string($since) ? EpochMillis::now() - Duration::toMilliseconds($since) : null;
 
-        $eligible = $this->store->count(
+        $filter = new DeadLetterFilter(
             messageName: $messageName,
             source: $sourceFilter,
-            sinceMs: $sinceMs,
+            failedFromMs: $sinceMs,
             replayed: false,
         );
+        $eligible = $this->store->count($filter);
 
         if ($input->getOption('dry-run') === true) {
             $output->writeln("<info>[dry-run] would replay {$eligible} dead letters into lane '{$lane}'.</info>");
-            $sample = $this->store->list(
-                messageName: $messageName,
-                source: $sourceFilter,
-                sinceMs: $sinceMs,
-                limit: 5,
-                replayed: false,
-            );
+            $sample = $this->store->list($filter, limit: 5);
             foreach ($sample as $deadLetter) {
                 $output->writeln("  {$deadLetter->id}  {$deadLetter->messageName}");
             }
@@ -111,13 +107,7 @@ final class DlqReplayCommand extends Command
         // at offset 0 always holds the next unprocessed rows.
         $replayed = 0;
         while (true) {
-            $batch = $this->store->list(
-                messageName: $messageName,
-                source: $sourceFilter,
-                sinceMs: $sinceMs,
-                limit: $this->batchSize,
-                replayed: false,
-            );
+            $batch = $this->store->list($filter, limit: $this->batchSize);
             if ($batch === []) {
                 break;
             }

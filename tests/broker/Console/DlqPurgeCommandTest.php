@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Console;
 
 use Freyr\MessageBroker\Console\DlqPurgeCommand;
+use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\Testing\InMemoryDeadLetterStore;
 use Freyr\MessageBroker\Tests\Fixtures\DeadLetterFactory;
 use Freyr\MessageBroker\Time\EpochMillis;
@@ -50,11 +51,8 @@ final class DlqPurgeCommandTest extends TestCase
         self::assertSame(0, $status);
         self::assertSame("[dry-run] would delete up to 2 dead letters.\n", $this->tester->getDisplay());
         self::assertSame([], $this->store->callsOf('purge'));
-        self::assertSame([[
-            'messageName' => null,
-            'source' => 'orders_q',
-            'sinceMs' => null,
-            'replayed' => null,
+        self::assertEquals([[
+            'filter' => new DeadLetterFilter(source: 'orders_q'),
         ]], $this->store->callsOf('count'));
     }
 
@@ -85,11 +83,13 @@ final class DlqPurgeCommandTest extends TestCase
 
         self::assertSame(0, $status);
         self::assertSame("Purged 1 dead letters.\n", $this->tester->getDisplay());
-        self::assertSame(2, $this->store->count(), 'only dl-1 matches the three filters');
-        self::assertSame([[
-            'messageName' => 'order.placed',
-            'source' => 'orders_q',
-            'olderThanMs' => EpochMillis::now() - 30 * 86_400_000,
+        self::assertSame(2, $this->store->count(new DeadLetterFilter()), 'only dl-1 matches the three filters');
+        self::assertEquals([[
+            'filter' => new DeadLetterFilter(
+                messageName: 'order.placed',
+                source: 'orders_q',
+                failedUntilMs: EpochMillis::now() - 30 * 86_400_000,
+            ),
         ]], $this->store->callsOf('purge'));
     }
 
@@ -101,10 +101,8 @@ final class DlqPurgeCommandTest extends TestCase
             'interactive' => false,
         ]);
 
-        self::assertSame([[
-            'messageName' => null,
-            'source' => null,
-            'olderThanMs' => null,
+        self::assertEquals([[
+            'filter' => new DeadLetterFilter(),
         ]], $this->store->callsOf('purge'));
     }
 

@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Adapter\PostgreSql;
 
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterStat;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\Time\EpochMillis;
+use InvalidArgumentException;
 use PDO;
 use PDOStatement;
 use Symfony\Component\Uid\Uuid;
@@ -94,41 +97,16 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
     }
 
     /** @return list<DeadLetter> */
-    public function list(
-        ?string $messageName = null,
-        ?string $source = null,
-        ?int $sinceMs = null,
-        int $limit = 100,
-        int $offset = 0,
-        ?bool $replayed = null,
-    ): array {
-        $conditions = [];
-        $parameters = [];
-        if ($messageName !== null) {
-            $conditions[] = 'message_name = :message_name';
-            $parameters['message_name'] = $messageName;
-        }
-        if ($source !== null) {
-            $conditions[] = 'source = :source';
-            $parameters['source'] = $source;
-        }
-        if ($sinceMs !== null) {
-            $conditions[] = 'failed_at >= :since';
-            $parameters['since'] = EpochMillis::toDateTime($sinceMs)->format(self::DATETIME_FORMAT);
-        }
-        if ($replayed !== null) {
-            $conditions[] = $replayed ? 'replayed_at IS NOT NULL' : 'replayed_at IS NULL';
-        }
-
-        $where = $conditions === [] ? '' : 'WHERE '.implode(' AND ', $conditions);
+    public function list(DeadLetterFilter $filter, int $limit = 100, int $offset = 0): array
+    {
+        [$where, $parameters] = self::where($filter);
         $statement = $this->pdo->prepare(
             "SELECT * FROM dead_letters {$where} ORDER BY failed_at DESC, id DESC LIMIT :limit OFFSET :offset",
         );
-        foreach ($parameters as $name => $value) {
-            $statement->bindValue($name, $value);
-        }
-        $statement->bindValue('limit', $limit, PDO::PARAM_INT);
-        $statement->bindValue('offset', $offset, PDO::PARAM_INT);
+        self::bind($statement, $parameters + [
+            'limit' => $limit,
+            'offset' => $offset,
+        ]);
         $statement->execute();
 
         /** @var list<array<string, mixed>> $rows */
@@ -137,35 +115,62 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
         return array_map($this->hydrate(...), $rows);
     }
 
-    public function count(
-        ?string $messageName = null,
-        ?string $source = null,
-        ?int $sinceMs = null,
-        ?bool $replayed = null,
-    ): int {
-        $conditions = [];
-        $parameters = [];
-        if ($messageName !== null) {
-            $conditions[] = 'message_name = :message_name';
-            $parameters['message_name'] = $messageName;
-        }
-        if ($source !== null) {
-            $conditions[] = 'source = :source';
-            $parameters['source'] = $source;
-        }
-        if ($sinceMs !== null) {
-            $conditions[] = 'failed_at >= :since';
-            $parameters['since'] = EpochMillis::toDateTime($sinceMs)->format(self::DATETIME_FORMAT);
-        }
-        if ($replayed !== null) {
-            $conditions[] = $replayed ? 'replayed_at IS NOT NULL' : 'replayed_at IS NULL';
-        }
-
-        $where = $conditions === [] ? '' : 'WHERE '.implode(' AND ', $conditions);
+    public function count(DeadLetterFilter $filter): int
+    {
+        [$where, $parameters] = self::where($filter);
         $statement = $this->pdo->prepare("SELECT COUNT(*) FROM dead_letters {$where}");
-        $statement->execute($parameters);
+        self::bind($statement, $parameters);
+        $statement->execute();
 
         return (int) $statement->fetchColumn();
+    }
+
+    /** @return list<string> */
+    public function ids(DeadLetterFilter $filter, int $limit): array
+    {
+        if ($limit < 1) {
+            throw new InvalidArgumentException("limit must be at least 1, got {$limit}");
+        }
+        [$where, $parameters] = self::where($filter);
+        $statement = $this->pdo->prepare(
+            "SELECT id FROM dead_letters {$where} ORDER BY failed_at ASC, id ASC LIMIT :limit",
+        );
+        self::bind($statement, $parameters + [
+            'limit' => $limit,
+        ]);
+        $statement->execute();
+
+        /** @var list<string> $ids */
+        $ids = $statement->fetchAll(PDO::FETCH_COLUMN);
+
+        return $ids;
+    }
+
+    /** @return list<DeadLetterStat> */
+    public function stats(DeadLetterFilter $filter): array
+    {
+        [$where, $parameters] = self::where($filter);
+        $statement = $this->pdo->prepare(<<<SQL
+            SELECT message_name, source, error_class, COUNT(*) AS count,
+                   MIN(failed_at) AS oldest_failed_at, MAX(failed_at) AS newest_failed_at
+            FROM dead_letters {$where}
+            GROUP BY message_name, source, error_class
+            ORDER BY count DESC, message_name ASC, source ASC, error_class ASC
+            SQL);
+        self::bind($statement, $parameters);
+        $statement->execute();
+
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_map(static fn (array $row): DeadLetterStat => new DeadLetterStat(
+            messageName: self::string($row, 'message_name'),
+            source: self::string($row, 'source'),
+            errorClass: self::string($row, 'error_class'),
+            count: (int) self::string($row, 'count'),
+            oldestFailedAt: self::epochMilliseconds(self::string($row, 'oldest_failed_at')),
+            newestFailedAt: self::epochMilliseconds(self::string($row, 'newest_failed_at')),
+        ), $rows);
     }
 
     /** Replay keeps the row for audit — marks replayed_at instead of deleting. */
@@ -178,28 +183,70 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
         ]);
     }
 
-    public function purge(?string $messageName = null, ?string $source = null, ?int $olderThanMs = null): int
+    public function purge(DeadLetterFilter $filter): int
+    {
+        [$where, $parameters] = self::where($filter);
+        $statement = $this->pdo->prepare("DELETE FROM dead_letters {$where}");
+        self::bind($statement, $parameters);
+        $statement->execute();
+
+        return $statement->rowCount();
+    }
+
+    /**
+     * The WHERE clause of a filter: fixed condition fragments only, and each
+     * filter value as a bound parameter.
+     *
+     * @return array{string, array<string, int|string>}
+     */
+    private static function where(DeadLetterFilter $filter): array
     {
         $conditions = [];
         $parameters = [];
-        if ($messageName !== null) {
+        if ($filter->messageName !== null) {
             $conditions[] = 'message_name = :message_name';
-            $parameters['message_name'] = $messageName;
+            $parameters['message_name'] = $filter->messageName;
         }
-        if ($source !== null) {
+        if ($filter->source !== null) {
             $conditions[] = 'source = :source';
-            $parameters['source'] = $source;
+            $parameters['source'] = $filter->source;
         }
-        if ($olderThanMs !== null) {
-            $conditions[] = 'failed_at < :threshold';
-            $parameters['threshold'] = EpochMillis::toDateTime($olderThanMs)->format(self::DATETIME_FORMAT);
+        if ($filter->errorClass !== null) {
+            $conditions[] = 'error_class = :error_class';
+            $parameters['error_class'] = $filter->errorClass;
+        }
+        if ($filter->messageId !== null) {
+            $conditions[] = 'message_id = :message_id';
+            $parameters['message_id'] = $filter->messageId;
+        }
+        if ($filter->failedFromMs !== null) {
+            $conditions[] = 'failed_at >= :failed_from';
+            $parameters['failed_from'] = EpochMillis::toDateTime($filter->failedFromMs)->format(self::DATETIME_FORMAT);
+        }
+        if ($filter->failedUntilMs !== null) {
+            $conditions[] = 'failed_at < :failed_until';
+            $parameters['failed_until'] = EpochMillis::toDateTime($filter->failedUntilMs)->format(self::DATETIME_FORMAT);
+        }
+        if ($filter->minAttempts !== null) {
+            $conditions[] = 'attempts >= :min_attempts';
+            $parameters['min_attempts'] = $filter->minAttempts;
+        }
+        if ($filter->replayed !== null) {
+            $conditions[] = $filter->replayed ? 'replayed_at IS NOT NULL' : 'replayed_at IS NULL';
+        }
+        if ($filter->replayable !== null) {
+            $conditions[] = $filter->replayable ? 'replayable' : 'NOT replayable';
         }
 
-        $where = $conditions === [] ? '' : 'WHERE '.implode(' AND ', $conditions);
-        $statement = $this->pdo->prepare("DELETE FROM dead_letters {$where}");
-        $statement->execute($parameters);
+        return [$conditions === [] ? '' : 'WHERE '.implode(' AND ', $conditions), $parameters];
+    }
 
-        return $statement->rowCount();
+    /** @param array<string, int|string> $parameters */
+    private static function bind(PDOStatement $statement, array $parameters): void
+    {
+        foreach ($parameters as $name => $value) {
+            $statement->bindValue($name, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
     }
 
     private static function bindBody(PDOStatement $statement, string $name, string $body): void
