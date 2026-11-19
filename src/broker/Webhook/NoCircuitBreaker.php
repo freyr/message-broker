@@ -1,0 +1,19 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Freyr\MessageBroker\Webhook;
+
+/** A {@see CircuitBreaker} that opens no lane and keeps no count. The default of {@see DeliveryLoop}. */
+final class NoCircuitBreaker implements CircuitBreaker
+{
+    public function openLanes(): array
+    {
+        return [];
+    }
+
+    public function record(array $counts): LaneTransitions
+    {
+        return new LaneTransitions();
+    }
+}
