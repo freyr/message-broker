@@ -20,6 +20,9 @@
         <testsuite name="amqp">
             <directory>tests/adapter/amqp</directory>
         </testsuite>
+        <testsuite name="http">
+            <directory>tests/adapter/http</directory>
+        </testsuite>
     </testsuites>
 
     <source>
@@ -27,6 +30,7 @@
             <directory>src/broker</directory>
             <directory>src/adapter/postgresql</directory>
             <directory>src/adapter/amqp</directory>
+            <directory>src/adapter/http</directory>
         </include>
         <exclude>
             <directory>src/broker/Testing</directory>

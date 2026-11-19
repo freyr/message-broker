@@ -53,7 +53,7 @@ cs-fix: ## Fix code style with ECS
 infection: ## Mutation testing with Infection and pcov (full run, all CPU cores); ARGS for extra options
 	docker compose run --rm php vendor/bin/infection --threads=max $(ARGS)
 
-split-rehearsal: ## Split rehearsal of one future package; PACKAGE=core|postgresql|amqp, ARGS=--infection
+split-rehearsal: ## Split rehearsal of one future package; PACKAGE=core|postgresql|amqp|http, ARGS=--infection
 	docker compose run --rm php tools/split-rehearsal.sh $(PACKAGE) $(ARGS)
 
 bench: ## Relay throughput benchmark; ARGS="<rows> <workers> <batch> [full|db-only|amqp-only]"

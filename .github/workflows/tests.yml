@@ -253,7 +253,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [core, postgresql, amqp]
+        package: [core, postgresql, amqp, http]
 
     services:
       postgres:
