@@ -32,6 +32,12 @@ final class InMemoryDeliveryStore implements DeliveryStore, TransactionParticipa
 {
     public int $claimCalls = 0;
 
+    /** @var list<array{lanes: list<string>, limitForEachLane: int, total: int, leaseMs: int}> the arguments of each claim() */
+    public array $claims = [];
+
+    /** @var list<array{before: int, limit: int, leaseMs: int}> the arguments of each claimExpired() */
+    public array $expiredClaims = [];
+
     /** @var (callable(int): void)|null called at the start of each claim() with the call number */
     public $onClaim;
 
@@ -59,6 +65,7 @@ final class InMemoryDeliveryStore implements DeliveryStore, TransactionParticipa
     public function claim(array $lanes, int $limitForEachLane, int $total, int $leaseMs): array
     {
         ++$this->claimCalls;
+        $this->claims[] = compact('lanes', 'limitForEachLane', 'total', 'leaseMs');
         if ($this->onClaim !== null) {
             ($this->onClaim)($this->claimCalls);
         }
@@ -114,6 +121,7 @@ final class InMemoryDeliveryStore implements DeliveryStore, TransactionParticipa
 
     public function claimExpired(int $before, int $limit, int $leaseMs): array
     {
+        $this->expiredClaims[] = compact('before', 'limit', 'leaseMs');
         $now = EpochMillis::now();
         $expired = array_filter(
             $this->rows,

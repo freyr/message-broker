@@ -11,11 +11,14 @@ use Freyr\MessageBroker\Webhook\SubscriptionProvider;
  * In-memory SubscriptionProvider. add() registers a subscription with the
  * message names that it receives; remove() takes it away, as an application
  * that removes a subscription. lanes() counts its calls, so a test can see the
- * refresh of the delivery loop.
+ * refresh of the delivery loop, and find() records its arguments.
  */
 final class InMemorySubscriptionProvider implements SubscriptionProvider
 {
     public int $lanesCalls = 0;
+
+    /** @var list<string> the argument of each find() call */
+    public array $finds = [];
 
     /** @var array<string, Subscription> subscription id => subscription */
     private array $subscriptions = [];
@@ -45,6 +48,8 @@ final class InMemorySubscriptionProvider implements SubscriptionProvider
 
     public function find(string $lane): ?Subscription
     {
+        $this->finds[] = $lane;
+
         return $this->subscriptions[$lane] ?? null;
     }
 
