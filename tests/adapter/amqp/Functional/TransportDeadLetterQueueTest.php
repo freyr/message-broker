@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Adapter\Amqp\Tests\Functional;
 
 use Freyr\MessageBroker\Adapter\Amqp\AmqpConsumer;
+use Freyr\MessageBroker\Adapter\Amqp\AmqpDeadLetterConfig;
 use Freyr\MessageBroker\Adapter\Amqp\AmqpDeadLetterImport;
+use Freyr\MessageBroker\Adapter\Amqp\AmqpDeadLetterSink;
 use Freyr\MessageBroker\Adapter\Amqp\AmqpQueueConfig;
 use Freyr\MessageBroker\Adapter\PostgreSql\PdoTransaction;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeadLetterStore;
@@ -18,6 +20,7 @@ use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterBuilder;
 use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterImporter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterSink;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Retry\Backoff;
@@ -55,6 +58,9 @@ final class TransportDeadLetterQueueTest extends AmqpFunctionalTestCase
     private AMQPChannel $channel;
 
     private PostgreSqlDeadLetterStore $store;
+
+    /** @var list<DeadLetter> each dead letter that the recording queue sink got */
+    private array $sinkGot = [];
 
     public static function setUpBeforeClass(): void
     {
@@ -209,9 +215,15 @@ final class TransportDeadLetterQueueTest extends AmqpFunctionalTestCase
      */
     private function awaitTheDeadLetterQueue(): void
     {
+        $this->awaitAMessageIn(self::deadLetterQueue(), 'the broker did not move the message in 5 seconds');
+    }
+
+    /** Waits until $queue holds a ready message: a requeue and a move are asynchronous on a quorum queue. */
+    private function awaitAMessageIn(string $queue, string $failure): void
+    {
         $deadline = microtime(true) + 5;
-        while ($this->messageCount(self::deadLetterQueue()) === 0) {
-            self::assertLessThan($deadline, microtime(true), 'the broker did not move the message in 5 seconds');
+        while ($this->messageCount($queue) === 0) {
+            self::assertLessThan($deadline, microtime(true), $failure);
             usleep(10_000);
         }
     }
@@ -489,5 +501,153 @@ final class TransportDeadLetterQueueTest extends AmqpFunctionalTestCase
         self::assertNotSame($firstId, $open[0]->id);
         self::assertSame('m-1', $open[0]->messageId);
         self::assertSame(self::queue(), $open[0]->source);
+    }
+
+    // the queue sink
+
+    /**
+     * A queue sink on its own channel of the connection of the consumer; each dead letter that it got goes to
+     * $this->sinkGot first.
+     */
+    private function recordingSink(string $routingKey, AMQPChannel $sinkChannel): DeadLetterSink
+    {
+        $sink = new AmqpDeadLetterSink($sinkChannel, new AmqpDeadLetterConfig(self::exchange(), $routingKey));
+
+        return new class($sink, function (DeadLetter $deadLetter): void {
+            $this->sinkGot[] = $deadLetter;
+        }) implements DeadLetterSink {
+            public function __construct(
+                private readonly DeadLetterSink $inner,
+                private readonly \Closure $record,
+            ) {}
+
+            public function store(DeadLetter $deadLetter): void
+            {
+                ($this->record)($deadLetter);
+                $this->inner->store($deadLetter);
+            }
+        };
+    }
+
+    private function consumerWithTheSink(DeadLetterSink $sink, int $maxAttempts): AmqpConsumer
+    {
+        return new AmqpConsumer(
+            channel: $this->channel,
+            queue: new AmqpQueueConfig(self::queue()),
+            processor: new DeliveryProcessor(
+                deserializer: new JsonDeserializer(),
+                dispatcher: new CallableDispatcher(static fn (IncomingMessage $incoming) => throw new RuntimeException('handler failed')),
+                transaction: new PdoTransaction(self::$pdo),
+                deduplication: new PostgreSqlDeduplicationStore(self::$pdo),
+                retryPolicy: new ExponentialRetryPolicy(
+                    maxAttempts: $maxAttempts,
+                    backoff: Backoff::exponential(initialDelayMs: self::DELAY_MS, maxDelayMs: self::DELAY_MS),
+                ),
+                deadLetters: $sink,
+                name: 'orders_consumer',
+            ),
+        );
+    }
+
+    public function testARoundTripThroughTheQueueSinkGivesARowEqualToTheDeadLetterOfTheSink(): void
+    {
+        $this->publish('m-1', extraHeaders: [
+            'x-custom' => 'h',
+        ]);
+        $sinkChannel = self::$amqp->channel();
+        $sink = $this->recordingSink(self::deadLetterQueue(), $sinkChannel);
+
+        // The first failure retries through the wait queue (the message comes back with an x-death entry
+        // 'expired'), the second failure dead-letters through the sink.
+        $this->consumerWithTheSink($sink, maxAttempts: 2)->run(messageLimit: 2, idleTimeoutSec: 5);
+        $sinkChannel->close();
+
+        self::assertCount(1, $this->sinkGot, 'the sink waited for its confirm on its own channel inside the consumer callback');
+        self::assertSame([], $this->rows(), 'the queue sink writes no row');
+        self::assertSame(1, $this->messageCount(self::deadLetterQueue()));
+        self::assertSame(0, $this->messageCount(self::queue()), 'the consumer acked the delivery');
+
+        self::assertSame(1, $this->import()->run());
+
+        $got = $this->sinkGot[0];
+        self::assertCount(1, $this->rows());
+        $row = $this->rows()[0];
+        self::assertSame($got->id, $row->id);
+        self::assertSame(self::queue(), $row->source);
+        self::assertSame($got->messageId, $row->messageId);
+        self::assertSame($got->messageName, $row->messageName);
+        self::assertSame($got->body, $row->body);
+        // The table stores the headers as JSON (an AMQP timestamp of x-death becomes its JSON form): compare the
+        // table form of the headers that the sink got. JSONB keeps no key order.
+        self::assertEquals(
+            json_decode(json_encode($got->headers, JSON_THROW_ON_ERROR), true),
+            $row->headers,
+            'the headers that the sink got, also the copied x-death',
+        );
+        self::assertSame('h', $row->headers['x-custom']);
+        self::assertSame(self::waitQueue(), $row->headers['x-death'][0]['queue']);
+        self::assertSame('expired', $row->headers['x-death'][0]['reason'], 'the broker keeps a client header x-death');
+        self::assertSame(RuntimeException::class, $row->errorClass);
+        self::assertSame('handler failed', $row->errorMessage);
+        self::assertSame($got->errorTrace, $row->errorTrace);
+        self::assertSame(2, $row->attempts);
+        self::assertSame($got->failedAt, $row->failedAt);
+        self::assertTrue($row->replayable);
+        self::assertSame(0, $this->messageCount(self::deadLetterQueue()), 'the import acked the message');
+    }
+
+    public function testAStopBeforeTheAckOfASinkMessageThenAReplayThenASecondRunChangesNothing(): void
+    {
+        $sinkChannel = self::$amqp->channel();
+        (new AmqpDeadLetterSink($sinkChannel, new AmqpDeadLetterConfig(self::exchange(), self::deadLetterQueue())))->store(new DeadLetter(
+            id: '0190f7e2-1234-7000-8000-abc123456789',
+            source: self::queue(),
+            messageId: 'm-1',
+            messageName: 'order.placed',
+            body: '{"metadata":{"message_name":"order.placed","message_id":"m-1","created_at":1765476000123},"payload":{"order_id":"o-1"}}',
+            headers: [
+                'x-custom' => 'h',
+            ],
+            errorClass: 'App\PaymentDeclined',
+            errorMessage: 'card expired',
+            errorTrace: '#0 trace-line',
+            attempts: 5,
+            failedAt: 1_795_219_200_123,
+        ));
+        $sinkChannel->close();
+        $firstId = $this->importAndStopBeforeTheAck();
+        self::assertSame('0190f7e2-1234-7000-8000-abc123456789', $firstId, 'the id of the header');
+        (new ReplayService($this->store, new InMemoryOutboxStore(), new PdoTransaction(self::$pdo), new JsonWireFormat()))
+            ->replay($firstId, self::queue());
+        $replayed = $this->store->find($firstId);
+        self::assertNotNull($replayed?->replayedAt);
+
+        self::assertSame(1, $this->import()->run(), 'the second run acks the message');
+
+        self::assertCount(1, $this->rows(), 'no second row');
+        self::assertEquals($replayed, $this->store->find($firstId), 'the replayed row is unchanged');
+        self::assertSame(0, $this->messageCount(self::deadLetterQueue()), 'the queue is empty');
+    }
+
+    public function testASinkPublishWithNoMatchingBindingThrowsAndTheDeliveryReturnsUnacked(): void
+    {
+        $this->publish('m-1');
+        $sinkChannel = self::$amqp->channel();
+        $sink = $this->recordingSink('no-binding', $sinkChannel);
+
+        try {
+            $this->consumerWithTheSink($sink, maxAttempts: 1)->run(messageLimit: 1, idleTimeoutSec: 5);
+            self::fail('a returned dead letter must stop the consumer');
+        } catch (RuntimeException $e) {
+            self::assertStringStartsWith('The broker returned the dead letter ', $e->getMessage());
+            self::assertStringEndsWith(': 312 NO_ROUTE', $e->getMessage());
+        }
+        $sinkChannel->close();
+
+        self::assertCount(1, $this->sinkGot);
+        $this->awaitAMessageIn(self::queue(), 'the delivery did not return to the work queue in 5 seconds');
+        self::assertSame(1, $this->messageCount(self::queue()), 'the delivery returned to the work queue');
+        self::assertSame(0, $this->messageCount(self::deadLetterQueue()));
+        self::assertSame([], $this->rows());
     }
 }
