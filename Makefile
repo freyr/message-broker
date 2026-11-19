@@ -24,7 +24,7 @@ test: ## Run tests against PostgreSQL and RabbitMQ
 # The pooler is started first: `docker compose run --rm php` starts only the services php depends on.
 PGBOUNCER_RUN = docker compose run --rm -e "POSTGRES_DSN=pgsql:host=pgbouncer;port=6432;dbname=message_broker_test" -e POSTGRES_ROTATING_POOLER=1 php vendor/bin/phpunit
 
-test-pgbouncer: ## Run the rotation guard, the PostgreSQL contract tests and the consumer functional tests through pgbouncer (transaction mode)
+test-pgbouncer: ## Run the rotation guard, the PostgreSQL contract tests and the consumer and webhook functional tests through pgbouncer (transaction mode)
 	docker compose up -d --wait pgbouncer
 	$(PGBOUNCER_RUN) --fail-on-skipped tests/adapter/postgresql/Functional/PoolerRotationGuardTest.php
 	$(PGBOUNCER_RUN) \
@@ -33,6 +33,7 @@ test-pgbouncer: ## Run the rotation guard, the PostgreSQL contract tests and the
 		tests/adapter/postgresql/Functional/PostgreSqlDeadLetterStoreContractTest.php \
 		tests/adapter/postgresql/Functional/PostgreSqlDeliveryStoreContractTest.php \
 		tests/adapter/postgresql/Functional/PdoTransactionContractTest.php \
+		tests/adapter/postgresql/Functional/WebhookEndToEndTest.php \
 		tests/adapter/amqp/Functional/AmqpConsumerTest.php \
 		tests/adapter/amqp/Functional/EndToEndTest.php \
 		tests/adapter/amqp/Functional/ParallelConsumptionTest.php

@@ -26,9 +26,10 @@ client and prepares them again on the server connection that runs the execute.
 The CI job `pgbouncer` (and `make test-pgbouncer` locally) runs the PostgreSQL
 contract tests (`PostgreSqlOutboxStoreContractTest`,
 `PostgreSqlDeduplicationStoreContractTest`, `PostgreSqlDeadLetterStoreContractTest`,
-`PostgreSqlDeliveryStoreContractTest`, `PdoTransactionContractTest`) and the consumer functional tests (`AmqpConsumerTest`,
-`EndToEndTest`, `ParallelConsumptionTest`) through pgbouncer 1.26.1 with these
-settings:
+`PostgreSqlDeliveryStoreContractTest`, `PdoTransactionContractTest`), the consumer functional tests (`AmqpConsumerTest`,
+`EndToEndTest`, `ParallelConsumptionTest`) and the webhook functional test
+(`WebhookEndToEndTest`: the delivery loop, the dead letters and the replay)
+through pgbouncer 1.26.1 with these settings:
 
 | Setting | Value |
 |---|---|

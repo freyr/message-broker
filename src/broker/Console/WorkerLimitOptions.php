@@ -11,7 +11,7 @@ use Symfony\Component\Console\Input\InputInterface;
 
 /**
  * The option helpers of the worker limit options, shared by
- * {@see RelayRunCommand} and {@see ConsumeCommand}.
+ * {@see RelayRunCommand}, {@see ConsumeCommand} and {@see WebhookRunCommand}.
  *
  * @internal
  */

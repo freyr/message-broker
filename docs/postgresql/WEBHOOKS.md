@@ -58,8 +58,11 @@ a new database; its partition DDL is not idempotent (`ATTACH`). The dead
 letters of the deliveries go to `dead_letters`, which
 `PostgreSqlSchemaInstaller` creates.
 
-This release has no console command for the table. Call `install()` from your
-deployment, and `PostgreSqlDeliveryRetention` from a daily job (below).
+The console commands `message-broker:webhook:setup` and
+`message-broker:webhook:maintain` take these classes (see
+[../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md)). Without the commands,
+call `install()` from your deployment, and `PostgreSqlDeliveryRetention` from a
+daily job (below).
 
 ```php
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryRetention;

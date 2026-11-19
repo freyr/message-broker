@@ -410,6 +410,7 @@ jobs:
           tests/adapter/postgresql/Functional/PostgreSqlDeadLetterStoreContractTest.php
           tests/adapter/postgresql/Functional/PostgreSqlDeliveryStoreContractTest.php
           tests/adapter/postgresql/Functional/PdoTransactionContractTest.php
+          tests/adapter/postgresql/Functional/WebhookEndToEndTest.php
           tests/adapter/amqp/Functional/AmqpConsumerTest.php
           tests/adapter/amqp/Functional/EndToEndTest.php
           tests/adapter/amqp/Functional/ParallelConsumptionTest.php

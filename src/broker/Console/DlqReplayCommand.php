@@ -9,6 +9,7 @@ use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterNotFound;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\NotReplayable;
+use Freyr\MessageBroker\DeadLetter\ReplayDestination;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Time\EpochMillis;
 use InvalidArgumentException;
@@ -25,7 +26,10 @@ use Throwable;
 
 /**
  * Replays one dead letter, or each matching dead letter with --all. Each
- * replay is its own transaction ({@see ReplayService}).
+ * replay is its own transaction ({@see ReplayService}). A webhook dead letter
+ * (source "webhook:<lane>") goes to a new delivery row for the lane of its
+ * source; --lane has no effect on it. The output names the webhook lane, and
+ * the summary of --all counts the webhook replays apart.
  *
  * --all reads only open rows (replayed = false), with replayable = true unless
  * --not-replayable is given, and only rows that failed before the start of
@@ -55,7 +59,7 @@ final class DlqReplayCommand extends Command
         $this
             ->addArgument('id', InputArgument::OPTIONAL, 'Dead letter id (omit with --all)')
             ->addOption('all', null, InputOption::VALUE_NONE, 'Replay every matching dead letter that is not replayed')
-            ->addOption('lane', null, InputOption::VALUE_REQUIRED, 'Target outbox lane', 'default')
+            ->addOption('lane', null, InputOption::VALUE_REQUIRED, 'Target outbox lane (no effect on a webhook dead letter)', 'default')
             ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'With --all: the maximum number of rows that the run handles')
             ->addOption('rate', null, InputOption::VALUE_REQUIRED, 'With --all: the maximum number of replays that start in one second')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Show what would be replayed; change nothing')
@@ -123,20 +127,30 @@ final class DlqReplayCommand extends Command
     {
         try {
             if ($dryRun) {
-                $this->replay->check($id);
-                $output->writeln("<info>[dry-run] would replay {$id} into lane '{$lane}'.</info>");
+                $destination = $this->replay->check($id, $lane);
+                $into = self::into($id, $destination);
+                $output->writeln("<info>[dry-run] would replay {$into}</info>");
 
                 return Command::SUCCESS;
             }
-            $this->replay->replay($id, $lane);
+            $destination = $this->replay->replay($id, $lane);
         } catch (DeadLetterNotFound|AlreadyReplayed|NotReplayable $refusal) {
             $output->writeln("<error>{$refusal->getMessage()}.</error>");
 
             return Command::FAILURE;
         }
-        $output->writeln("<info>Replayed {$id} into lane '{$lane}'.</info>");
+        $into = self::into($id, $destination);
+        $output->writeln("<info>Replayed {$into}</info>");
 
         return Command::SUCCESS;
+    }
+
+    /** "<id> into lane '<lane>'." for an outbox replay; a webhook replay names its webhook lane and says that --lane had no effect. */
+    private static function into(string $id, ReplayDestination $destination): string
+    {
+        return $destination->webhook
+            ? "{$id} into webhook lane '{$destination->lane}' (a webhook dead letter goes to the lane of its source; --lane has no effect)."
+            : "{$id} into lane '{$destination->lane}'.";
     }
 
     /**
@@ -148,6 +162,9 @@ final class DlqReplayCommand extends Command
     private function replayAll(DeadLetterFilter $filter, string $lane, ?int $limit, ?int $rate, OutputInterface $output): int
     {
         $replayed = 0;
+        $webhookReplayed = 0;
+        /** @var list<string> $webhookLanes the lane of each webhook replay */
+        $webhookLanes = [];
         $notReplayable = 0;
         $alreadyReplayed = 0;
         $failed = 0;
@@ -174,8 +191,13 @@ final class DlqReplayCommand extends Command
                     $previousStart = self::waitForTheRate($previousStart, $rate);
                 }
                 try {
-                    $this->replay->replay($id, $lane);
-                    ++$replayed;
+                    $destination = $this->replay->replay($id, $lane);
+                    if ($destination->webhook) {
+                        ++$webhookReplayed;
+                        $webhookLanes[] = $destination->lane;
+                    } else {
+                        ++$replayed;
+                    }
 
                     continue;
                 } catch (NotReplayable $skip) {
@@ -200,6 +222,13 @@ final class DlqReplayCommand extends Command
             $failed,
             $lane,
         ));
+        if ($webhookReplayed > 0) {
+            $output->writeln(sprintf(
+                '<info>Replayed %d webhook dead letter(s) into the webhook lanes of their sources (--lane has no effect on them): %s.</info>',
+                $webhookReplayed,
+                implode(', ', array_unique($webhookLanes)),
+            ));
+        }
 
         return $failed > 0 ? Command::FAILURE : Command::SUCCESS;
     }

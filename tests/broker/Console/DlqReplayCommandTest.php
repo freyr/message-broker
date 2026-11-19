@@ -10,11 +10,13 @@ use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Testing\InMemoryDeadLetterStore;
+use Freyr\MessageBroker\Testing\InMemoryDeliveryStore;
 use Freyr\MessageBroker\Testing\InMemoryTransaction;
 use Freyr\MessageBroker\Tests\Fixtures\DeadLetterFactory;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingDeadLetterStore;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingOutboxStore;
 use Freyr\MessageBroker\Time\EpochMillis;
+use Freyr\MessageBroker\Webhook\DeliveryRecord;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -582,6 +584,116 @@ final class DlqReplayCommandTest extends TestCase
         ]);
 
         self::assertEquals($before, $this->clock->now());
+    }
+
+    public function testDryRunOfAWebhookDeadLetterWithABodyThatIsNotACanonicalDocumentPassesAndChangesNothing(): void
+    {
+        $this->store->add(DeadLetterFactory::make('dl-1', source: 'webhook:crm', body: self::RAW));
+        $deliveries = new InMemoryDeliveryStore();
+        $tester = $this->webhookTester($deliveries);
+
+        $status = $tester->execute([
+            'id' => 'dl-1',
+            '--dry-run' => true,
+        ]);
+
+        self::assertSame(Command::SUCCESS, $status);
+        self::assertSame(
+            "[dry-run] would replay dl-1 into webhook lane 'crm' (a webhook dead letter goes to the lane of its source; --lane has no effect).\n",
+            $tester->getDisplay(),
+        );
+        self::assertSame([], $deliveries->records());
+        self::assertSame([], $this->outbox->inserted);
+        self::assertNull($this->store->find('dl-1')?->replayedAt);
+    }
+
+    public function testReplayOfAWebhookDeadLetterInsertsOneDeliveryRowForTheLaneOfTheSourceAndNoOutboxRow(): void
+    {
+        $this->store->add(DeadLetterFactory::make('dl-1', source: 'webhook:crm', body: self::RAW));
+        $deliveries = new InMemoryDeliveryStore();
+        $tester = $this->webhookTester($deliveries);
+
+        $status = $tester->execute([
+            'id' => 'dl-1',
+            '--lane' => 'orders',
+        ]);
+
+        self::assertSame(Command::SUCCESS, $status);
+        self::assertSame(
+            "Replayed dl-1 into webhook lane 'crm' (a webhook dead letter goes to the lane of its source; --lane has no effect).\n",
+            $tester->getDisplay(),
+        );
+        self::assertSame(['crm'], array_map(static fn (DeliveryRecord $r): string => $r->lane, $deliveries->records()));
+        self::assertSame(self::RAW, $deliveries->records()[0]->body);
+        self::assertSame([], $this->outbox->inserted);
+    }
+
+    public function testReplayOfAWebhookDeadLetterWithNoDeliveryStoreFailsAsNotReplayable(): void
+    {
+        $this->store->add(DeadLetterFactory::make('dl-1', source: 'webhook:crm'));
+        $tester = $this->tester();
+
+        $status = $tester->execute([
+            'id' => 'dl-1',
+        ]);
+
+        self::assertSame(Command::FAILURE, $status);
+        self::assertSame(
+            "Dead letter 'dl-1' is not replayable: the replay service has no delivery store for a webhook dead letter.\n",
+            $tester->getDisplay(),
+        );
+        self::assertSame([], $this->outbox->inserted);
+    }
+
+    public function testAllWithAConsumerAndAWebhookDeadLetterReplaysEachToItsDestinationAndCountsThemApart(): void
+    {
+        $this->store->add(DeadLetterFactory::make('dl-q', source: 'orders_q', messageId: 'm-q', failedAt: 1_750_000_000_100));
+        $this->store->add(DeadLetterFactory::make('dl-w', source: 'webhook:crm', body: self::RAW, messageId: 'm-w', failedAt: 1_750_000_000_200));
+        $deliveries = new InMemoryDeliveryStore();
+        $tester = $this->webhookTester($deliveries);
+
+        $status = $tester->execute([
+            '--all' => true,
+            '--force' => true,
+            '--lane' => 'orders',
+        ]);
+
+        self::assertSame(Command::SUCCESS, $status);
+        self::assertSame(
+            "Replayed 1, skipped 0 (not replayable), skipped 0 (already replayed), failed 0 into lane 'orders'.\n"
+            ."Replayed 1 webhook dead letter(s) into the webhook lanes of their sources (--lane has no effect on them): crm.\n",
+            $tester->getDisplay(),
+        );
+        self::assertSame(['m-q'], self::insertedIds($this->outbox->inserted));
+        self::assertSame('orders', $this->outbox->inserted[0]->lane);
+        self::assertSame(['crm'], array_map(static fn (DeliveryRecord $r): string => $r->lane, $deliveries->records()));
+        self::assertSame(['m-w'], array_map(static fn (DeliveryRecord $r): string => $r->messageId, $deliveries->records()));
+    }
+
+    public function testAllNamesEachWebhookLaneOnceInTheOrderOfTheReplays(): void
+    {
+        $this->store->add(DeadLetterFactory::make('dl-1', source: 'webhook:erp', messageId: 'm-1', failedAt: 1_750_000_000_100));
+        $this->store->add(DeadLetterFactory::make('dl-2', source: 'webhook:crm', messageId: 'm-2', failedAt: 1_750_000_000_200));
+        $this->store->add(DeadLetterFactory::make('dl-3', source: 'webhook:erp', messageId: 'm-3', failedAt: 1_750_000_000_300));
+        $tester = $this->webhookTester(new InMemoryDeliveryStore());
+
+        $tester->execute([
+            '--all' => true,
+            '--force' => true,
+        ]);
+
+        self::assertSame(
+            "Replayed 0, skipped 0 (not replayable), skipped 0 (already replayed), failed 0 into lane 'default'.\n"
+            ."Replayed 3 webhook dead letter(s) into the webhook lanes of their sources (--lane has no effect on them): erp, crm.\n",
+            $tester->getDisplay(),
+        );
+    }
+
+    private function webhookTester(InMemoryDeliveryStore $deliveries): CommandTester
+    {
+        $replay = new ReplayService($this->replayStore, $this->outbox, new InMemoryTransaction(), new JsonWireFormat(), deliveries: $deliveries);
+
+        return new CommandTester(new DlqReplayCommand($replay, $this->store));
     }
 
     private function seedRefusedRows(): void

@@ -70,13 +70,29 @@ final class BrokerHeader
      */
     public static function forReplay(array $headers, string $target): array
     {
+        $kept = self::withoutReplayStrip($headers);
+        $kept[self::REPLAY_TARGET] = $target;
+
+        return $kept;
+    }
+
+    /**
+     * The headers of a dead letter minus the strip list and the strip
+     * prefixes, with no replay target: the headers of the delivery row of a
+     * replayed webhook dead letter.
+     *
+     * @param array<string, mixed> $headers
+     *
+     * @return array<string, mixed>
+     */
+    public static function withoutReplayStrip(array $headers): array
+    {
         $kept = [];
         foreach ($headers as $name => $value) {
             if (!in_array($name, self::REPLAY_STRIP, true) && !self::hasStripPrefix($name)) {
                 $kept[$name] = $value;
             }
         }
-        $kept[self::REPLAY_TARGET] = $target;
 
         return $kept;
     }

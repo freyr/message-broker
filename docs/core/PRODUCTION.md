@@ -55,8 +55,8 @@ was measured on PHP 8.4 with no `pcntl`:
   137), so the stop is slow and also not graceful. Run the process under an
   init process, or load `ext-pcntl`.
 
-Use `--require-signals` on `message-broker:relay:run` and
-`message-broker:consume` to fail fast at startup if `ext-pcntl` is missing,
+Use `--require-signals` on `message-broker:relay:run`,
+`message-broker:consume` and `message-broker:webhook:run` to fail fast at startup if `ext-pcntl` is missing,
 rather than discovering it the first time a supervisor sends SIGTERM:
 
 ```bash
@@ -66,13 +66,15 @@ php bin/console message-broker:consume orders --require-signals
 
 ## Worker limits
 
-`message-broker:relay:run` and `message-broker:consume` take `--limit`,
-`--time-limit` and `--memory-limit`; `message-broker:consume` also takes
+`message-broker:relay:run`, `message-broker:consume` and
+`message-broker:webhook:run` take `--limit`, `--time-limit` and
+`--memory-limit`; `message-broker:consume` also takes
 `--failure-limit`. A worker that stops after a limit starts again with a fresh
 process, so memory growth and long-lived connections do not build up. The
 options and the callable type are in
 [CLI_REFERENCE.md](CLI_REFERENCE.md#message-brokerrelayrun-lane) (relay) and
-[CLI_REFERENCE.md](CLI_REFERENCE.md#message-brokerconsume-name) (consumer).
+[CLI_REFERENCE.md](CLI_REFERENCE.md#message-brokerconsume-name) (consumer) and
+[CLI_REFERENCE.md](CLI_REFERENCE.md#message-brokerwebhookrun) (webhook delivery loop).
 
 A limit stop ends the process with exit code `0`. **The supervisor must start a
 new process after each exit, exit code `0` included.** A supervisor that restarts
@@ -84,8 +86,8 @@ only after a failure leaves the lane or the queue with no worker.
 | Supervisor | `autorestart=true` | `autorestart=unexpected` |
 | Kubernetes | `restartPolicy: Always` (the default of a `Deployment`) | `OnFailure` or `Never` |
 
-Set `--memory-limit` below the PHP `memory_limit`. The relay checks the memory
-after each pass and the consumer after each delivery, so a pass or a delivery
+Set `--memory-limit` below the PHP `memory_limit`. The relay and the webhook
+delivery loop check the memory after each pass and the consumer after each delivery, so a pass or a delivery
 that goes above the PHP `memory_limit` ends the process with a fatal error
 before the check. The check uses
 `memory_get_usage(true)`, the memory that PHP took from the system; it seldom
