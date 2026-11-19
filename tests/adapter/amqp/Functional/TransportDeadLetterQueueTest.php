@@ -235,6 +235,27 @@ final class TransportDeadLetterQueueTest extends AmqpFunctionalTestCase
         return (int) $ready;
     }
 
+    /**
+     * The table keeps no key order of a JSON object: sort the keys of each object (a list keeps its order).
+     *
+     * @param array<array-key, mixed> $value
+     *
+     * @return array<array-key, mixed>
+     */
+    private static function sortKeys(array $value): array
+    {
+        foreach ($value as $key => $item) {
+            if (is_array($item)) {
+                $value[$key] = self::sortKeys($item);
+            }
+        }
+        if (!array_is_list($value)) {
+            ksort($value);
+        }
+
+        return $value;
+    }
+
     /** @return list<DeadLetter> */
     private function rows(): array
     {
@@ -579,9 +600,11 @@ final class TransportDeadLetterQueueTest extends AmqpFunctionalTestCase
         self::assertSame($got->body, $row->body);
         // The table stores the headers as JSON (an AMQP timestamp of x-death becomes its JSON form): compare the
         // table form of the headers that the sink got. JSONB keeps no key order.
-        self::assertEquals(
-            json_decode(json_encode($got->headers, JSON_THROW_ON_ERROR), true),
-            $row->headers,
+        $expected = json_decode(json_encode($got->headers, JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($expected);
+        self::assertSame(
+            self::sortKeys($expected),
+            self::sortKeys($row->headers),
             'the headers that the sink got, also the copied x-death',
         );
         self::assertSame('h', $row->headers['x-custom']);
