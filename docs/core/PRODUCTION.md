@@ -111,7 +111,7 @@ webhook delivery worker its current pass (one `send()` call can last up to
 longer than the longest of these. The time of a `preStop` hook counts against
 the same grace period. A process that SIGKILL stops loses no message, as after
 a crash: the open transaction of a relay or a consumer rolls back, the broker
-redelivers the unacked deliveries (each with one more delivery count, see
+redelivers the unacked deliveries (on a quorum queue, each with one more delivery count, see
 [The count after an uncontrolled stop](../amqp/CONSUMER.md#the-count-after-an-uncontrolled-stop)),
 and the rows that a webhook delivery worker claimed are due again when their
 lease ends. Deduplication of the consumer, or of the webhook receiver by
