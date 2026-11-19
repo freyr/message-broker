@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Webhook delivery queue, core part (`src/broker/Webhook/`): the values `Subscription`, `DeliveryRecord`, `ClaimedDelivery` (with its lease value), `DeliveryPair`, `DeliveryResult` (`delivered`, `failed` with an optional retry time of the receiver, `refused` with a reason code; request time and text), `DeliveryCompletion` and `DeliveryDecision`. See `docs/core/WEBHOOKS.md`
+- The webhook ports `Webhook\SubscriptionProvider` (`forMessage()`, `find()`, `lanes()`), `Webhook\DeliveryStore` (`insert()`, `claim()` with a lease, `complete()` with the lease check and the dead letters, `claimExpired()`), `Webhook\DeliverySender` (`send()`, `maxSendMs()`), `Webhook\DeliveryRetryPolicy` (`decide()`, `longestDelayMs()`) and `Webhook\DeliveryRetention` (`ensureCapacity()`, `purge()`). This release has no adapter for them. See `docs/core/PORTS.md`
+- `Webhook\DefaultDeliveryRetryPolicy`: 8 attempts with the delays 5 s, 5 min, 30 min, 2 h, 5 h, 10 h, 10 h (about 27.5 hours); a refused result is a dead letter at once; a later retry time of the receiver replaces the delay, up to `maxReceiverDelayMs` (default 1 day)
+- `Webhook\WebhookProducer::produce(Message $message, array $headers = [])`: one delivery row for each subscription of the message, in the transaction of the application, with the body bytes that `OutboxProducer` stores
+- `Webhook\DeliveryLoop` with `Webhook\DeliveryLoopConfig`: the lanes at a refresh interval, with a lane filter and a random order; the claim with a row limit for each lane and a lease; no request and no attempt for a lane with no subscription; the results through the retry policy; dead letters with the source `webhook:<lane>`; the check of expired rows (default maximum age 3 days); `run(?WorkerLimits $limits = null)`; two start checks (the lease is longer than `maxSendMs()`; the maximum age plus the longest retry delay is shorter than the retention period, default 7 days); a database error stops the worker
+- The events `BrokerEvents::WEBHOOK_DELIVERED` (`webhook.delivered`), `WEBHOOK_RETRIED` (`webhook.retried`), `WEBHOOK_DEAD_LETTERED` (`webhook.dead_lettered`, with `reason` and `reason_code`) and `WEBHOOK_EXPIRED` (`webhook.expired`)
+- Test kit: `Testing\InMemoryDeliveryStore`, `Testing\FakeDeliverySender`, `Testing\InMemorySubscriptionProvider` and `Testing\DeliveryStoreContractTestCase` (abstract methods `createStore()` and `deadLetterStore()`). The in-memory store passes the contract test case. See `docs/core/TESTING.md`
+
 ## [0.12.0] - 2026-11-19
 
 ### Added

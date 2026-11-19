@@ -12,7 +12,8 @@ use Throwable;
  * One row of the dead_letters table — the uniform, database-backed DLQ
  * shared by all transports (design decision D8).
  *
- * CONSUMER-SIDE ONLY (D17): only consumption failures dead-letter. The
+ * Two paths write dead letters: a consumption failure (D17) and a webhook
+ * delivery that ends with no success (source "webhook:<lane>"). The
  * outbox/relay path never does — it retries forever.
  *
  * Invariant: each dead letter holds text that each sink can store. The
