@@ -16,6 +16,10 @@ deptrac:
       collectors:
         - type: directory
           value: src/adapter/amqp/.*
+    - name: Http
+      collectors:
+        - type: directory
+          value: src/adapter/http/.*
     - name: Pdo
       collectors:
         - type: classNameRegex
@@ -24,6 +28,11 @@ deptrac:
       collectors:
         - type: classNameRegex
           value: '#^PhpAmqpLib\\.+#'
+    # NoPrivateNetworkHttpClient needs IpUtils of HttpFoundation; the HTTP adapter uses the same list for its pre-check.
+    - name: SymfonyHttpClient
+      collectors:
+        - type: classNameRegex
+          value: '#^Symfony\\(Component\\HttpClient|Contracts\\HttpClient|Component\\HttpFoundation)\\.+#'
   ruleset:
     Core: []
     PostgreSql:
@@ -32,3 +41,6 @@ deptrac:
     Amqp:
       - Core
       - PhpAmqpLib
+    Http:
+      - Core
+      - SymfonyHttpClient

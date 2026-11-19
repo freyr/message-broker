@@ -4,6 +4,7 @@ parameters:
         - src/broker/
         - src/adapter/postgresql/
         - src/adapter/amqp/
+        - src/adapter/http/
     ignoreErrors:
         # The traits of the test kit are used by test classes, which PHPStan does not analyse.
         -

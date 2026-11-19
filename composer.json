@@ -32,29 +32,36 @@
         "php-amqplib/php-amqplib": "^3.7.2",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^13.4",
+        "symfony/http-client": "^8.1",
+        "symfony/http-foundation": "^8.1",
         "symplify/easy-coding-standard": "^13.3"
     },
     "suggest": {
         "ext-pcntl": "Graceful shutdown of the relay and the consumer on SIGTERM and SIGINT",
         "php-amqplib/php-amqplib": "Required for the AMQP transport",
+        "symfony/http-client": "Required for the HTTP webhook sender",
+        "symfony/http-foundation": "Required for the HTTP webhook sender (the private network check)",
         "phpunit/phpunit": "Required for Freyr\\MessageBroker\\Testing\\*, the test kit of contract test cases and fakes"
     },
     "replace": {
         "freyr/message-broker-postgresql": "self.version",
-        "freyr/message-broker-amqp": "self.version"
+        "freyr/message-broker-amqp": "self.version",
+        "freyr/message-broker-http": "self.version"
     },
     "autoload": {
         "psr-4": {
             "Freyr\\MessageBroker\\": "src/broker/",
             "Freyr\\MessageBroker\\Adapter\\PostgreSql\\": "src/adapter/postgresql/",
-            "Freyr\\MessageBroker\\Adapter\\Amqp\\": "src/adapter/amqp/"
+            "Freyr\\MessageBroker\\Adapter\\Amqp\\": "src/adapter/amqp/",
+            "Freyr\\MessageBroker\\Adapter\\Http\\": "src/adapter/http/"
         }
     },
     "autoload-dev": {
         "psr-4": {
             "Freyr\\MessageBroker\\Tests\\": "tests/broker/",
             "Freyr\\MessageBroker\\Adapter\\PostgreSql\\Tests\\": "tests/adapter/postgresql/",
-            "Freyr\\MessageBroker\\Adapter\\Amqp\\Tests\\": "tests/adapter/amqp/"
+            "Freyr\\MessageBroker\\Adapter\\Amqp\\Tests\\": "tests/adapter/amqp/",
+            "Freyr\\MessageBroker\\Adapter\\Http\\Tests\\": "tests/adapter/http/"
         }
     },
     "config": {

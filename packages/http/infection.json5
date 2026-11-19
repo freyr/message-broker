@@ -1,0 +1,21 @@
+{
+    "$schema": "vendor/infection/infection/resources/schema.json",
+    "source": {
+        "directories": ["src"]
+    },
+    "timeout": 20,
+    "logs": {
+        "text": "var/infection/infection.log",
+        "html": "var/infection/infection.html",
+        "summary": "var/infection/summary.log"
+    },
+    "tmpDir": "var/infection/tmp",
+    "mutators": {
+        "@default": true
+    },
+    "testFramework": "phpunit",
+    "testFrameworkOptions": "--no-progress",
+    // Measured for this package alone (split rehearsal, its own tests only). Raise it as tests improve; never lower it.
+    "minMsi": 94,
+    "minCoveredMsi": 94
+}
