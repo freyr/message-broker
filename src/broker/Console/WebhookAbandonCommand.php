@@ -44,7 +44,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 )]
 final class WebhookAbandonCommand extends Command
 {
-    private const string BEFORE_ERROR = '--before must be a date (2026-01-31) or an ISO 8601 time (2026-01-31T12:00:00Z), in UTC when it has no offset.';
+    private const string BEFORE_ERROR = '<error>--before must be a date (2026-01-31) or an ISO 8601 time (2026-01-31T12:00:00Z), in UTC when it has no offset.</error>';
 
     /** @param int $batchSize the most rows of one abandon() call */
     public function __construct(
@@ -68,7 +68,7 @@ final class WebhookAbandonCommand extends Command
     {
         $before = self::before($input->getOption('before'));
         if ($before === null) {
-            $output->writeln('<error>'.self::BEFORE_ERROR.'</error>');
+            $output->writeln(self::BEFORE_ERROR);
 
             return Command::INVALID;
         }
@@ -79,7 +79,8 @@ final class WebhookAbandonCommand extends Command
 
             return Command::INVALID;
         }
-        $lanes = $laneOption === [] ? null : array_values(array_unique($laneOption));
+        // A repeated lane is harmless: the counts are keyed by lane.
+        $lanes = $laneOption === [] ? null : $laneOption;
         $dryRun = $input->getOption('dry-run') === true;
         $prefix = $dryRun ? '[dry-run] ' : '';
         $date = EpochMillis::toDateTime($before)->format('Y-m-d H:i:s.v');
@@ -102,7 +103,7 @@ final class WebhookAbandonCommand extends Command
             $total += $count;
             $output->writeln("<info>{$prefix}{$lane}: {$count} row(s) {$verb}.</info>");
             if (!$dryRun) {
-                $left = $this->store->countUnfinished($before, [$lane])[$lane] ?? 0;
+                $left = array_sum($this->store->countUnfinished($before, [$lane]));
                 if ($left > 0) {
                     $output->writeln(
                         "<comment>{$lane}: {$left} row(s) left (locked by a different session); run the command again.</comment>",
