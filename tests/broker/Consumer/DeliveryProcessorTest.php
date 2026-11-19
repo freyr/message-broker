@@ -13,6 +13,7 @@ use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterSink;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Retry\Backoff;
@@ -85,7 +86,7 @@ final class DeliveryProcessorTest extends TestCase
         bool $withObservers = true,
         ?RetryPolicy $retryPolicy = null,
         ?int $maxDeliveries = 5,
-        ?DeadLetterStore $deadLetters = null,
+        ?DeadLetterSink $deadLetters = null,
     ): DeliveryProcessor {
         return new DeliveryProcessor(
             deserializer: $deserializer ?? new JsonDeserializer(),
@@ -442,6 +443,58 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame(self::SOURCE, $letter->source);
         self::assertSame('failure 2', $letter->errorMessage, 'the data of the second failure');
         self::assertNull($letter->replayedAt);
+    }
+
+    public function testTheProcessorAcceptsASinkThatIsNotAStore(): void
+    {
+        $sink = new class() implements DeadLetterSink {
+            /** @var list<DeadLetter> */
+            public array $stored = [];
+
+            public function store(DeadLetter $deadLetter): void
+            {
+                $this->stored[] = $deadLetter;
+            }
+        };
+        self::assertNotInstanceOf(DeadLetterStore::class, $sink);
+        $this->failingDispatch = self::failure('final failure');
+
+        $this->processor(maxAttempts: 3, deadLetters: $sink)->process($this->delivery('m-9', attempt: 3), $this->control);
+
+        self::assertSame(['ack'], $this->control->calls);
+        self::assertCount(1, $sink->stored);
+        self::assertSame('m-9', $sink->stored[0]->messageId);
+        self::assertSame(self::SOURCE, $sink->stored[0]->source);
+        self::assertSame('final failure', $sink->stored[0]->errorMessage);
+        self::assertSame([], $this->deadLetters(), 'the default store is not used');
+        self::assertSame([BrokerEvents::DEAD_LETTERED], $this->events->names());
+    }
+
+    public function testASinkThatThrowsGivesNoAckAndNoDeadLetteredEvent(): void
+    {
+        $error = new RuntimeException('sink refused');
+        $sink = new class($error) implements DeadLetterSink {
+            public function __construct(
+                private readonly RuntimeException $error,
+            ) {}
+
+            public function store(DeadLetter $deadLetter): void
+            {
+                throw $this->error;
+            }
+        };
+        $this->failingDispatch = self::failure('final failure');
+
+        try {
+            $this->processor(maxAttempts: 3, deadLetters: $sink)->process($this->delivery('m-9', attempt: 3), $this->control);
+            self::fail('a failed sink write must propagate');
+        } catch (RuntimeException $e) {
+            self::assertSame($error, $e);
+        }
+
+        self::assertSame([], $this->control->calls, 'no ack');
+        self::assertSame(['begin', 'rollback'], $this->transaction->calls);
+        self::assertNotContains(BrokerEvents::DEAD_LETTERED, $this->events->names());
     }
 
     public function testADiscardDecisionAcksWithoutRetryOrDeadLetter(): void
