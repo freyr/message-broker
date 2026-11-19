@@ -90,6 +90,7 @@ final class HttpDeliverySenderTest extends TestCase
         self::assertSame(DeliveryResultKind::Failed, $result->kind);
         self::assertStringEndsWith('(timeout)', $result->text);
         self::assertGreaterThanOrEqual(400, $elapsedMs, 'the request waited until the total limit of 500 ms');
+        self::assertLessThan(1_000, $elapsedMs, 'the request ended at the total limit of 500 ms, not at maxSendMs()');
         self::assertLessThanOrEqual($sender->maxSendMs(), $elapsedMs, 'send() returns not later than maxSendMs()');
         self::assertCount(1, $this->server->waitForRequests(1), 'the request reached the server');
     }
