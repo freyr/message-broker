@@ -233,7 +233,7 @@ final class ReplayServiceTest extends FunctionalTestCase
 
         self::assertFalse(
             (new PostgreSqlDeadLetterStore($sessionB))->markReplayed($deadLetter->id),
-            'READ COMMITTED evaluates the condition again on the committed row',
+            'a mark after the commit of the other session finds the row replayed',
         );
     }
 

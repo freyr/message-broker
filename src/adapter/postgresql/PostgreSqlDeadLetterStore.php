@@ -169,8 +169,8 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
         ), $rows);
     }
 
-    /** Replay keeps the row for audit — marks replayed_at instead of deleting. */
     /**
+     * Replay keeps the row for audit — marks replayed_at instead of deleting.
      * The conditional update takes the row lock: a second transaction that
      * marks the same row waits, and after the commit of the first it finds
      * replayed_at set and changes no row (READ COMMITTED). A value that is
