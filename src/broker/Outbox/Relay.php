@@ -42,8 +42,8 @@ use Throwable;
  *    other rows of the call count as published.
  *  - A publisher call throws (channel, connection or confirm-timeout failure):
  *    crash-only. The rows of that call back off (committed), the results of
- *    earlier calls stay, then the error propagates and the worker stops; the
- *    supervisor restarts it with a fresh connection. Rows that the relay did
+ *    earlier calls stay, then the error propagates and the worker stops;
+ *    Kubernetes starts the container again with a fresh connection. Rows that the relay did
  *    not attempt (later chunks) stay due, untouched.
  *
  * Each worker must OWN its publisher resources (for example the AMQP
@@ -140,7 +140,7 @@ final class Relay
         }
 
         if ($failure instanceof Throwable) {
-            throw $failure; // crash-only: the supervisor restarts the worker with a fresh channel
+            throw $failure; // crash-only: Kubernetes starts the container again with a fresh channel
         }
 
         return $published;

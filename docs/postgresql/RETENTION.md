@@ -16,7 +16,8 @@ retention drops their partition, once every row of it is published or abandoned.
 no default partition. An insert for a day with no partition fails, and the
 producer's transaction fails with it, so create partitions ahead of time.
 
-Run `message-broker:outbox:maintain` once a day (cron):
+Run `message-broker:outbox:maintain` once a day (a Kubernetes `CronJob`, see
+[Scheduled commands](../core/PRODUCTION.md#scheduled-commands)):
 
 ```bash
 php bin/console message-broker:outbox:maintain --retention-days=7 --premake-days=3
@@ -35,8 +36,8 @@ The command:
 
 **Unpublished rows.** By default, an expired partition that still holds a row
 with `published_at IS NULL AND abandoned_at IS NULL` is kept. The command prints the partition and the
-number of unpublished rows and exits with code 1, so that a scheduler or a
-monitor alerts. A later run drops the partition once its rows are published.
+number of unpublished rows and exits with code 1, so that the `Job` of the
+`CronJob` fails and a monitor alerts. A later run drops the partition once its rows are published.
 The same rule covers a partition with a pending detach and an expired table
 that an earlier run detached. A partition that is kept grows, so fix the relay
 or alert on the exit code well before the disk fills.

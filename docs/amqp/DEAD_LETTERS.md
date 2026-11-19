@@ -167,7 +167,7 @@ $imported = $import->run(limit: 1000); // null: until the queue is empty
 is empty or the limit is reached, and returns the number of imported messages.
 Register it with `message-broker:dlq:import` (see
 [../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md)) and run it from a
-scheduler. It is not a daemon.
+Kubernetes `CronJob`. It is not a long-running worker.
 
 For each message:
 

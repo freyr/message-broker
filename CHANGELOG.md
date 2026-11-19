@@ -32,6 +32,11 @@ All notable changes to this project will be documented in this file.
 
 - **Breaking:** a webhook delivery has no time limit. `Webhook\DeliveryStore::claimExpired()`, the check of expired rows of `DeliveryLoop` with `DeliveryLoop::REASON_EXPIRED` and the dead letter reason `expired`, the `DeliveryLoopConfig` parameters `maxAgeMs`, `expiredCheckIntervalMs` and `retentionDays`, the start check that compared the maximum age plus the longest retry delay with the retention period, `Webhook\DeliveryRetryPolicy::longestDelayMs()` (also on `DefaultDeliveryRetryPolicy`) and the event `BrokerEvents::WEBHOOK_EXPIRED` (`webhook.expired`) are removed. End old rows with `message-broker:webhook:abandon`. See `UPGRADE.md`
 
+### Changed
+
+- The library is documented for a Kubernetes deployment only: each worker is the only process of its container, a `Deployment` starts the container again after each exit (`restartPolicy: Always`, also after the exit code `0` of a limit stop), and HPA or KEDA changes the number of pods. `docs/core/PRODUCTION.md` gets the restart delay of the kubelet and its effect on the worker limits, the termination grace period, and a part "Scheduled commands" (`CronJob` for `outbox:maintain`, `webhook:maintain`, `dedup:cleanup` and `dlq:import`). The instructions for systemd and Supervisor are removed
+- The warning of `Console\SignalSupport` (no `ext-pcntl`) now says that Kubernetes sends SIGKILL at the end of the termination grace period, and asks to load `ext-pcntl` in the container image; it no longer names `docker run --init`
+
 ## [0.12.0] - 2026-11-19
 
 ### Added

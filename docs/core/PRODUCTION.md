@@ -6,13 +6,18 @@ retention and connection pooling are in the documents of the PostgreSQL
 adapter: [../postgresql/RETENTION.md](../postgresql/RETENTION.md) and
 [../postgresql/CONNECTION_POOLING.md](../postgresql/CONNECTION_POOLING.md).
 
-## Deployment model — crash-only under a supervisor
+## Deployment model — crash-only on Kubernetes
 
-Run one or more relay workers per lane and one or more consumer processes under a process
-supervisor (systemd, a Kubernetes `Deployment`, Supervisor, etc.) configured
-with restart-always. On any broker or database failure, the process
-**crashes by design** — there is no in-process reconnect logic; the
-supervisor is what restarts it.
+The library is made for Kubernetes. Each relay worker, consumer and webhook
+delivery worker is one process, the only process of its container. Run each
+kind of worker as a `Deployment`: the relay workers of one lane, the
+consumers of one queue, the webhook delivery workers. Kubernetes starts a
+container again after each exit, and HPA or KEDA changes the number of pods.
+The library does not fork, has no worker pool and does not watch other
+processes.
+
+On any broker or database failure, the process **crashes by design** — there
+is no in-process reconnect logic; Kubernetes starts the container again.
 
 This is safe because:
 
@@ -35,8 +40,29 @@ This is safe because:
   `--drop-unpublished` drops such a row. Alert on relay backlog and on the
   exit code of the maintain command.
 
-Tune restart backoff (how fast the supervisor retries a crashed process),
-not reconnect logic — there is none to tune.
+There is no reconnect logic to tune. After a container exits, the kubelet
+starts it again with an exponential delay (10 s, 20 s, 40 s, and so on, at
+most 5 minutes), and it resets the delay after the container ran for 10
+minutes with no problem (see [Worker limits](#worker-limits) for the effect
+on a limit stop).
+
+## Scheduled commands
+
+The commands that end after one run go into a Kubernetes `CronJob`:
+
+| Command | Schedule |
+| --- | --- |
+| `message-broker:outbox:maintain` | Once a day. |
+| `message-broker:webhook:maintain` | Once a day, when the application uses webhooks. |
+| `message-broker:dedup:cleanup` | Once a day (see [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md#dedup-cleanup)). |
+| `message-broker:dlq:import` | At the interval that the dead letter queue of the transport needs. |
+
+Set `concurrencyPolicy: Forbid`, so that a new run does not start while the
+last run continues. Kubernetes can create the `Job` of one schedule two
+times, or create none; a repeated run of each of these commands is safe. An
+exit code that is not `0` fails the `Job`, so alert on failed `Job`s: for
+example, `outbox:maintain` exits with code `1` when it keeps an expired
+partition with unpublished rows.
 
 ## Graceful shutdown needs ext-pcntl
 
@@ -44,25 +70,35 @@ SIGTERM/SIGINT handling for relays and consumers is registered only when
 `ext-pcntl` is loaded. Without it, the signal keeps its default action. This
 was measured on PHP 8.4 with no `pcntl`:
 
-- **The process is not PID 1** (for example under an init process such as
-  `docker run --init` or tini): SIGTERM and SIGINT end the process at once
-  (exit status 143 and 130). There is no graceful shutdown. The current
+- **The process is PID 1 of its container** (the usual case on Kubernetes):
+  the kernel does not deliver a signal with the default action to PID 1, so
+  the process ignores SIGTERM and SIGINT. Kubernetes sends SIGKILL at the end
+  of the termination grace period (exit status 137), so the stop is slow and
+  also not graceful.
+- **The process is not PID 1** (for example, when an init process such as
+  tini is the entrypoint of the image): SIGTERM and SIGINT end the process at
+  once (exit status 143 and 130). There is no graceful shutdown. The current
   delivery or batch is not completed. The broker redelivers the delivery,
   the relay publishes the batch again, and deduplication absorbs the repeat.
-- **The process is PID 1 of a container**: the kernel does not deliver a
-  signal with the default action to PID 1, so the process ignores SIGTERM
-  and SIGINT. The runtime sends SIGKILL after its stop timeout (exit status
-  137), so the stop is slow and also not graceful. Run the process under an
-  init process, or load `ext-pcntl`.
 
-Use `--require-signals` on `message-broker:relay:run`,
-`message-broker:consume` and `message-broker:webhook:run` to fail fast at startup if `ext-pcntl` is missing,
-rather than discovering it the first time a supervisor sends SIGTERM:
+Load `ext-pcntl` in the container image. Use `--require-signals` on
+`message-broker:relay:run`, `message-broker:consume` and
+`message-broker:webhook:run`, so that a container with no `ext-pcntl` fails
+at startup, and not at the first SIGTERM of a scale-down or a rollout:
 
 ```bash
 php bin/console message-broker:relay:run orders --require-signals
 php bin/console message-broker:consume orders --require-signals
 ```
+
+**Termination grace period.** On a scale-down, a rollout or a node drain,
+Kubernetes sends SIGTERM to PID 1 of each container and sends SIGKILL when
+`terminationGracePeriodSeconds` ends (default 30 seconds). After SIGTERM, a
+consumer completes its current delivery, a relay its current batch and a
+webhook delivery worker its current pass, then the process exits. Set the
+grace period longer than the longest of these. The time of a `preStop` hook
+counts against the same grace period. A process that SIGKILL stops loses no
+message: the claims roll back and the broker redelivers, as after a crash.
 
 ## Worker limits
 
@@ -76,17 +112,22 @@ options and the callable type are in
 [CLI_REFERENCE.md](CLI_REFERENCE.md#message-brokerconsume-name) (consumer) and
 [CLI_REFERENCE.md](CLI_REFERENCE.md#message-brokerwebhookrun) (webhook delivery loop).
 
-A limit stop ends the process with exit code `0`. **The supervisor must start a
-new process after each exit, exit code `0` included.** A supervisor that restarts
-only after a failure leaves the lane or the queue with no worker.
+A limit stop ends the process with exit code `0`. **The container must start
+again after each exit, exit code `0` included.** A `Deployment` does this: its
+pod template allows only `restartPolicy: Always`. Do not run a worker as a
+`Job`, or as a pod with `restartPolicy: OnFailure` or `Never`: after a limit
+stop, the lane or the queue then has no worker.
 
-| Supervisor | Setting that restarts after exit code 0 | Setting that does not |
-| --- | --- | --- |
-| systemd | `Restart=always` | `Restart=on-failure` |
-| Supervisor | `autorestart=true` | `autorestart=unexpected` |
-| Kubernetes | `restartPolicy: Always` (the default of a `Deployment`) | `OnFailure` or `Never` |
+The restart delay of the kubelet also applies after a limit stop, because
+Kubernetes documents no exception for exit code `0`. A worker that stops
+again in less than 10 minutes waits longer before each new start, up to 5
+minutes, and its pod shows `CrashLoopBackOff`. Choose `--limit` and
+`--time-limit` so that a worker runs for 10 minutes or more.
 
-Set `--memory-limit` below the PHP `memory_limit`. The relay and the webhook
+Set `--memory-limit` below the PHP `memory_limit`, and the PHP
+`memory_limit` below the memory limit of the container: a process above the
+memory limit of the container ends with SIGKILL from the kernel, with no PHP
+error. The relay and the webhook
 delivery loop check the memory after each pass and the consumer after each delivery, so a pass or a delivery
 that goes above the PHP `memory_limit` ends the process with a fatal error
 before the check. The check uses
@@ -161,6 +202,18 @@ and `dead_letters` tables plus these events:
 
 ## Scaling
 
+**The unit of scale is the pod.** One pod runs one worker process, so "add
+consumer processes" means "add replicas to the consumer `Deployment`". HPA or
+KEDA changes the number of replicas: for example, scale a consumer on the
+depth of its queue (KEDA has a RabbitMQ scaler) and a relay on the backlog of
+its lane (KEDA has a PostgreSQL scaler that runs a query; see *Relay backlog*
+above). Each pod holds its own database connection, so the replicas of all
+workers together must fit `max_connections` of PostgreSQL, or the pool of a
+transaction-mode pooler (see
+[../postgresql/CONNECTION_POOLING.md](../postgresql/CONNECTION_POOLING.md)).
+A scale-down is a SIGTERM: a consumer returns its buffered deliveries with no
+delivery count (see [the return rule](../amqp/CONSUMER.md#the-return-rule)).
+
 **There is no ordering.** Rows publish in any order, and consumers must be
 order-insensitive. AMQP routes by message name. See
 [../amqp/TRANSPORT.md](../amqp/TRANSPORT.md).
@@ -202,7 +255,7 @@ throughput with slow handlers, add consumer processes. Run the benchmark with
 `make bench-consumer ARGS="<messages> <processes> <prefetch> <handler-ms>"`.
 
 **Scale by adding workers to a lane.** Run N identical `Relay` worker
-processes against one lane. Each claims a batch of eligible rows via
+processes (N replicas) against one lane. Each claims a batch of eligible rows via
 `FOR UPDATE SKIP LOCKED` inside a transaction owned by the outbox store,
 publishes the batch with publisher confirms, and marks the rows published.
 Workers never block each other, and a crashed worker's claimed rows are

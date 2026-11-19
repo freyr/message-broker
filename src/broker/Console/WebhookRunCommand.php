@@ -31,8 +31,9 @@ use Symfony\Component\Console\Output\OutputInterface;
  * fields of the base config; each other field stays. The command builds one
  * {@see WorkerLimits} from --limit (delivered rows), --time-limit and
  * --memory-limit and gives it to DeliveryLoop::run(). A limit stop ends the
- * run like SIGTERM does, and the command exits with 0: the supervisor must
- * start a new process after each exit, exit code 0 included.
+ * run like SIGTERM does, and the command exits with 0: the container must
+ * start again after each exit, exit code 0 included (a Kubernetes
+ * Deployment, restartPolicy Always).
  */
 #[AsCommand(name: 'message-broker:webhook:run', description: 'Run the webhook delivery loop for all lanes or the given lanes (blocks)')]
 final class WebhookRunCommand extends Command

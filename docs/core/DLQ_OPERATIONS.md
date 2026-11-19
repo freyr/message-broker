@@ -494,7 +494,8 @@ x-dead-letter: {"id":"0190f7e2-1234-7000-8000-abc123456789","source":"orders_q",
 
 Consumer-side deduplication only ever inserts into `message_deduplication` —
 nothing else prunes it, so it grows without bound unless you run
-`dedup:cleanup` on a schedule (e.g. a daily cron):
+`dedup:cleanup` on a schedule (for example a daily Kubernetes `CronJob`, see
+[Scheduled commands in PRODUCTION.md](PRODUCTION.md#scheduled-commands)):
 
 ```bash
 php bin/console message-broker:dedup:cleanup --older-than=7d --dry-run

@@ -24,8 +24,9 @@ use Symfony\Component\Console\Output\OutputInterface;
  *     ]);
  *
  * A limit stop ends the run like SIGTERM does, and the command exits with 0:
- * the supervisor must start a new process after each exit, exit code 0
- * included. A callable with no parameter still runs, with no limit.
+ * the container must start again after each exit, exit code 0 included (a
+ * Kubernetes Deployment, restartPolicy Always). A callable with no parameter
+ * still runs, with no limit.
  */
 #[AsCommand(name: 'message-broker:consume', description: 'Run a registered consumer (blocks)')]
 final class ConsumeCommand extends Command

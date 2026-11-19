@@ -121,8 +121,8 @@ own database connection and its own channel. See
 
 Rows stay in `outbox_messages` until their daily partition expires. There is
 no default partition, so an insert for a day with no partition fails. Run
-`message-broker:outbox:maintain` once a day to create the upcoming partitions
-and drop the expired ones:
+`message-broker:outbox:maintain` once a day (a Kubernetes `CronJob`) to create
+the upcoming partitions and drop the expired ones:
 
 ```php
 use Freyr\MessageBroker\Console\OutboxMaintainCommand;
@@ -197,8 +197,8 @@ same named consumer is processed once.
 ## Register the CLI
 
 Relays and consumers are long-running processes. Register each one as a
-named callable on `RelayRunCommand`/`ConsumeCommand` so an operator (or a
-supervisor) starts it by lane/consumer name:
+named callable on `RelayRunCommand`/`ConsumeCommand`, so that the command of a
+container starts it by lane/consumer name:
 
 ```php
 use Freyr\MessageBroker\Console\ConsumeCommand;
@@ -213,9 +213,10 @@ Run them with `php bin/console message-broker:relay:run orders` and
 `php bin/console message-broker:consume orders`. Each command gives the
 callable a `WorkerLimits` from its options (`--limit`, `--time-limit`,
 `--memory-limit`, and `--failure-limit` for `consume`), for example
-`php bin/console message-broker:consume orders --time-limit=3600 --memory-limit=128M`. Deploy both under a process
-supervisor with restart-always — see [core/PRODUCTION.md](core/PRODUCTION.md) for the
-crash-only deployment model and why it is safe.
+`php bin/console message-broker:consume orders --time-limit=3600 --memory-limit=128M`. Run each command
+as the only process of its container, in a Kubernetes `Deployment` — see
+[core/PRODUCTION.md](core/PRODUCTION.md) for the crash-only deployment model
+and why it is safe.
 
 ## Send webhooks
 
@@ -304,8 +305,8 @@ $application->add(new WebhookRunCommand(
 ));
 ```
 
-Run `php bin/console message-broker:webhook:run` under a process supervisor,
-and `message-broker:webhook:maintain` once a day. Each request is a signed
+Run `php bin/console message-broker:webhook:run` in a Kubernetes `Deployment`,
+and `message-broker:webhook:maintain` once a day in a `CronJob`. Each request is a signed
 `POST` with the message ID in `webhook-id`. A delivery that fails each attempt
 goes to `dead_letters` with the source `webhook:crm`, and `dlq:replay` sends it
 again when `ReplayService` has the delivery store (the argument `deliveries:`,

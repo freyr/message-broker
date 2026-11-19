@@ -90,9 +90,9 @@ signature of `AmqpConsumer::run()`. It changes no schema.
   for relays: `static fn (WorkerLimits $limits) => $relay->run($limits)`). A
   callable with no parameter still runs, with no limit; the command prints a
   warning when a limit option is set.
-- A limit stop exits with code `0`. The supervisor must start a new process
-  after each exit, exit code `0` included (see `docs/core/PRODUCTION.md`,
-  "Worker limits").
+- A limit stop exits with code `0`. The container must start again after each
+  exit, exit code `0` included: a Kubernetes `Deployment` does this
+  (`restartPolicy: Always`; see `docs/core/PRODUCTION.md`, "Worker limits").
 - `DeliveryProcessor::process()` returns a `DeliveryOutcome` instead of `void`.
   A caller that ignores the return value needs no change.
 

@@ -12,14 +12,15 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * Retention of the webhook_deliveries table, meant for a daily schedule, with
- * the options and the exit codes of message-broker:outbox:maintain: create
- * the daily partitions ahead of time, then drop the expired ones. An expired
- * partition that still holds an unfinished row is kept: it is reported and
- * the command exits with FAILURE, so a scheduler alerts. There is no option
- * to drop such a partition: a delivery has no time limit, so the partition
- * stays until each of its rows reaches a final state or an operator abandons
- * it with message-broker:webhook:abandon.
+ * Retention of the webhook_deliveries table, meant for a daily Kubernetes
+ * CronJob, with the options and the exit codes of
+ * message-broker:outbox:maintain: create the daily partitions ahead of time,
+ * then drop the expired ones. An expired partition that still holds an
+ * unfinished row is kept: it is reported and the command exits with FAILURE,
+ * so the Job fails and alerts. There is no option to drop such a partition:
+ * a delivery has no time limit, so the partition stays until each of its rows
+ * reaches a final state or an operator abandons it with
+ * message-broker:webhook:abandon.
  * A dry run changes nothing and always exits with SUCCESS.
  */
 #[AsCommand(
