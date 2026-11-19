@@ -308,7 +308,9 @@ Run `php bin/console message-broker:webhook:run` under a process supervisor,
 and `message-broker:webhook:maintain` once a day. Each request is a signed
 `POST` with the message ID in `webhook-id`. A delivery that fails each attempt
 goes to `dead_letters` with the source `webhook:crm`, and `dlq:replay` sends it
-again. Keep `maxHostConnections` of the sender at the batch size of the loop
+again when `ReplayService` has the delivery store (the argument `deliveries:`,
+see [core/DLQ_OPERATIONS.md](core/DLQ_OPERATIONS.md#replay-of-a-webhook-dead-letter)).
+Keep `maxHostConnections` of the sender at the batch size of the loop
 or more. The sender refuses an endpoint in a private network by default.
 
 - [core/WEBHOOKS.md](core/WEBHOOKS.md) — the model, the ports, the delivery
