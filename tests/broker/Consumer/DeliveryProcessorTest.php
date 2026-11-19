@@ -9,6 +9,7 @@ use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\Delivery;
 use Freyr\MessageBroker\Consumer\DeliveryControl;
 use Freyr\MessageBroker\Consumer\DeliveryLimitExceeded;
+use Freyr\MessageBroker\Consumer\DeliveryOutcome;
 use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
@@ -166,8 +167,9 @@ final class DeliveryProcessorTest extends TestCase
 
     public function testDispatchedDeliveryCommitsAcksAndRecordsTheEvent(): void
     {
-        $this->processor()->process($this->delivery('m-5'), $this->control);
+        $outcome = $this->processor()->process($this->delivery('m-5'), $this->control);
 
+        self::assertSame(DeliveryOutcome::Dispatched, $outcome);
         self::assertSame(['begin', 'commit'], $this->transaction->calls);
         self::assertSame(['ack'], $this->control->calls);
         self::assertCount(1, $this->dispatched);
@@ -186,8 +188,9 @@ final class DeliveryProcessorTest extends TestCase
     {
         $this->dedup->duplicate = true;
 
-        $this->processor()->process($this->delivery('m-6'), $this->control);
+        $outcome = $this->processor()->process($this->delivery('m-6'), $this->control);
 
+        self::assertSame(DeliveryOutcome::Deduplicated, $outcome);
         self::assertSame(['begin', 'commit'], $this->transaction->calls);
         self::assertSame(['ack'], $this->control->calls);
         self::assertSame([], $this->dispatched);
@@ -231,8 +234,9 @@ final class DeliveryProcessorTest extends TestCase
     {
         $this->failingDispatch = self::failure();
 
-        $this->processor()->process($this->delivery('m-4'), $this->control);
+        $outcome = $this->processor()->process($this->delivery('m-4'), $this->control);
 
+        self::assertSame(DeliveryOutcome::Retried, $outcome);
         self::assertSame(['begin', 'rollback'], $this->transaction->calls);
         self::assertSame(['retry:100:2', 'ack'], $this->control->calls, 'the retry is scheduled before the ack');
         self::assertSame([], $this->deadLetters());
@@ -336,13 +340,14 @@ final class DeliveryProcessorTest extends TestCase
     {
         $this->failingDispatch = self::failure('final failure');
 
-        $this->processor(maxAttempts: 3)->process(
+        $outcome = $this->processor(maxAttempts: 3)->process(
             $this->delivery('m-9', [
                 'x-custom' => 'h',
             ], attempt: 3),
             $this->control,
         );
 
+        self::assertSame(DeliveryOutcome::DeadLettered, $outcome);
         self::assertSame(['ack'], $this->control->calls);
         self::assertCount(1, $this->deadLetters());
         $letter = $this->deadLetters()[0];
@@ -507,8 +512,9 @@ final class DeliveryProcessorTest extends TestCase
             }
         };
 
-        $this->processor(retryPolicy: $policy)->process($this->delivery(), $this->control);
+        $outcome = $this->processor(retryPolicy: $policy)->process($this->delivery(), $this->control);
 
+        self::assertSame(DeliveryOutcome::Discarded, $outcome);
         self::assertSame(['ack'], $this->control->calls);
         self::assertSame([], $this->deadLetters());
         self::assertSame([[
@@ -529,8 +535,9 @@ final class DeliveryProcessorTest extends TestCase
 
     public function testMalformedDeliveryIsDeadLetteredWithEnvelopeFieldsAndAcked(): void
     {
-        $this->processor()->process($this->delivery('m-bad', body: '{{{not json'), $this->control);
+        $outcome = $this->processor()->process($this->delivery('m-bad', body: '{{{not json'), $this->control);
 
+        self::assertSame(DeliveryOutcome::Malformed, $outcome);
         self::assertSame(['ack'], $this->control->calls);
         self::assertSame([], $this->transaction->calls, 'a malformed message never opens a transaction');
         self::assertCount(1, $this->deadLetters());
@@ -694,13 +701,14 @@ final class DeliveryProcessorTest extends TestCase
 
     public function testACountEqualToTheLimitDeadLettersWithNoTransactionNoDeduplicationAndNoDispatchThenAcks(): void
     {
-        $this->processor(maxDeliveries: 3)->process(
+        $outcome = $this->processor(maxDeliveries: 3)->process(
             $this->delivery('m-7', [
                 'x-custom' => 'h',
             ], attempt: 2, deliveryCount: 3),
             $this->control,
         );
 
+        self::assertSame(DeliveryOutcome::DeliveryLimitExceeded, $outcome);
         self::assertSame([], $this->transaction->calls, 'no BEGIN');
         self::assertSame([], $this->dedup->scopes, 'no deduplication acquire');
         self::assertSame([], $this->dispatched, 'no dispatch');
@@ -803,13 +811,14 @@ final class DeliveryProcessorTest extends TestCase
 
     public function testAMalformedDeliveryAtTheLimitStoresTheRawBytes(): void
     {
-        $this->processor(maxDeliveries: 2)->process(
+        $outcome = $this->processor(maxDeliveries: 2)->process(
             $this->delivery('m-bad', [
                 'x-custom' => 'h',
             ], body: '{{{not json', attempt: 3, deliveryCount: 2),
             $this->control,
         );
 
+        self::assertSame(DeliveryOutcome::DeliveryLimitExceeded, $outcome, 'the limit, not malformed');
         self::assertSame(['ack'], $this->control->calls);
         self::assertSame([], $this->transaction->calls);
         self::assertCount(1, $this->deadLetters());
@@ -1077,10 +1086,11 @@ final class DeliveryProcessorTest extends TestCase
 
     public function testAReplayForADifferentQueueIsAckedWithNoDispatchNoDeduplicationAndNoDeadLetter(): void
     {
-        $this->processor()->process($this->delivery('m-9', [
+        $outcome = $this->processor()->process($this->delivery('m-9', [
             BrokerHeader::REPLAY_TARGET => 'billing',
         ]), $this->control);
 
+        self::assertSame(DeliveryOutcome::ReplaySkipped, $outcome);
         self::assertSame([], $this->transaction->calls, 'no BEGIN');
         self::assertSame([], $this->dedup->scopes, 'no deduplication row');
         self::assertSame([], $this->dispatched, 'no dispatch');
@@ -1126,10 +1136,11 @@ final class DeliveryProcessorTest extends TestCase
 
     public function testAReplayForADifferentQueueAboveTheDeliveryLimitIsSkippedBeforeTheLimit(): void
     {
-        $this->processor(maxDeliveries: 3)->process($this->delivery(extraHeaders: [
+        $outcome = $this->processor(maxDeliveries: 3)->process($this->delivery(extraHeaders: [
             BrokerHeader::REPLAY_TARGET => 'billing',
         ], deliveryCount: 9), $this->control);
 
+        self::assertSame(DeliveryOutcome::ReplaySkipped, $outcome, 'the replay check comes before the limit');
         self::assertSame([], $this->deadLetters(), 'never a dead letter of this consumer');
         self::assertSame(['ack'], $this->control->calls);
         self::assertSame([BrokerEvents::REPLAY_SKIPPED], $this->events->names());
@@ -1195,5 +1206,45 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame(['begin', 'commit'], $this->transaction->calls);
         self::assertCount(1, $this->dispatched);
         self::assertSame([BrokerEvents::DISPATCHED], $this->events->names());
+    }
+
+    // outcome
+
+    /** @return iterable<string, array{DeliveryOutcome, bool}> */
+    public static function outcomes(): iterable
+    {
+        yield 'Dispatched' => [DeliveryOutcome::Dispatched, false];
+        yield 'Deduplicated' => [DeliveryOutcome::Deduplicated, false];
+        yield 'Malformed' => [DeliveryOutcome::Malformed, false];
+        yield 'Retried' => [DeliveryOutcome::Retried, true];
+        yield 'DeadLettered' => [DeliveryOutcome::DeadLettered, true];
+        yield 'Discarded' => [DeliveryOutcome::Discarded, true];
+        yield 'DeliveryLimitExceeded' => [DeliveryOutcome::DeliveryLimitExceeded, false];
+        yield 'ReplaySkipped' => [DeliveryOutcome::ReplaySkipped, false];
+    }
+
+    #[DataProvider('outcomes')]
+    public function testOnlyTheThreeResultsOfAHandlerFailureAreAHandlerFailure(
+        DeliveryOutcome $outcome,
+        bool $handlerFailure,
+    ): void {
+        self::assertSame($handlerFailure, $outcome->isHandlerFailure());
+    }
+
+    public function testTheOutcomeHasEightCases(): void
+    {
+        self::assertSame(
+            [
+                'Dispatched',
+                'Deduplicated',
+                'Malformed',
+                'Retried',
+                'DeadLettered',
+                'Discarded',
+                'DeliveryLimitExceeded',
+                'ReplaySkipped',
+            ],
+            array_map(static fn (DeliveryOutcome $case): string => $case->name, DeliveryOutcome::cases()),
+        );
     }
 }
