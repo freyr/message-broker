@@ -60,6 +60,9 @@ trait RecordsChannel
 
     private string $consumedQueue = '';
 
+    /** @var list<mixed> the queue of each basic_get */
+    private array $gets = [];
+
     private ?\Closure $callback = null;
 
     private AMQPChannel&Stub $channel;
@@ -107,6 +110,12 @@ trait RecordsChannel
         $this->channel->method('basic_nack')->willReturnCallback(function (...$args): void {
             $this->returnCalls[] = ['basic_nack', ...$args];
             $this->failIfConfigured('basic_nack');
+        });
+        $this->channel->method('basic_get')->willReturnCallback(function (...$args): ?AMQPMessage {
+            $this->gets[] = $args[0] ?? '';
+            $this->failIfConfigured('basic_get');
+
+            return array_shift($this->pending);
         });
         $this->channel->method('basic_ack')->willReturnCallback(function (int $tag): void {
             $this->acked[] = $tag;
