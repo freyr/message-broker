@@ -141,3 +141,40 @@ routes by key, for example `direct` or `topic`. Bind each work queue to the
 message names that its consumers handle. Declare the work queue with a
 dead-letter exchange (see [CONSUMER.md](CONSUMER.md), *Dead-letter exchange of
 the work queue*).
+
+The arguments of a work queue:
+
+| Argument | Value |
+| --- | --- |
+| `x-queue-type` | `quorum` (a classic queue gives no delivery count and no delivery limit) |
+| `x-dead-letter-exchange` | the dead letter exchange, for example `dlx` |
+| `x-dead-letter-routing-key` | the routing key of the dead letter queue, for example `orders_q.dlq` |
+| `x-delivery-limit` | higher than `maxDeliveries` of the consumer (default 5); the broker default is 20 |
+
+The dead letter queue is a durable queue that you declare and bind to the dead
+letter exchange with that routing key. One dead letter queue for each work
+queue keeps the import simple: `message-broker:dlq:import` reads one queue for
+each name (see [DEAD_LETTERS.md](DEAD_LETTERS.md)). The library sets no TTL and
+no length limit on it. Two rules for the dead letter queue:
+
+- A length limit (`x-max-length`) drops the oldest message by default. Do not
+  set one, or monitor the message count.
+- A quorum dead letter queue has its own delivery limit (20 by default). A
+  failed import does not count toward it, because the import returns the
+  message with `basic.nack` and `requeue`. Only a stop of the import process
+  between `basic.get` and the ack counts. The dead letter queue has no dead
+  letter exchange, so after its limit the broker drops the message.
+
+The wait queues `<queue>.wait.<delayMs>` have their own arguments,
+`x-dead-letter-exchange: ''` and `x-dead-letter-routing-key: <queue>`. Thus an
+expired wait-queue message returns to the work queue and does not reach the
+dead letter queue of the work queue.
+
+A quorum queue moves a message with the strategy `at-most-once` by default:
+the broker can lose a moved message when the dead letter queue is not
+available. The strategy `x-dead-letter-strategy: at-least-once` needs
+`x-overflow: reject-publish` on the work queue (RabbitMQ documentation). The
+library does not test it.
+
+The library does not read the arguments of the work queue and makes no start
+check of the dead letter exchange.

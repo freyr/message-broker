@@ -153,6 +153,60 @@ to confirm; a non-interactive session (no TTY) is refused outright rather
 than defaulting to "no" silently or "yes" dangerously. Always pass `--force`
 in scripted/scheduled purges.
 
+## Importing a dead letter queue of the transport
+
+The consumer writes its dead letters to the table. The transport can also move
+a message to its own dead letter queue, with no handler error: for example,
+RabbitMQ moves a message of a quorum work queue above its `x-delivery-limit`.
+This occurs after stops that the consumer does not control (a killed process,
+a lost connection), or after a dead letter write that fails at each delivery.
+`message-broker:dlq:import` moves the messages of such a queue into the table,
+where the filters, the statistics and the replay apply:
+
+```bash
+# For example every 10 minutes from cron.
+php bin/console message-broker:dlq:import orders_q.dlq --limit=1000
+```
+
+The import stores each message, then acks it. A stop between the two leaves
+the message in the queue, and the next run stores it again: one open row
+results. When the store fails, the message returns to the queue, and the
+command exits with a non-zero code. The transport part (for AMQP, the read of
+`x-death`) is in [../amqp/DEAD_LETTERS.md](../amqp/DEAD_LETTERS.md).
+
+The import maps each message to one of three cases:
+
+| Case | `source` | Body | `error_class` | `error_message` | `replayable` |
+| --- | --- | --- | --- | --- | --- |
+| A move by the transport, the message deserializes | the queue that the transport moved the message from (the work queue) | the canonical document | `Consumer\DeliveryLimitExceeded` for the reason `delivery_limit`; `DeadLetter\MovedByTransport` for each other reason | `Moved by the transport: reason 'delivery_limit', queue 'orders_q', count 1` | `true` |
+| A move by the transport, the message does not deserialize | the work queue | the raw bytes | as above | as above, then `; the body did not deserialize: <error>` | `false` |
+| No move (for example, a message that a person published into the dead letter queue) | the dead letter queue | the canonical document, else the raw bytes | `DeadLetter\MovedByTransport` | `Moved by the transport: reason 'unknown', queue 'orders_q.dlq'` | `false` |
+
+- `error_trace` is empty, because no handler ran. `attempts` is the attempt of
+  the message (`x-attempt` for AMQP), never the delivery count of the
+  transport. `failed_at` is the time of the move, else the time of the import.
+- The row keeps all headers of the message, also the broker headers
+  (`x-death`, `x-first-death-*`, `x-last-death-*`, `x-delivery-count`).
+- `DeliveryLimitExceeded` and `MovedByTransport` are synthetic error classes:
+  the import uses only their names and never throws them. Select the moved rows
+  with `--error`, for example
+  `dlq:list --error='Freyr\MessageBroker\DeadLetter\MovedByTransport'`.
+- A row of the third case has the dead letter queue as `source`. No consumer
+  has that source, so the row is not replayable. Find it with `dlq:list
+  --source=orders_q.dlq`, then purge it or publish its message again by hand.
+- Each import gives a new row `id`. The sequence "a store, a stop before the
+  ack, a replay of that row, the next import run" thus gives a second open row
+  for the same message. A second replay of it is absorbed by the deduplication
+  of the consumer while its deduplication row exists.
+
+**A message that stops each import run.** The import runs the queue in order.
+When the store of one message fails each time (an infrastructure fault that
+stays, or a value that the dead letter invariant does not cover), each run
+stops at that message, and no later message is imported. The command error
+names the cause. Remove that message from the dead letter queue by hand (for
+RabbitMQ, with the management UI or `rabbitmqadmin`, after you copied it), and
+run the import again.
+
 ## Dedup cleanup
 
 Consumer-side deduplication only ever inserts into `message_deduplication` —
