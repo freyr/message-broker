@@ -17,10 +17,13 @@ services:
       AMQP_USER: guest
       AMQP_PASSWORD: guest
       AMQP_VHOST: "/"
+      WEBHOOK_SERVER_URL: "http://webhook-server:8080"
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      webhook-server:
         condition: service_healthy
 
   postgres:
@@ -83,6 +86,19 @@ services:
       retries: 10
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+
+  # Test HTTP server of the HTTP adapter tests and the webhook benchmark: tools/webhook-test-server/server.mjs
+  # (Node.js, built-in modules only). No host port: the php service reaches it by its service name.
+  webhook-server:
+    image: node:22-alpine
+    command: ["node", "/srv/server.mjs"]
+    volumes:
+      - ./tools/webhook-test-server:/srv:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/_health"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
 
 volumes:
   postgres_data:

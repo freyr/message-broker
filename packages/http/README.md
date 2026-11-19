@@ -43,4 +43,14 @@ $sender = new HttpDeliverySender(new HttpSenderConfig(), logger: $logger);
 
 ## Documents
 
+- [HTTP sender](../../docs/http/SENDER.md): the request, the configuration, the results, the timeouts, the DNS allowance and its known limit, the connections
+- [Signature](../../docs/http/SIGNATURE.md): the `webhook-` headers, the secret, the verification by a receiver
+- [Network rules](../../docs/http/NETWORK.md): the private network rule, the proxy rule, the `https` rule, no redirects
 - [Webhooks](../../docs/core/WEBHOOKS.md): the model, the ports and the delivery loop of the core
+- [Webhook delivery storage](../../docs/postgresql/WEBHOOKS.md): the PostgreSQL store of the deliveries
+- [Quickstart](../../docs/QUICKSTART.md#send-webhooks): a webhook example with the three packages
+
+## Tests
+
+The functional tests need a test HTTP server and PostgreSQL; see
+[Tests](../../docs/http/SENDER.md#tests).

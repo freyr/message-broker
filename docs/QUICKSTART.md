@@ -13,8 +13,10 @@ from your application. See [core/RELAY.md](core/RELAY.md) for the relay,
 The example uses the three packages: the core (`Freyr\MessageBroker\`), the
 PostgreSQL adapter (`Freyr\MessageBroker\Adapter\PostgreSql\`) and the AMQP
 adapter (`Freyr\MessageBroker\Adapter\Amqp\`). Today one Composer package
-holds all three. The documents of each package are in `docs/core/`,
-`docs/postgresql/` and `docs/amqp/`.
+holds all three. The section [Send webhooks](#send-webhooks) uses the HTTP
+adapter (`Freyr\MessageBroker\Adapter\Http\`) in place of the AMQP adapter.
+The documents of each package are in `docs/core/`, `docs/postgresql/`,
+`docs/amqp/` and `docs/http/`.
 
 ## Define a message
 
@@ -215,6 +217,110 @@ callable a `WorkerLimits` from its options (`--limit`, `--time-limit`,
 supervisor with restart-always — see [core/PRODUCTION.md](core/PRODUCTION.md) for the
 crash-only deployment model and why it is safe.
 
+## Send webhooks
+
+The webhook queue sends the same messages to the HTTP endpoints of
+subscribers. It uses the core, the PostgreSQL adapter and the HTTP adapter
+(`Freyr\MessageBroker\Adapter\Http\`, needs `symfony/http-client` and
+`symfony/http-foundation`). It does not use the outbox, the relay or AMQP.
+
+Your application owns the subscriptions and gives them through
+`Webhook\SubscriptionProvider`. The ID of a subscription is the lane of its
+deliveries:
+
+```php
+use Freyr\MessageBroker\Webhook\Subscription;
+use Freyr\MessageBroker\Webhook\SubscriptionProvider;
+
+final class CrmSubscriptions implements SubscriptionProvider
+{
+    public function forMessage(string $messageName): array
+    {
+        return $messageName === 'order.placed' ? [$this->crm()] : [];
+    }
+
+    public function find(string $lane): ?Subscription
+    {
+        return $lane === 'crm' ? $this->crm() : null;
+    }
+
+    public function lanes(): array
+    {
+        return ['crm'];
+    }
+
+    private function crm(): Subscription
+    {
+        return new Subscription('crm', 'https://crm.example.com/hooks/orders', ['whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw']);
+    }
+}
+```
+
+Create the table `webhook_deliveries` with
+`php bin/console message-broker:webhook:setup`, then produce inside your
+transaction. `WebhookProducer` writes one delivery row for each subscription
+of the message:
+
+```php
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryStore;
+use Freyr\MessageBroker\Serializer\JsonWireFormat;
+use Freyr\MessageBroker\Webhook\WebhookProducer;
+
+$subscriptions = new CrmSubscriptions();
+$webhooks = new WebhookProducer($subscriptions, new PostgreSqlDeliveryStore($pdo), new JsonWireFormat());
+
+$pdo->beginTransaction();
+// ... your own state change ...
+$webhooks->produce(OrderPlaced::create('o-1', 4999));
+$pdo->commit();
+```
+
+Run the delivery loop with the HTTP sender, as a command. Each worker has its
+own connection:
+
+```php
+use Freyr\MessageBroker\Adapter\Http\HttpDeliverySender;
+use Freyr\MessageBroker\Adapter\Http\HttpSenderConfig;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryRetention;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliverySchemaInstaller;
+use Freyr\MessageBroker\Console\WebhookMaintainCommand;
+use Freyr\MessageBroker\Console\WebhookRunCommand;
+use Freyr\MessageBroker\Console\WebhookSetupCommand;
+use Freyr\MessageBroker\Webhook\DeliveryLoop;
+use Freyr\MessageBroker\Webhook\DeliveryLoopConfig;
+
+$sender = new HttpDeliverySender(new HttpSenderConfig(maxHostConnections: 100), logger: $logger);
+
+$application->add(new WebhookSetupCommand(new PostgreSqlDeliverySchemaInstaller($pdo)));
+$application->add(new WebhookMaintainCommand(new PostgreSqlDeliveryRetention($pdo)));
+$application->add(new WebhookRunCommand(
+    static fn (DeliveryLoopConfig $config) => new DeliveryLoop(
+        new PostgreSqlDeliveryStore($workerPdo),
+        $sender,
+        $subscriptions,
+        config: $config,
+    ),
+    new DeliveryLoopConfig(batchSize: 100),
+));
+```
+
+Run `php bin/console message-broker:webhook:run` under a process supervisor,
+and `message-broker:webhook:maintain` once a day. Each request is a signed
+`POST` with the message ID in `webhook-id`. A delivery that fails each attempt
+goes to `dead_letters` with the source `webhook:crm`, and `dlq:replay` sends it
+again when `ReplayService` has the delivery store (the argument `deliveries:`,
+see [core/DLQ_OPERATIONS.md](core/DLQ_OPERATIONS.md#replay-of-a-webhook-dead-letter)).
+Keep `maxHostConnections` of the sender at the batch size of the loop
+or more. The sender refuses an endpoint in a private network by default.
+
+- [core/WEBHOOKS.md](core/WEBHOOKS.md) — the model, the ports, the delivery
+  loop, the retry policy, the commands and the events.
+- [postgresql/WEBHOOKS.md](postgresql/WEBHOOKS.md) — the table
+  `webhook_deliveries`, the delivery store and its retention.
+- [http/SENDER.md](http/SENDER.md), [http/SIGNATURE.md](http/SIGNATURE.md) and
+  [http/NETWORK.md](http/NETWORK.md) — the HTTP sender, the signature that a
+  receiver verifies, and the network rules.
+
 ## Next steps
 
 - [core/RELAY.md](core/RELAY.md) — lanes, the relay loop, failure handling and backoff.
@@ -227,3 +333,5 @@ crash-only deployment model and why it is safe.
   purging dead letters.
 - [core/PRODUCTION.md](core/PRODUCTION.md) — deployment, observability, and scaling;
   [postgresql/RETENTION.md](postgresql/RETENTION.md) — outbox retention.
+- [core/WEBHOOKS.md](core/WEBHOOKS.md), [postgresql/WEBHOOKS.md](postgresql/WEBHOOKS.md)
+  and [http/SENDER.md](http/SENDER.md) — the webhook queue.
