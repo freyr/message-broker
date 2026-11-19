@@ -50,6 +50,8 @@ final class ByteSizeTest extends TestCase
         yield 'overflow in gigabytes' => ['9000000000G'];
         yield 'overflow at the first value above' => ['8589934592G'];
         yield 'overflow in bytes' => ['9223372036854775808'];
+        yield 'trailing newline with unit' => ["128M\n"];
+        yield 'trailing newline in bytes' => ["512\n"];
     }
 
     #[DataProvider('invalidSizes')]

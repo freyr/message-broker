@@ -127,7 +127,7 @@ final class RelayRunCommand extends Command
         if ($value === null) {
             return null;
         }
-        if (preg_match('/^[1-9]\d*$/', $value) !== 1) {
+        if (preg_match('/^[1-9]\d*\z/', $value) !== 1) {
             throw new InvalidArgumentException("Invalid value for --{$name}: '{$value}' — expected an integer, 1 or more");
         }
 

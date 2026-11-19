@@ -95,6 +95,9 @@ final class ConsumeCommandTest extends TestCase
         yield 'time limit trailing newline' => [[
             '--time-limit' => "60\n",
         ], '--time-limit'];
+        yield 'memory limit trailing newline' => [[
+            '--memory-limit' => "128M\n",
+        ], '--memory-limit'];
         yield 'time limit zero' => [[
             '--time-limit' => '0',
         ], '--time-limit'];

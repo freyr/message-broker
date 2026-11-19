@@ -57,6 +57,7 @@ All notable changes to this project will be documented in this file.
 - A raw dead letter with no message ID (no envelope and no transport message ID) now gets the message ID `unknown-` and a UUID v7, a new value for each dead letter. Before, it got the literal `unknown`, so all such messages of one work queue had the same message ID. The `DEAD_LETTERED` event, the log and the `ErrorHandler` context of the delivery limit give the generated value. Rows that earlier versions wrote keep `unknown`
 - `Console\Duration` refuses a value with a trailing newline (`"7d\n"`): its pattern now ends with `\z`, not `$`. Before, `dedup:cleanup --older-than` and `dlq:purge --older-than` accepted such a value
 - `DeadLetterStoreContractTestCase::testIdsAreOldestFirstAndThenByIdAscending` gives its two rows of the same time one `failedAt` value. Before, it read the clock two times, so the test failed when a millisecond passed between the two reads
+- The limit options of `message-broker:relay:run` and `message-broker:consume` (`--limit`, `--time-limit`, `--memory-limit`, `--failure-limit`) and `Console\ByteSize::toBytes()` refuse a value with a trailing newline (`"5\n"`, `"128M\n"`): their patterns now end with `\z`, not `$`. Before, such a value was accepted
 
 ### Changed
 
