@@ -13,6 +13,7 @@ use Freyr\MessageBroker\DeadLetter\DeadLetterImporter;
 use Freyr\MessageBroker\DeadLetter\MovedByTransport;
 use Freyr\MessageBroker\DeadLetter\TransportMove;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
+use Freyr\MessageBroker\Serializer\MalformedMessage;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Testing\InMemoryDeadLetterStore;
 use Freyr\MessageBroker\Time\EpochMillis;
@@ -83,6 +84,20 @@ final class DeadLetterImporterTest extends TestCase
     private static function move(string $reason = 'delivery_limit', ?int $movedAt = self::MOVED_AT): TransportMove
     {
         return new TransportMove(self::WORK_QUEUE, $reason, 1, $movedAt);
+    }
+
+    /** The message of the deserializer error for the delivery: its text depends on the PHP version. */
+    private static function deserializerError(Delivery $delivery): string
+    {
+        try {
+            (new JsonDeserializer())->deserialize($delivery->body, $delivery->headers);
+        } catch (MalformedMessage $error) {
+            self::assertStringStartsWith('Body is not valid JSON: ', $error->getMessage());
+
+            return $error->getMessage();
+        }
+
+        self::fail('the delivery must not deserialize');
     }
 
     /** @return list<DeadLetter> */
@@ -178,7 +193,7 @@ final class DeadLetterImporterTest extends TestCase
         self::assertSame(DeliveryLimitExceeded::class, $row->errorClass);
         self::assertSame(
             "Moved by the transport: reason 'delivery_limit', queue 'orders_q', count 1;"
-            .' the body did not deserialize: Body is not valid JSON: Syntax error',
+            .' the body did not deserialize: '.self::deserializerError($delivery),
             $row->errorMessage,
         );
         self::assertSame('', $row->errorTrace);
@@ -233,7 +248,9 @@ final class DeadLetterImporterTest extends TestCase
 
     public function testAMalformedMessageWithNoMoveGivesARawRowOfTheDeadLetterQueue(): void
     {
-        $this->importer->import(self::delivery(body: 'raw'));
+        $delivery = self::delivery(body: 'raw');
+
+        $this->importer->import($delivery);
 
         $row = $this->rows()[0];
         self::assertSame(self::DEAD_LETTER_QUEUE, $row->source);
@@ -241,7 +258,7 @@ final class DeadLetterImporterTest extends TestCase
         self::assertSame(MovedByTransport::class, $row->errorClass);
         self::assertSame(
             "Moved by the transport: reason 'unknown', queue 'orders_q.dlq';"
-            .' the body did not deserialize: Body is not valid JSON: Syntax error',
+            .' the body did not deserialize: '.self::deserializerError($delivery),
             $row->errorMessage,
         );
         self::assertSame(self::NOW, $row->failedAt);
