@@ -13,6 +13,7 @@ use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Random\Randomizer;
+use Symfony\Component\Clock\Clock;
 use UnexpectedValueException;
 
 /**
@@ -21,22 +22,33 @@ use UnexpectedValueException;
  *
  *  1. Lanes: the lanes of SubscriptionProvider::lanes(), read at a refresh
  *     interval, kept to the lane filter, in a random order for each claim.
- *  2. Claim: at most the batch size, at most the row limit of each lane, with
- *     a lease that the store commits before a request starts.
- *  3. Pairs: the subscription of each claimed delivery (find(lane)). A lane
+ *  2. Open lanes: the lanes of CircuitBreaker::openLanes() leave the list.
+ *     Their rows wait with their attempts and retry times.
+ *  3. Permits: RateLimiter::acquire(batch size). With a grant of 0, the
+ *     worker sleeps the permit wait (through symfony/clock) and does not claim.
+ *  4. Claim: at most the grant, at most the row limit of each lane, with a
+ *     lease that the store commits before a request starts. The permits of
+ *     the rows that the claim did not get go back (giveBack()).
+ *  5. Pairs: the subscription of each claimed delivery (find(lane)). A lane
  *     with no subscription sends no request and uses no attempt; its row
  *     waits until the subscription returns or an operator abandons it.
- *  4. Send: one send() call with no open transaction.
- *  5. Results: delivered; else the retry policy decides between a retry and a
+ *  6. Send: one send() call with no open transaction.
+ *  7. Results: delivered; else the retry policy decides between a retry and a
  *     dead letter (source `webhook:<lane>`). The results go to the store in
  *     one complete() call, with the lease check.
+ *  8. Record: the requests and the failures of each lane of the batch go to
+ *     CircuitBreaker::record() in one call. A failure is each result that is
+ *     not delivered, and a delivered result above the slow limit of the
+ *     {@see CircuitBreakerPolicy} (the row stays delivered).
  *
  * A delivery has no time limit: a row waits until it is delivered, reaches
  * the retry limit, or gets a permanent refusal. An operator ends old rows
  * with DeliveryStore::abandon() (the command message-broker:webhook:abandon).
  *
- * A database error or a sender error propagates and stops the worker
- * (crash-only): the claimed rows are due again when their lease ends.
+ * A database error (also of the rate limiter or the circuit breaker) or a
+ * sender error propagates and stops the worker (crash-only): the claimed rows
+ * are due again when their lease ends. With no rate limiter and no circuit
+ * breaker, the loop uses {@see NoRateLimit} and {@see NoCircuitBreaker}.
  *
  * Dead letters: the error class is the reason (`failed` or `refused`); the error message is the text of the last result (for a
  * refused result: `<reason code>: <text>`); the trace is empty; the attempt
@@ -57,6 +69,9 @@ final class DeliveryLoop
 
     private int $lanesReadAt = 0;
 
+    /** The last pass slept the permit wait, so the run skips the idle sleep. */
+    private bool $waitedForPermits = false;
+
     private readonly Randomizer $randomizer;
 
     public function __construct(
@@ -68,6 +83,9 @@ final class DeliveryLoop
         ?Randomizer $randomizer = null,
         private readonly LoggerInterface $logger = new NullLogger(),
         private readonly ?BrokerEvents $events = null,
+        private readonly RateLimiter $rateLimiter = new NoRateLimit(),
+        private readonly CircuitBreaker $circuitBreaker = new NoCircuitBreaker(),
+        private readonly CircuitBreakerPolicy $breakerPolicy = new CircuitBreakerPolicy(),
     ) {
         $this->randomizer = $randomizer ?? new Randomizer();
     }
@@ -78,8 +96,9 @@ final class DeliveryLoop
      * is checked at the end of each pass, so the run can deliver up to one
      * batch above a message limit; the message count is the delivered rows.
      *
-     * @throws InvalidArgumentException when the start check fails: the lease is not longer than
-     *                                  the longest send call
+     * @throws InvalidArgumentException when a start check fails: the lease is not longer than
+     *                                  the longest send call, or the batch size is larger than
+     *                                  the burst capacity of the configuration
      */
     public function run(?WorkerLimits $limits = null): void
     {
@@ -90,7 +109,7 @@ final class DeliveryLoop
 
         while (!$this->shouldStop) {
             $delivered = $this->deliverOnce();
-            if ($delivered === 0) {
+            if ($delivered === 0 && !$this->waitedForPermits) {
                 usleep(IdleSleep::micros($this->config->idleSleepMs, intdiv($this->config->idleSleepMs, 4)));
             }
 
@@ -115,26 +134,48 @@ final class DeliveryLoop
     }
 
     /**
-     * One pass: lanes, claim, pairs, send, results.
+     * One pass: lanes, open lanes, permits, claim, give back, pairs, send,
+     * results, record.
      *
      * @return int the rows that this pass delivered
      */
     public function deliverOnce(): int
     {
-        $lanes = $this->lanes(EpochMillis::now());
+        $this->waitedForPermits = false;
+        $now = EpochMillis::now();
+
+        $lanes = $this->lanes($now);
+        if ($lanes === []) {
+            return 0;
+        }
+        $lanes = array_values(array_diff($lanes, $this->circuitBreaker->openLanes()));
         if ($lanes === []) {
             return 0;
         }
 
-        $claimed = $this->store->claim($lanes, $this->config->limitForEachLane, $this->config->batchSize, $this->config->leaseMs);
+        $granted = $this->rateLimiter->acquire($this->config->batchSize);
+        if ($granted === 0) {
+            $this->waitForPermits();
+
+            return 0;
+        }
+
+        $claimed = $this->store->claim($lanes, $this->config->limitForEachLane, $granted, $this->config->leaseMs);
+        $unused = $granted - count($claimed);
+        if ($unused > 0) {
+            $this->rateLimiter->giveBack($unused);
+        }
+
         $pairs = $this->pairs($claimed);
         if ($pairs === []) {
             return 0;
         }
 
         $results = $this->sender->send($pairs);
+        $delivered = $this->complete($pairs, $results);
+        $this->record($pairs, $results);
 
-        return $this->complete($pairs, $results);
+        return $delivered;
     }
 
     private function assertStartConditions(): void
@@ -146,6 +187,67 @@ final class DeliveryLoop
                 $this->config->leaseMs,
                 $maxSendMs,
             ));
+        }
+
+        $burstCapacity = $this->config->burstCapacity;
+        if ($burstCapacity !== null && $this->config->batchSize > $burstCapacity) {
+            throw new InvalidArgumentException(sprintf(
+                'The batch size (%d) must not be larger than the burst capacity of the rate limit (%d)',
+                $this->config->batchSize,
+                $burstCapacity,
+            ));
+        }
+    }
+
+    /** No permit: record the wait and sleep the permit wait through the clock, so a test clock does not wait. */
+    private function waitForPermits(): void
+    {
+        $this->events?->record(BrokerEvents::WEBHOOK_PERMIT_WAIT, [
+            'wanted' => $this->config->batchSize,
+            'sleep_ms' => $this->config->permitWaitMs,
+        ]);
+        Clock::get()->sleep($this->config->permitWaitMs / 1_000);
+        $this->waitedForPermits = true;
+    }
+
+    /**
+     * Give the requests and the failures of each lane of the batch to the circuit breaker in one call,
+     * and record an event for each lane that left circulation or returned.
+     *
+     * @param non-empty-list<DeliveryPair> $pairs
+     * @param array<string, DeliveryResult> $results the result of each pair (complete() checked them)
+     */
+    private function record(array $pairs, array $results): void
+    {
+        /** @var array<string, array{lane: string, requests: int, failures: int}> $byLane the key is not a lane ID that PHP can make an int */
+        $byLane = [];
+        foreach ($pairs as $pair) {
+            $record = $pair->claimed->delivery;
+            $key = "lane:{$record->lane}";
+            $byLane[$key] ??= [
+                'lane' => $record->lane,
+                'requests' => 0,
+                'failures' => 0,
+            ];
+            ++$byLane[$key]['requests'];
+            if ($this->breakerPolicy->countsAsFailure($results[$record->id])) {
+                ++$byLane[$key]['failures'];
+            }
+        }
+
+        $transitions = $this->circuitBreaker->record(array_values(array_map(
+            static fn (array $c): LaneCounts => new LaneCounts($c['lane'], $c['requests'], $c['failures']),
+            $byLane,
+        )));
+        foreach ($transitions->left as $lane) {
+            $this->events?->record(BrokerEvents::WEBHOOK_LANE_OPENED, [
+                'lane' => $lane,
+            ]);
+        }
+        foreach ($transitions->returned as $lane) {
+            $this->events?->record(BrokerEvents::WEBHOOK_LANE_RETURNED, [
+                'lane' => $lane,
+            ]);
         }
     }
 

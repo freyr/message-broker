@@ -21,6 +21,16 @@ final class DeliveryLoopConfigTest extends TestCase
         self::assertSame(30_000, $config->laneRefreshMs);
         self::assertNull($config->laneFilter);
         self::assertSame(200, $config->idleSleepMs);
+        self::assertSame(50, $config->permitWaitMs);
+        self::assertNull($config->burstCapacity, 'no burst capacity: the loop does not check the batch size');
+    }
+
+    public function testAcceptsTheValueOneForThePermitWaitAndTheBurstCapacity(): void
+    {
+        $config = new DeliveryLoopConfig(permitWaitMs: 1, burstCapacity: 1);
+
+        self::assertSame(1, $config->permitWaitMs);
+        self::assertSame(1, $config->burstCapacity);
     }
 
     public function testAcceptsTheValueOneForEachNumber(): void
@@ -34,7 +44,7 @@ final class DeliveryLoopConfigTest extends TestCase
     /** @return iterable<string, array{string}> */
     public static function numbers(): iterable
     {
-        foreach (['leaseMs', 'batchSize', 'limitForEachLane', 'laneRefreshMs', 'idleSleepMs'] as $name) {
+        foreach (['leaseMs', 'batchSize', 'limitForEachLane', 'laneRefreshMs', 'idleSleepMs', 'permitWaitMs', 'burstCapacity'] as $name) {
             yield $name => [$name];
         }
     }

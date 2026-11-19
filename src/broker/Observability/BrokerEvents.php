@@ -7,7 +7,8 @@ namespace Freyr\MessageBroker\Observability;
 /**
  * Optional lifecycle listener for lifecycle transitions: produce, relay,
  * dispatch, dedup-hit, retry, discard, dead-letter, replay, replay skip, abandon,
- * and the webhook deliveries (delivered, retried, dead-lettered, abandoned). Mirrors ErrorHandler's minimal,
+ * the webhook deliveries (delivered, retried, dead-lettered, abandoned), and the
+ * webhook flow control (a lane leaves circulation, a lane returns, a wait for permits). Mirrors ErrorHandler's minimal,
  * optional shape — the library's behavior never depends on it. For
  * metrics/tracing: derive throughput, lag, duplicate-rate, retry rate, and DLQ flow.
  */
@@ -40,6 +41,18 @@ interface BrokerEvents
     public const string WEBHOOK_DEAD_LETTERED = 'webhook.dead_lettered';
     /** An operator abandoned the old webhook deliveries of one lane (webhook:abandon); context: lane, count. */
     public const string WEBHOOK_ABANDONED = 'webhook.abandoned';
+    /**
+     * The circuit breaker took a webhook lane out of circulation; context: lane. The worker whose
+     * record() call made the trip records it, so each trip has one such event.
+     */
+    public const string WEBHOOK_LANE_OPENED = 'webhook.lane_opened';
+    /**
+     * A webhook lane is back in circulation after its open time; context: lane. The worker whose
+     * record() call started the first window after the open time records it, so each trip has one such event.
+     */
+    public const string WEBHOOK_LANE_RETURNED = 'webhook.lane_returned';
+    /** The rate limiter granted 0 permits and the worker sleeps; context: wanted (the batch size), sleep_ms. */
+    public const string WEBHOOK_PERMIT_WAIT = 'webhook.permit_wait';
 
     /** @param array<string, mixed> $context */
     public function record(string $event, array $context = []): void;

@@ -8,7 +8,9 @@ use InvalidArgumentException;
 
 /**
  * The configuration of one {@see DeliveryLoop}. Each number is 1 or more.
- * The retry attempts and delays are the configuration of the retry policy.
+ * The retry attempts and delays are the configuration of the retry policy;
+ * the rate and the values of the circuit breaker are the configuration of the
+ * {@see RateLimiter} and of the {@see CircuitBreakerPolicy}.
  */
 final readonly class DeliveryLoopConfig
 {
@@ -19,6 +21,10 @@ final readonly class DeliveryLoopConfig
      * @param int $laneRefreshMs the interval of the read of SubscriptionProvider::lanes()
      * @param list<string>|null $laneFilter claim only these lanes; null = all lanes
      * @param int $idleSleepMs the sleep after a pass that delivered nothing
+     * @param int $permitWaitMs the sleep after a grant of 0 permits of the rate limiter
+     * @param int|null $burstCapacity the burst capacity of the rate limiter; when set, the loop
+     *                                refuses to start with a larger batch size. Null (for
+     *                                example with NoRateLimit) = no such check
      */
     public function __construct(
         public int $leaseMs = 60_000,
@@ -27,6 +33,8 @@ final readonly class DeliveryLoopConfig
         public int $laneRefreshMs = 30_000,
         public ?array $laneFilter = null,
         public int $idleSleepMs = 200,
+        public int $permitWaitMs = 50,
+        public ?int $burstCapacity = null,
     ) {
         foreach ([
             'leaseMs' => $leaseMs,
@@ -34,8 +42,10 @@ final readonly class DeliveryLoopConfig
             'limitForEachLane' => $limitForEachLane,
             'laneRefreshMs' => $laneRefreshMs,
             'idleSleepMs' => $idleSleepMs,
+            'permitWaitMs' => $permitWaitMs,
+            'burstCapacity' => $burstCapacity,
         ] as $name => $value) {
-            if ($value < 1) {
+            if ($value !== null && $value < 1) {
                 throw new InvalidArgumentException("\${$name} must be 1 or more, {$value} given");
             }
         }
