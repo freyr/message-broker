@@ -30,9 +30,10 @@ use Symfony\Component\Uid\Uuid;
  *    of the last minutes (an adapter that partitions by day prepares the
  *    partitions of today), and they show the lease rules with leases of 0 ms
  *    (due again at once) and 60 s (not due during the test), with no sleep.
- *    "Due" compares with millisecond precision: a store that keeps
- *    milliseconds must cut its present time to milliseconds before it
- *    compares, or a lease of 0 ms is not due for some microseconds.
+ *    "Due" compares with millisecond precision: a store must use one
+ *    conversion of its present time to milliseconds for the lease that it
+ *    writes and for the due comparison (a database can round a stored value
+ *    and not the compared one), or a lease of 0 ms is not due at once.
  *  - A lease value can differ from the time of the test by up to
  *    CLOCK_TOLERANCE_MS, for a store whose clock is not the clock of PHP.
  */
