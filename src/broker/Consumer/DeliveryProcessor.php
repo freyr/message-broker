@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Consumer;
 
+use Freyr\MessageBroker\BrokerHeader;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterBuilder;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
@@ -22,6 +23,10 @@ use Throwable;
 /**
  * The transport-neutral exactly-once algorithm for one delivery:
  *
+ *   replay target          (the header x-replay-target is present and is not
+ *                           Delivery::$source → ack, event replay_skipped; the
+ *                           header only, no deserialize, no transaction, no
+ *                           dedup, no dispatch, no dead letter)
  *   delivery limit         (the delivery count of the transport >= maxDeliveries
  *                           → dead-letter with DeliveryLimitExceeded, ack; no
  *                           transaction, no dedup, no dispatch)
@@ -75,6 +80,25 @@ final class DeliveryProcessor
 
     public function process(Delivery $delivery, DeliveryControl $control): void
     {
+        // A replay goes to one consumer: a delivery whose target is another
+        // queue is acked before any write, whatever its delivery count, so it
+        // never becomes a deduplication row or a dead letter of this consumer.
+        if (array_key_exists(BrokerHeader::REPLAY_TARGET, $delivery->headers)
+            && $delivery->headers[BrokerHeader::REPLAY_TARGET] !== $delivery->source) {
+            $messageId = $delivery->headers[MetadataHeader::MESSAGE_ID] ?? null;
+            $messageName = $delivery->headers[MetadataHeader::MESSAGE_NAME] ?? null;
+            $this->events?->record(BrokerEvents::REPLAY_SKIPPED, [
+                'consumer' => $this->name,
+                'source' => $delivery->source,
+                'target' => $delivery->headers[BrokerHeader::REPLAY_TARGET],
+                'message_id' => is_string($messageId) ? $messageId : $delivery->fallbackMessageId,
+                'message_name' => is_string($messageName) ? $messageName : null,
+            ]);
+            $control->ack();
+
+            return;
+        }
+
         $attempt = $delivery->attempt;
         $deliveryCount = $delivery->deliveryCount;
 

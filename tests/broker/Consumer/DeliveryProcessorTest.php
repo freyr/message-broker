@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Consumer;
 
+use Freyr\MessageBroker\BrokerHeader;
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\Delivery;
 use Freyr\MessageBroker\Consumer\DeliveryControl;
@@ -1004,5 +1005,142 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame('m-0', $this->dispatched[0]->messageId);
         self::assertCount(1, $this->deadLetters());
         self::assertSame('m-1', $this->deadLetters()[0]->messageId);
+    }
+
+    // replay target
+
+    public function testAReplayTargetEqualToTheSourceTakesTheNormalPath(): void
+    {
+        $this->processor()->process($this->delivery(extraHeaders: [
+            BrokerHeader::REPLAY_TARGET => self::SOURCE,
+        ]), $this->control);
+
+        self::assertSame(['begin', 'commit'], $this->transaction->calls);
+        self::assertSame(['orders_consumer'], $this->dedup->scopes);
+        self::assertCount(1, $this->dispatched);
+        self::assertSame(['ack'], $this->control->calls);
+        self::assertSame([BrokerEvents::DISPATCHED], $this->events->names());
+    }
+
+    public function testAReplayForADifferentQueueIsAckedWithNoDispatchNoDeduplicationAndNoDeadLetter(): void
+    {
+        $this->processor()->process($this->delivery('m-9', [
+            BrokerHeader::REPLAY_TARGET => 'billing',
+        ]), $this->control);
+
+        self::assertSame([], $this->transaction->calls, 'no BEGIN');
+        self::assertSame([], $this->dedup->scopes, 'no deduplication row');
+        self::assertSame([], $this->dispatched, 'no dispatch');
+        self::assertSame([], $this->deadLetters(), 'no dead letter');
+        self::assertSame(['ack'], $this->control->calls);
+        self::assertSame([[
+            'event' => BrokerEvents::REPLAY_SKIPPED,
+            'context' => [
+                'consumer' => 'orders_consumer',
+                'source' => self::SOURCE,
+                'target' => 'billing',
+                'message_id' => 'm-9',
+                'message_name' => 'order.placed',
+            ],
+        ]], $this->events->records);
+        self::assertSame([], $this->errorHandler->calls);
+    }
+
+    public function testAReplayForADifferentQueueWithAMalformedBodyIsSkippedBeforeTheDeserialize(): void
+    {
+        $this->processor()->process($this->delivery(
+            extraHeaders: [
+                BrokerHeader::REPLAY_TARGET => 'billing',
+            ],
+            body: 'not json',
+            withEnvelope: false,
+            fallbackMessageId: 'amqp-7',
+        ), $this->control);
+
+        self::assertSame([], $this->deadLetters());
+        self::assertSame(['ack'], $this->control->calls);
+        self::assertSame([[
+            'event' => BrokerEvents::REPLAY_SKIPPED,
+            'context' => [
+                'consumer' => 'orders_consumer',
+                'source' => self::SOURCE,
+                'target' => 'billing',
+                'message_id' => 'amqp-7',
+                'message_name' => null,
+            ],
+        ]], $this->events->records, 'the fallback id; no name without the envelope');
+    }
+
+    public function testAReplayForADifferentQueueAboveTheDeliveryLimitIsSkippedBeforeTheLimit(): void
+    {
+        $this->processor(maxDeliveries: 3)->process($this->delivery(extraHeaders: [
+            BrokerHeader::REPLAY_TARGET => 'billing',
+        ], deliveryCount: 9), $this->control);
+
+        self::assertSame([], $this->deadLetters(), 'never a dead letter of this consumer');
+        self::assertSame(['ack'], $this->control->calls);
+        self::assertSame([BrokerEvents::REPLAY_SKIPPED], $this->events->names());
+    }
+
+    /** @return iterable<string, array{mixed}> */
+    public static function targetsThatAreNotAString(): iterable
+    {
+        yield 'integer' => [5];
+        yield 'null' => [null];
+        yield 'list with the source' => [[self::SOURCE]];
+    }
+
+    #[DataProvider('targetsThatAreNotAString')]
+    public function testAReplayTargetThatIsNotAStringIsSkipped(mixed $target): void
+    {
+        $this->processor()->process($this->delivery(extraHeaders: [
+            BrokerHeader::REPLAY_TARGET => $target,
+        ]), $this->control);
+
+        self::assertSame([], $this->dispatched);
+        self::assertSame([], $this->deadLetters());
+        self::assertSame(['ack'], $this->control->calls);
+        self::assertSame([BrokerEvents::REPLAY_SKIPPED], $this->events->names());
+        self::assertArrayHasKey('target', $this->events->records[0]['context']);
+        self::assertSame($target, $this->events->records[0]['context']['target']);
+    }
+
+    public function testAnEnvelopeThatIsNotAStringGivesTheFallbackIdAndNoName(): void
+    {
+        $this->processor()->process(new Delivery('{}', [
+            BrokerHeader::REPLAY_TARGET => 'billing',
+            MetadataHeader::MESSAGE_ID => 42,
+            MetadataHeader::MESSAGE_NAME => 7,
+        ], 1, self::SOURCE, 'amqp-1'), $this->control);
+        $this->processor()->process(new Delivery('{}', [
+            BrokerHeader::REPLAY_TARGET => 'billing',
+        ], 1, self::SOURCE), $this->control);
+
+        self::assertSame(
+            [['amqp-1', null], [null, null]],
+            array_map(
+                static fn (array $record): array => [$record['context']['message_id'], $record['context']['message_name']],
+                $this->events->records,
+            ),
+        );
+    }
+
+    public function testAReplaySkipWorksWithoutEvents(): void
+    {
+        $this->processor(withObservers: false)->process($this->delivery(extraHeaders: [
+            BrokerHeader::REPLAY_TARGET => 'billing',
+        ]), $this->control);
+
+        self::assertSame([], $this->dispatched);
+        self::assertSame(['ack'], $this->control->calls);
+    }
+
+    public function testNoReplayTargetTakesTheNormalPath(): void
+    {
+        $this->processor()->process($this->delivery(), $this->control);
+
+        self::assertSame(['begin', 'commit'], $this->transaction->calls);
+        self::assertCount(1, $this->dispatched);
+        self::assertSame([BrokerEvents::DISPATCHED], $this->events->names());
     }
 }
