@@ -70,6 +70,48 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         self::assertNull($found->replayedAt, 'a new dead letter is not replayed');
     }
 
+    public function testStoresTextThatEachSinkCanStore(): void
+    {
+        $fffd = "\u{FFFD}";
+        $body = "raw\x00bytes\xff";
+        $deadLetter = new DeadLetter(
+            id: self::newId(),
+            source: 'orders_q',
+            messageId: 'msg-1',
+            messageName: str_repeat('ż', 300),
+            body: $body,
+            headers: [
+                'x-invalid' => "a\xffb",
+                'x-nul' => "a\x00b",
+                "x-key\x00" => 'v',
+                'x-nested' => [
+                    'deep' => "c\xfed",
+                ],
+            ],
+            errorClass: 'RuntimeException',
+            errorMessage: "bad \xff text \x00 here",
+            errorTrace: '#0 trace-line',
+            attempts: 1,
+            failedAt: self::at(-10),
+        );
+
+        $this->store()->store($deadLetter);
+        $found = $this->store()->find($deadLetter->id);
+
+        self::assertNotNull($found);
+        self::assertSame(str_repeat('ż', 255), $found->messageName);
+        self::assertSame(self::sortKeys([
+            'x-invalid' => "a{$fffd}b",
+            'x-nul' => "a{$fffd}b",
+            "x-key{$fffd}" => 'v',
+            'x-nested' => [
+                'deep' => "c{$fffd}d",
+            ],
+        ]), self::sortKeys($found->headers));
+        self::assertSame("bad {$fffd} text {$fffd} here", $found->errorMessage);
+        self::assertSame($body, $found->body, 'the body stays the exact bytes');
+    }
+
     public function testFindOfAnUnknownIdReturnsNull(): void
     {
         $this->store()->store($this->deadLetter());

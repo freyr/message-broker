@@ -17,6 +17,7 @@ use Freyr\MessageBroker\Storage\Transaction;
 use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Symfony\Component\Uid\Uuid;
 use Throwable;
 
 /**
@@ -177,8 +178,7 @@ final class DeliveryProcessor
         if ($incoming === null) {
             $messageId = $this->deadLetterRaw($delivery, $error);
         } else {
-            $this->deadLetterIncoming($delivery, $incoming, $error);
-            $messageId = $incoming->messageId;
+            $messageId = $this->deadLetterIncoming($delivery, $incoming, $error);
         }
 
         $context = [
@@ -271,21 +271,19 @@ final class DeliveryProcessor
     private function deadLetterRaw(Delivery $delivery, Throwable $error): string
     {
         // Best-effort triage: prefer the x-message-* envelope headers; fall back
-        // to the transport message id and 'unknown'. Stage-1 raw dead
+        // to the transport message id, and then to a generated 'unknown-<UUID v7>'
+        // so that two messages with no id never share one row. Stage-1 raw dead
         // letters are never replayed, so this only improves dlq:show output.
-        $messageId = 'unknown';
         $messageName = 'unknown';
         try {
             $meta = MetadataHeader::parse($delivery->headers);
             $messageId = $meta['message_id'];
             $messageName = $meta['message_name'];
         } catch (MalformedMessage) {
-            if ($delivery->fallbackMessageId !== null) {
-                $messageId = $delivery->fallbackMessageId;
-            }
+            $messageId = $delivery->fallbackMessageId ?? 'unknown-'.Uuid::v7()->toString();
         }
 
-        $this->storeDeadLetter(
+        return $this->storeDeadLetter(
             source: $delivery->source,
             messageId: $messageId,
             messageName: $messageName,
@@ -293,12 +291,11 @@ final class DeliveryProcessor
             headers: $delivery->headers,
             error: $error,
             attempt: $delivery->attempt,
-        );
-
-        return $messageId;
+        )->messageId;
     }
 
-    private function deadLetterIncoming(Delivery $delivery, IncomingMessage $incoming, Throwable $error): void
+    /** @return string the message id of the stored row */
+    private function deadLetterIncoming(Delivery $delivery, IncomingMessage $incoming, Throwable $error): string
     {
         // Store the reconstructed canonical document, not the wire bytes:
         // readable in dlq:show and replayable through the outbox regardless
@@ -315,7 +312,7 @@ final class DeliveryProcessor
             // dead-letter write.
         ], JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
 
-        $this->storeDeadLetter(
+        return $this->storeDeadLetter(
             source: $delivery->source,
             messageId: $incoming->messageId,
             messageName: $incoming->messageName,
@@ -323,10 +320,14 @@ final class DeliveryProcessor
             headers: $incoming->headers,
             error: $error,
             attempt: $delivery->attempt,
-        );
+        )->messageId;
     }
 
-    /** @param array<string, mixed> $headers */
+    /**
+     * @param array<string, mixed> $headers
+     *
+     * @return DeadLetter the stored dead letter: its texts are the valid, cut form of the arguments
+     */
     private function storeDeadLetter(
         string $source,
         string $messageId,
@@ -335,8 +336,8 @@ final class DeliveryProcessor
         array $headers,
         Throwable $error,
         int $attempt,
-    ): void {
-        $this->deadLetters->store(DeadLetter::fromFailure(
+    ): DeadLetter {
+        $deadLetter = DeadLetter::fromFailure(
             source: $source,
             messageId: $messageId,
             messageName: $messageName,
@@ -344,12 +345,15 @@ final class DeliveryProcessor
             headers: $headers,
             error: $error,
             attempts: $attempt,
-        ));
+        );
+        $this->deadLetters->store($deadLetter);
 
         $this->events?->record(BrokerEvents::DEAD_LETTERED, [
-            'source' => $source,
-            'message_id' => $messageId,
-            'message_name' => $messageName,
+            'source' => $deadLetter->source,
+            'message_id' => $deadLetter->messageId,
+            'message_name' => $deadLetter->messageName,
         ]);
+
+        return $deadLetter;
     }
 }
