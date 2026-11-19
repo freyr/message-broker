@@ -14,8 +14,8 @@ use LogicException;
 /**
  * In-memory delivery store that implements the contract of
  * {@see DeliveryStore}: the claim with a lease (available_at = now + lease),
- * the row limit for each lane and the total, the lease check of complete(),
- * and the claim of expired rows. The dead letters of complete() go to an
+ * the row limit for each lane and the total, and the lease check of
+ * complete(). The dead letters of complete() go to an
  * {@see InMemoryDeadLetterStore} through store(), which keeps one open row
  * for each pair of message ID and source.
  *
@@ -34,9 +34,6 @@ final class InMemoryDeliveryStore implements DeliveryStore, TransactionParticipa
 
     /** @var list<array{lanes: list<string>, limitForEachLane: int, total: int, leaseMs: int}> the arguments of each claim() */
     public array $claims = [];
-
-    /** @var list<array{before: int, limit: int, leaseMs: int}> the arguments of each claimExpired() */
-    public array $expiredClaims = [];
 
     /** @var (callable(int): void)|null called at the start of each claim() with the call number */
     public $onClaim;
@@ -117,22 +114,6 @@ final class InMemoryDeliveryStore implements DeliveryStore, TransactionParticipa
         }
 
         return $changed;
-    }
-
-    public function claimExpired(int $before, int $limit, int $leaseMs): array
-    {
-        $this->expiredClaims[] = compact('before', 'limit', 'leaseMs');
-        $now = EpochMillis::now();
-        $expired = array_filter(
-            $this->rows,
-            fn (DeliveryRecord $row): bool => $row->createdAt < $before && $this->isDue($row, $now),
-        );
-        usort($expired, static fn (DeliveryRecord $a, DeliveryRecord $b): int => $a->createdAt <=> $b->createdAt);
-
-        return array_map(
-            fn (DeliveryRecord $row): ClaimedDelivery => $this->lease($row, $now + $leaseMs),
-            array_slice($expired, 0, $limit),
-        );
     }
 
     /** The dead letter store that complete() writes to. */

@@ -12,9 +12,9 @@ use Freyr\MessageBroker\Outbox\RetentionReport;
  * finished rows leave the table one storage unit at a time (PostgreSQL: one
  * daily partition). The PostgreSQL adapter provides the implementation.
  *
- * The retention period must be the retention period of the delivery loop:
- * the loop checks at its start that each row reaches a final state before
- * its unit expires.
+ * A delivery has no time limit, so a unit that holds an unfinished row
+ * stays until the row reaches a final state or an operator abandons it
+ * ({@see DeliveryStore::abandon()}).
  */
 interface DeliveryRetention
 {

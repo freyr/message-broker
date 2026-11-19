@@ -202,7 +202,6 @@ abstract class DeliveryStoreContractTestCase extends TestCase
         self::assertGreaterThanOrEqual($before + self::LEASE_MS - self::CLOCK_TOLERANCE_MS, $claimed[0]->lease);
         self::assertLessThanOrEqual($after + self::LEASE_MS + self::CLOCK_TOLERANCE_MS, $claimed[0]->lease);
         self::assertSame([], $this->claim(), 'the lease holds the row');
-        self::assertSame([], $this->store()->claimExpired(EpochMillis::now() + 60_000, 10, self::LEASE_MS), 'also for the claim of expired rows');
     }
 
     public function testARowWhoseLeaseEndedIsDueAgainWithANewLeaseAndNoAttempt(): void
@@ -228,7 +227,6 @@ abstract class DeliveryStoreContractTestCase extends TestCase
 
         self::assertSame([$row->id], $changed);
         self::assertSame([], $this->claim(), 'a finished row is never claimed again');
-        self::assertSame([], $this->store()->claimExpired(EpochMillis::now() + 60_000, 10, 0));
     }
 
     public function testARetryOutcomeAddsTheAttemptAndSetsTheRetryTime(): void
@@ -356,54 +354,6 @@ abstract class DeliveryStoreContractTestCase extends TestCase
         self::assertCount(1, $rows, 'the open row rule: one open row for each message ID and source');
         self::assertSame($first->id, $rows[0]->id, 'the open row keeps its first id');
         self::assertSame(5, $rows[0]->attempts, 'and gets the data of the second dead letter');
-    }
-
-    public function testAClaimOfExpiredRowsTakesTheDueUnfinishedRowsOfAnyLaneThatAreOlderThanTheCut(): void
-    {
-        $now = EpochMillis::now();
-        $cut = $now - 10_000;
-        $old = $this->record(createdAt: $now - 60_000);
-        $oldOtherLane = $this->record(lane: self::OTHER_LANE, createdAt: $now - 50_000);
-        $atTheCut = $this->record(createdAt: $cut);
-        $young = $this->record(createdAt: $now - 5_000);
-        $oldNotDue = $this->record(createdAt: $now - 60_000, availableAt: $now + 60_000);
-        $oldFinished = $this->record(createdAt: $now - 60_000);
-        $this->store()->insert([$old, $oldOtherLane, $atTheCut, $young, $oldNotDue, $oldFinished]);
-        // A lease of 0 ms: the other rows of the claim are due again at once.
-        $finished = self::byId($this->store()->claim([self::LANE], 10, 10, 0), [$oldFinished->id]);
-        $this->store()->complete([DeliveryCompletion::delivered($finished[0])]);
-
-        $expired = $this->store()->claimExpired($cut, 10, self::LEASE_MS);
-
-        self::assertSame([$old->id, $oldOtherLane->id], self::claimedIds($expired), 'the oldest first; created_at at the cut is not older');
-        self::assertSame([], $this->store()->claimExpired($cut, 10, self::LEASE_MS), 'the claim leases the rows');
-    }
-
-    public function testAClaimOfExpiredRowsKeepsTheLimitAndTakesTheOldestFirst(): void
-    {
-        $now = EpochMillis::now();
-        $middle = $this->record(createdAt: $now - 40_000);
-        $oldest = $this->record(lane: self::OTHER_LANE, createdAt: $now - 60_000);
-        $youngest = $this->record(createdAt: $now - 20_000);
-        $this->store()->insert([$middle, $oldest, $youngest]);
-
-        $expired = $this->store()->claimExpired($now, 2, self::LEASE_MS);
-
-        self::assertSame([$oldest->id, $middle->id], self::claimedIds($expired));
-    }
-
-    public function testAnExpiredClaimHasALeaseThatCompleteChecks(): void
-    {
-        $now = EpochMillis::now();
-        $row = $this->record(createdAt: $now - 60_000);
-        $this->store()->insert([$row]);
-
-        $old = $this->store()->claimExpired($now, 10, 0)[0];
-        $current = $this->store()->claimExpired($now, 10, self::LEASE_MS)[0];
-
-        self::assertSame([], $this->store()->complete([DeliveryCompletion::dead($old, $this->deadLetter($old))]));
-        self::assertSame([$row->id], $this->store()->complete([DeliveryCompletion::dead($current, $this->deadLetter($current))]));
-        self::assertSame(1, $this->deadLetterStore()->count(new DeadLetterFilter()));
     }
 
     protected function store(): DeliveryStore

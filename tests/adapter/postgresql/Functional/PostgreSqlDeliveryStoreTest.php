@@ -371,18 +371,6 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
         self::assertSame([$secondLetter->id], array_map(static fn (DeadLetter $d): string => $d->id, $open));
     }
 
-    public function testAClaimOfExpiredRowsTakesOnlyDueRows(): void
-    {
-        $now = EpochMillis::now();
-        $due = $this->record(createdAt: $now - 30_000);
-        $leased = $this->record(createdAt: $now - 40_000, availableAt: $now + 60_000);
-        $this->store->insert([$due, $leased]);
-
-        $expired = $this->store->claimExpired($now - 10_000, 10, self::LEASE_MS);
-
-        self::assertSame([$due->id], self::claimedIds($expired));
-    }
-
     /** @return list<string> the lanes: "busy" with 10,000 due rows, and 19 lanes with 2 due rows each */
     private function insertTwentyLanesWithOneBacklog(): array
     {

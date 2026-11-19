@@ -57,7 +57,7 @@ final readonly class PostgreSqlDeliverySchemaInstaller implements SchemaInstalle
         //
         // idx_webhook_deliveries_due serves the claim: one index start for
         // each lane, due rows first. Finished rows leave the index, so it
-        // stays small, and the claim of expired rows reads it too.
+        // stays small.
         return [
             <<<'SQL'
                 CREATE TABLE IF NOT EXISTS webhook_deliveries (

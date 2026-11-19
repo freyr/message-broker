@@ -133,14 +133,6 @@ final class DefaultDeliveryRetryPolicyTest extends TestCase
         self::assertSame($this->now + 86_400_000, $decision->retryAt);
     }
 
-    public function testTheLongestDelayIsTheLongestStepOrTheMaximumOfTheReceiver(): void
-    {
-        self::assertSame(86_400_000, (new DefaultDeliveryRetryPolicy())->longestDelayMs());
-        self::assertSame(36_000_000, (new DefaultDeliveryRetryPolicy(maxReceiverDelayMs: 1_000))->longestDelayMs());
-        self::assertSame(9_000, (new DefaultDeliveryRetryPolicy([1_000, 9_000, 2_000], 8_999))->longestDelayMs());
-        self::assertSame(500, (new DefaultDeliveryRetryPolicy([], 500))->longestDelayMs());
-    }
-
     public function testADecisionKeepsItsTime(): void
     {
         self::assertSame(123, DeliveryDecision::retryAt(123)->retryAt);

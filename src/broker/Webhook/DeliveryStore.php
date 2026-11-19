@@ -73,16 +73,4 @@ interface DeliveryStore
      * @return list<string> the ids of the rows that this call changed (the rows that passed the lease check)
      */
     public function complete(array $outcomes): array;
-
-    /**
-     * Claim due, unfinished rows of any lane with created_at earlier than
-     * $before: at most $limit rows, the oldest first. The lease is the same
-     * as in claim(). The delivery loop gives these rows a dead letter with
-     * the reason "expired".
-     *
-     * @param int $before epoch milliseconds: now minus the maximum age
-     *
-     * @return list<ClaimedDelivery>
-     */
-    public function claimExpired(int $before, int $limit, int $leaseMs): array;
 }

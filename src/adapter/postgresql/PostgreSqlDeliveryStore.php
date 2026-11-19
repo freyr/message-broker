@@ -25,7 +25,7 @@ use Throwable;
  * in TIMESTAMP(3); a comparison of a rounded stored lease with a raw
  * microsecond now() could find a lease of 0 ms not yet due.
  *
- * claim() and claimExpired() are one statement each: in autocommit mode the
+ * claim() is one statement: in autocommit mode the
  * statement is the transaction, and its commit makes the lease visible before
  * the method returns. The row locks of FOR UPDATE SKIP LOCKED last only for
  * that statement. No session state: the store works behind a transaction-mode
@@ -73,25 +73,6 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
             ) AS d
             ORDER BY l.position
             LIMIT :total
-        )
-        UPDATE webhook_deliveries w
-        SET available_at = (SELECT now_ms FROM clock) + CAST(:lease_ms AS INTEGER) * INTERVAL '1 millisecond'
-        WHERE w.id = ANY(ARRAY(SELECT id FROM picked)) AND w.created_at = ANY(ARRAY(SELECT created_at FROM picked))
-        RETURNING
-        SQL.' '.self::COLUMNS;
-
-    private const string CLAIM_EXPIRED_SQL = <<<'SQL'
-        WITH clock AS (
-            SELECT CAST(now() AT TIME ZONE 'UTC' AS TIMESTAMP(3)) AS now_ms
-        ),
-        picked AS (
-            SELECT c.id, c.created_at
-            FROM webhook_deliveries c
-            WHERE c.completed_at IS NULL AND c.created_at < CAST(:before AS TIMESTAMP(3))
-              AND c.available_at <= (SELECT now_ms FROM clock)
-            ORDER BY c.created_at
-            LIMIT :limit
-            FOR UPDATE SKIP LOCKED
         )
         UPDATE webhook_deliveries w
         SET available_at = (SELECT now_ms FROM clock) + CAST(:lease_ms AS INTEGER) * INTERVAL '1 millisecond'
@@ -201,22 +182,6 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
         }
 
         return array_values(array_filter(array_keys($first), static fn (string $id): bool => isset($changed[$id])));
-    }
-
-    public function claimExpired(int $before, int $limit, int $leaseMs): array
-    {
-        $statement = $this->pdo->prepare(self::CLAIM_EXPIRED_SQL);
-        $statement->bindValue('before', self::timestamp($before));
-        $statement->bindValue('limit', $limit, PDO::PARAM_INT);
-        $statement->bindValue('lease_ms', $leaseMs, PDO::PARAM_INT);
-        $statement->execute();
-
-        /** @var list<Row> $rows */
-        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
-        // RETURNING has no order: the oldest first.
-        usort($rows, static fn (array $a, array $b): int => $a['created_at_ms'] <=> $b['created_at_ms']);
-
-        return array_map(self::claimed(...), $rows);
     }
 
     /** @return array{id: string, created_at: string, lease: string, attempts: int, available_at: ?string, outcome: ?int} */
