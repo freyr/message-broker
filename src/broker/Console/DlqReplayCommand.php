@@ -158,16 +158,16 @@ final class DlqReplayCommand extends Command
 
         while ($limit === null || $handled < $limit) {
             $wanted = $limit === null ? $this->batchSize : min($this->batchSize, $limit - $handled);
-            $ids = array_values(array_filter(
+            $ids = array_filter(
                 $this->store->ids($filter, $wanted + count($heldBack)),
                 static fn (string $id): bool => !isset($heldBack[$id]),
-            ));
+            );
             if ($ids === []) {
                 break;
             }
             foreach ($ids as $id) {
                 if ($limit !== null && $handled >= $limit) {
-                    break 2;
+                    break; // the while condition then ends the run
                 }
                 ++$handled;
                 if ($rate !== null) {
