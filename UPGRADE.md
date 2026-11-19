@@ -1,5 +1,30 @@
 # Upgrade guide
 
+## From 0.12.0 to the next release
+
+This release adds the webhook delivery queue (see `docs/core/WEBHOOKS.md`). It
+is additive: an application that does not use webhooks needs no change and
+runs no new DDL.
+
+- To use webhooks, create the table with `message-broker:webhook:setup` (or
+  `PostgreSqlDeliverySchemaInstaller::install()`), schedule
+  `message-broker:webhook:maintain` once a day, and run workers with
+  `message-broker:webhook:run`. The library registers no command: add
+  `WebhookSetupCommand`, `WebhookMaintainCommand` and `WebhookRunCommand` to
+  your console application (see `docs/core/CLI_REFERENCE.md`).
+- Give `--retention-days` of `webhook:maintain` the value of `retentionDays` of
+  the `DeliveryLoopConfig` (default `7` for both).
+- To replay webhook dead letters (source `webhook:<lane>`), pass the delivery
+  store to `ReplayService` as its new last argument, on the connection of the
+  transaction: `new ReplayService($deadLetters, $outbox, $transaction,
+  $wireFormat, $events, deliveries: new PostgreSqlDeliveryStore($pdo))`. With
+  no delivery store, `dlq:replay` refuses a webhook dead letter as not
+  replayable (exit code 1). Each other dead letter replays to the outbox as
+  before.
+- `dlq:replay --all` with no `--source` also replays the webhook dead letters
+  that match, each to the delivery table of its lane. Use
+  `--source=<queue>` to replay the rows of one consumer queue only.
+
 ## From 0.11.x to 0.12.0
 
 This release adds worker limits to `message-broker:consume` and changes the

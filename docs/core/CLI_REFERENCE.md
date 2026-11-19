@@ -199,6 +199,106 @@ not caught: the process ends with an error, and the supervisor restarts it.
 start a new process after each exit, exit code `0` included. See
 [Worker limits in PRODUCTION.md](PRODUCTION.md#worker-limits).
 
+## `message-broker:webhook:setup`
+
+Creates the `webhook_deliveries` table of the webhook delivery queue, with the
+daily partitions from today to today plus `--premake-days`. A second run
+skips what exists. An application that does not use webhooks does not need
+this command. The table is described in
+[../postgresql/WEBHOOKS.md](../postgresql/WEBHOOKS.md).
+
+**Constructor:** `new WebhookSetupCommand(SchemaInstaller $installer)`, with
+the installer of the webhook table, for example
+`new WebhookSetupCommand(new PostgreSqlDeliverySchemaInstaller($pdo))`.
+
+| Option | Description |
+| --- | --- |
+| `--premake-days` | Create daily partitions from today to today plus this many days (default `3`, `0` creates only today). |
+
+Exit codes: `0` success; `2` invalid `--premake-days` (an integer of 0 or more).
+
+## `message-broker:webhook:maintain`
+
+Retention of `webhook_deliveries`, with the options and the exit codes of
+`outbox:maintain`. Creates the upcoming daily partitions and drops the
+expired ones. Run it daily (cron). It must run outside a transaction.
+
+**Constructor:** `new WebhookMaintainCommand(DeliveryRetention $retention)`,
+for example `new WebhookMaintainCommand(new PostgreSqlDeliveryRetention($pdo))`.
+
+| Option | Description |
+| --- | --- |
+| `--retention-days` | Keep rows at least this many days (default `7`). The cutoff is today midnight UTC minus this value. **Use the same value as `retentionDays` of the delivery loop** (see [WEBHOOKS.md](WEBHOOKS.md#start-checks)). |
+| `--premake-days` | Create daily partitions from today to today plus this many days (default `3`, `0` creates only today). |
+| `--dry-run` | Report what would be dropped and what would be kept; change nothing. |
+
+An expired partition that holds an unfinished row is kept and reported. The
+command has no option that drops such a partition: the maximum age of the
+delivery loop ends each row before its partition expires, when
+`--retention-days` and `retentionDays` of the loop have the same value. Thus a
+kept partition shows a fault, for example two different values.
+
+Exit codes: `0` success (always on `--dry-run`); `1` at least one expired
+partition was kept because of unfinished rows; `2` invalid options
+(`--retention-days` must be 1 or more, `--premake-days` 0 or more).
+
+## `message-broker:webhook:run`
+
+Runs the webhook delivery loop (`Webhook\DeliveryLoop`). One worker serves all
+lanes, or the lanes of `--lane`. Blocks until stopped. Start the command more
+than once to run parallel workers.
+
+**Constructor:** `new WebhookRunCommand(callable $loopFactory, DeliveryLoopConfig $config = new DeliveryLoopConfig())`.
+The lane filter, the batch size and the row limit for each lane are fields of
+the `DeliveryLoopConfig` that the loop takes in its constructor, so the command
+takes a factory `callable(DeliveryLoopConfig): DeliveryLoop` and a base
+config. The options replace their fields of the base config; each other field
+(lease, maximum age, retention period, ...) stays:
+
+```php
+use Freyr\MessageBroker\Console\WebhookRunCommand;
+use Freyr\MessageBroker\Webhook\DeliveryLoop;
+use Freyr\MessageBroker\Webhook\DeliveryLoopConfig;
+
+$application->add(new WebhookRunCommand(
+    static fn (DeliveryLoopConfig $config) => new DeliveryLoop(
+        new PostgreSqlDeliveryStore($workerPdo),
+        $sender,
+        $subscriptions,
+        config: $config,
+        logger: $logger,
+        events: $events,
+    ),
+    new DeliveryLoopConfig(retentionDays: 7),
+));
+```
+
+| Option | Description |
+| --- | --- |
+| `--lane=<id>` | Claim only this lane (a subscription ID). Repeat it for more lanes: `--lane=crm --lane=erp`. Default: the `laneFilter` of the base config (`null`: all lanes). |
+| `--batch-size=<n>` | The most rows of one claim, all lanes together (integer, 1 or more). Default: `batchSize` of the base config. |
+| `--lane-limit=<n>` | The most rows of one lane in one claim (integer, 1 or more). Default: `limitForEachLane` of the base config. |
+| `--limit=<n>` | Stop after `<n>` delivered rows (integer, 1 or more). The loop checks the limit after each pass, so it can deliver up to one batch above the limit. Retried and dead rows do not count. |
+| `--time-limit=<seconds>` | Stop after `<seconds>` seconds since the start (integer, 1 or more), checked after each pass. |
+| `--memory-limit=<size>` | Stop when `memory_get_usage(true)` reaches `<size>`, in the format of the relay option above; 1 or more. Set it below the PHP `memory_limit`. |
+| `--require-signals` | Fail immediately at startup if `ext-pcntl` is unavailable (see the relay option above for the effect of a missing extension). |
+
+The command builds one `Worker\WorkerLimits` from the three limit options and
+gives it to `DeliveryLoop::run()`. A limit stop ends the run like SIGTERM does:
+the loop logs one `info` line ("Worker limit reached; the worker stops") and
+`run()` returns.
+
+Exit codes: `0` after the loop returned, also after a limit stop; `1` with
+`--require-signals` and no `ext-pcntl`; `2` for an invalid option value (no
+loop is made). A failed start check of the loop (the lease is not longer than
+`maxSendMs()` of the sender; the maximum age plus the longest retry delay is
+not shorter than the retention period) and a database error are not caught:
+the process ends with an error, and the supervisor restarts it.
+
+**Supervisor rule.** A limit stop exits with code `0`, so the supervisor must
+start a new process after each exit, exit code `0` included. See
+[Worker limits in PRODUCTION.md](PRODUCTION.md#worker-limits).
+
 ## Dead letter filter options
 
 `dlq:list`, `dlq:stats`, `dlq:purge` and `dlq:replay --all` take these
@@ -250,6 +350,9 @@ Re-enqueues one or many dead letters back into the outbox; redelivery rides
 the normal relay path. Each replay is one transaction: the replay mark, then
 a new outbox row with the original message id, a new `created_at` and the
 header `x-replay-target` (the `source` of the dead letter), then the commit.
+A webhook dead letter (source `webhook:<lane>`) gets a new delivery row for
+that lane instead, and `--lane` has no effect on it (see
+[Replay of a webhook dead letter](DLQ_OPERATIONS.md#replay-of-a-webhook-dead-letter)).
 See [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md) for the worked dry-run-then-force
 workflow, the refusals and the replay to one consumer.
 
@@ -266,7 +369,7 @@ run keeps only the ids of the rows that it skipped or that failed.
 | The filter options | With `--all`: see [Dead letter filter options](#dead-letter-filter-options). |
 | `--limit` | With `--all`: the maximum number of rows that the run handles (replayed, skipped or failed). A positive integer. |
 | `--rate` | With `--all`: the maximum number of replays that start in one second. A positive integer; no limit when absent. |
-| `--lane` | The outbox lane the replayed message is re-enqueued into (default `default`). |
+| `--lane` | The outbox lane the replayed message is re-enqueued into (default `default`). No effect on a webhook dead letter. |
 | `--dry-run` | Show what would be replayed and change nothing. One id: the checks of the replay ("would replay", or the refusal). `--all`: the count (at most `--limit`) and the first 5 candidates. |
 | `--force` | Required to run `--all` non-interactively (no TTY); a single-id replay never prompts. |
 

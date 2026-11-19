@@ -87,7 +87,10 @@ refusal, or when the row passes the maximum age. The dead letter has:
 The dead letter follows the open row rule of the dead letter store: one open
 row for each pair of message ID and source, so one message has one open dead
 letter for each lane. `dlq:list`, `dlq:show` and `dlq:stats` read it as each
-other dead letter.
+other dead letter. `dlq:replay` inserts a new delivery row for the lane of the
+source, with the message ID and the body of the dead letter, and no outbox
+row (see
+[Replay of a webhook dead letter](DLQ_OPERATIONS.md#replay-of-a-webhook-dead-letter)).
 
 ## The ports that your application implements
 
@@ -127,7 +130,7 @@ $maxReceiverDelayMs = 86_400_000)`:
 | `laneFilter` | `null` | Claim only these lanes; `null` claims all lanes. |
 | `maxAgeMs` | `259_200_000` (3 days) | A due, unfinished row older than this goes to the dead letters with the reason `expired`. |
 | `expiredCheckIntervalMs` | `60_000` (60 s) | The interval of the check of expired rows. One check claims batches until a batch is not full. |
-| `retentionDays` | `7` | The retention period of the table. Use the same value for the retention of the table. |
+| `retentionDays` | `7` | The retention period of the table. Use the same value for `--retention-days` of `message-broker:webhook:maintain`. |
 | `idleSleepMs` | `200` | The sleep after a pass that delivered nothing, plus up to a quarter of it as jitter. |
 
 ```php
@@ -166,6 +169,48 @@ a run can deliver up to one batch above a message limit. A limit stop logs
 one `info` line, "Worker limit reached; the worker stops". SIGTERM and SIGINT
 stop the loop at the end of the pass when `ext-pcntl` is loaded (see
 [PRODUCTION.md](PRODUCTION.md)).
+
+## Commands
+
+The library registers no command. Add the command classes to your console
+application, as the other commands (see [CLI_REFERENCE.md](CLI_REFERENCE.md)):
+
+```php
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryRetention;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliverySchemaInstaller;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryStore;
+use Freyr\MessageBroker\Console\WebhookMaintainCommand;
+use Freyr\MessageBroker\Console\WebhookRunCommand;
+use Freyr\MessageBroker\Console\WebhookSetupCommand;
+use Freyr\MessageBroker\Webhook\DeliveryLoop;
+use Freyr\MessageBroker\Webhook\DeliveryLoopConfig;
+
+$config = new DeliveryLoopConfig(retentionDays: 7);
+
+$application->add(new WebhookSetupCommand(new PostgreSqlDeliverySchemaInstaller($pdo)));
+$application->add(new WebhookMaintainCommand(new PostgreSqlDeliveryRetention($pdo)));
+$application->add(new WebhookRunCommand(
+    static fn (DeliveryLoopConfig $config) => new DeliveryLoop(
+        new PostgreSqlDeliveryStore($workerPdo),
+        $sender,
+        $subscriptions,
+        config: $config,
+    ),
+    $config,
+));
+```
+
+| Command | Purpose |
+| --- | --- |
+| `message-broker:webhook:setup --premake-days=N` | Create the table and its daily partitions. Run it at deployment. |
+| `message-broker:webhook:maintain` | Create the partitions ahead and drop the expired ones, once a day. Options `--retention-days`, `--premake-days`, `--dry-run`; the exit codes of `outbox:maintain`. |
+| `message-broker:webhook:run` | Run the delivery loop. Options `--lane` (repeatable), `--batch-size`, `--lane-limit`, and the worker limits `--limit`, `--time-limit`, `--memory-limit`. |
+
+**`--retention-days` of `webhook:maintain` and `retentionDays` of the loop
+must have the same value.** The start check of the loop proves that each row
+reaches a final state inside `retentionDays`. A smaller `--retention-days` lets
+a partition expire while it holds unfinished rows: the command keeps it and
+exits with code 1, and it has no option to drop it. Alert on that exit code.
 
 ## Events
 

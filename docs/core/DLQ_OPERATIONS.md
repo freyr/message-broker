@@ -89,7 +89,9 @@ lane, so redelivery rides the normal relay path (publisher confirms). The
 command inserts a new outbox row with the original message id and a new
 `created_at`; the original published row can still exist until retention
 drops its partition. The dead letter row is kept for audit and marked
-`replayed_at` rather than deleted.
+`replayed_at` rather than deleted. A webhook dead letter (source
+`webhook:<lane>`) goes to the webhook delivery table instead: see
+[Replay of a webhook dead letter](#replay-of-a-webhook-dead-letter).
 
 ### One transaction for each replay
 
@@ -134,7 +136,7 @@ The replay refuses three cases and changes nothing:
 | --- | --- | --- |
 | No row with the id (unknown, or purged) | `DeadLetterNotFound` | exit code 1 |
 | The row is replayed (`replayed_at` is set) | `AlreadyReplayed` | exit code 1 |
-| The row has `replayable` false, or its body is not the canonical document | `NotReplayable` | exit code 1 |
+| The row has `replayable` false, or its body is not the canonical document; for a webhook dead letter: the service has no delivery store, or the source has no valid lane | `NotReplayable` | exit code 1 |
 
 No option replays a replayed row again. A message that failed again after
 its replay has a new open row: replay that row. A repeat of a message that
@@ -207,7 +209,7 @@ still publishes at its own speed, so the outbox backlog can grow.
 `--lane` (default `default`) chooses which outbox lane the replayed
 message(s) are re-enqueued into; pick a lane deliberately if you want
 replayed traffic isolated from — or merged with — a lane's normal
-production.
+production. `--lane` has no effect on a webhook dead letter.
 
 ### Replay to one consumer
 
@@ -258,6 +260,48 @@ WHERE id = '<id>'
 
 A replay to a queue with a new name is not possible: the target is always the
 `source` of the dead letter.
+
+### Replay of a webhook dead letter
+
+A dead letter of the webhook delivery queue has the source `webhook:<lane>`
+(see [WEBHOOKS.md](WEBHOOKS.md#dead-letters)). Its replay inserts a new row
+into `webhook_deliveries` for that lane, not an outbox row. The delivery loop
+then sends it as each other row. The new row has:
+
+- The message ID, the message name and the body bytes of the dead letter. The
+  replay does not decode the body, so a body that is not the canonical
+  document is replayable.
+- Attempts 0, a new row ID, and `created_at` of the replay. The row is due at
+  once.
+- The headers of the dead letter without the strip list (above), and with no
+  `x-replay-target`.
+
+The rules of the outbox replay apply: one transaction, the replay mark first
+and the delivery insert second, the same refusals, `--dry-run`, `--all`,
+`--limit` and `--rate`. `--lane` has no effect, and the output names the
+`--lane` value, not the lane of the source. A `--all` run can replay outbox
+rows and webhook rows together; use `--source=webhook:<lane>` to select the
+rows of one lane.
+
+Give the service the delivery store as its last argument, on the connection of
+the transaction. A service with no delivery store refuses a webhook dead
+letter with `NotReplayable`, and an application with no webhooks constructs it
+as before:
+
+```php
+$replay = new ReplayService(
+    new PostgreSqlDeadLetterStore($pdo),
+    new PostgreSqlOutboxStore($pdo),
+    new PdoTransaction($pdo),
+    new JsonWireFormat(),
+    deliveries: new PostgreSqlDeliveryStore($pdo),
+);
+```
+
+A replayed delivery that fails again gets a new dead letter (one open row for
+each pair of message ID and source). A subscription that the application
+removed has no subscription for the lane, so the replayed row waits for the
+maximum age and goes to the dead letters again with the reason `expired`.
 
 ## Purging
 
