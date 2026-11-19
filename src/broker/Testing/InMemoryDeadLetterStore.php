@@ -27,13 +27,45 @@ final class InMemoryDeadLetterStore implements DeadLetterStore, TransactionParti
         $transaction?->enlist($this);
     }
 
+    /** A seed hook: stores the object as it is, with no upsert (a test can seed two open rows of one pair). */
     public function add(DeadLetter $deadLetter): void
     {
         $this->items[$deadLetter->id] = $deadLetter;
     }
 
+    /**
+     * The rule of the port: nothing changes when an item has the id (open or
+     * replayed). Otherwise the open item of the same message id and source
+     * keeps its id and gets the data of the new failure; with no open item,
+     * the dead letter is added.
+     */
     public function store(DeadLetter $deadLetter): void
     {
+        if (isset($this->items[$deadLetter->id])) {
+            return;
+        }
+        foreach ($this->items as $id => $item) {
+            if ($item->replayedAt === null
+                && $item->messageId === $deadLetter->messageId
+                && $item->source === $deadLetter->source) {
+                $this->items[$id] = new DeadLetter(
+                    id: $item->id,
+                    source: $item->source,
+                    messageId: $item->messageId,
+                    messageName: $deadLetter->messageName,
+                    body: $deadLetter->body,
+                    headers: $deadLetter->headers,
+                    errorClass: $deadLetter->errorClass,
+                    errorMessage: $deadLetter->errorMessage,
+                    errorTrace: $deadLetter->errorTrace,
+                    attempts: $deadLetter->attempts,
+                    failedAt: $deadLetter->failedAt,
+                    replayable: $deadLetter->replayable,
+                );
+
+                return;
+            }
+        }
         $this->add($deadLetter);
     }
 

@@ -22,17 +22,38 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
         private PDO $pdo,
     ) {}
 
+    /**
+     * Idempotent by id: when a row has the id (open or replayed), nothing
+     * changes. Otherwise the upsert on the open pair (message_id, source):
+     * an open row keeps its id and gets the data of the new failure; with no
+     * open row, a new row. ON CONFLICT names the partial index
+     * uq_dead_letters_open, so the store fails when the index is absent.
+     */
     public function store(DeadLetter $deadLetter): void
     {
         $statement = $this->pdo->prepare(<<<'SQL'
             INSERT INTO dead_letters
                 (id, source, message_id, message_name, body, headers, error_class, error_message, error_trace,
-                 attempts, failed_at, replayed_at, replayable)
-            VALUES
-                (:id, :source, :message_id, :message_name, :body, :headers, :error_class, :error_message, :error_trace,
-                 :attempts, :failed_at, NULL, :replayable)
+                 attempts, failed_at, replayable)
+            SELECT
+                CAST(:id AS UUID), CAST(:source AS TEXT), CAST(:message_id AS TEXT), CAST(:message_name AS TEXT),
+                CAST(:body AS BYTEA), CAST(:headers AS JSONB), CAST(:error_class AS TEXT),
+                CAST(:error_message AS TEXT), CAST(:error_trace AS TEXT), CAST(:attempts AS INTEGER),
+                CAST(:failed_at AS TIMESTAMP(3)), CAST(:replayable AS BOOLEAN)
+            WHERE NOT EXISTS (SELECT 1 FROM dead_letters WHERE id = CAST(:existing_id AS UUID))
+            ON CONFLICT (message_id, source) WHERE replayed_at IS NULL DO UPDATE SET
+                message_name = EXCLUDED.message_name,
+                error_class = EXCLUDED.error_class,
+                error_message = EXCLUDED.error_message,
+                error_trace = EXCLUDED.error_trace,
+                attempts = EXCLUDED.attempts,
+                failed_at = EXCLUDED.failed_at,
+                body = EXCLUDED.body,
+                headers = EXCLUDED.headers,
+                replayable = EXCLUDED.replayable
             SQL);
         $statement->bindValue('id', $deadLetter->id);
+        $statement->bindValue('existing_id', $deadLetter->id);
         $statement->bindValue('source', $deadLetter->source);
         $statement->bindValue('message_id', $deadLetter->messageId);
         $statement->bindValue('message_name', $deadLetter->messageName);

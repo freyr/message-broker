@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Tests\Consumer;
 
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\Delivery;
+use Freyr\MessageBroker\Consumer\DeliveryControl;
 use Freyr\MessageBroker\Consumer\DeliveryLimitExceeded;
 use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
@@ -411,6 +412,57 @@ final class DeliveryProcessorTest extends TestCase
         $document = json_decode($this->deadLetters()[0]->body, true);
         self::assertSame("caf\u{FFFD}", $document['payload']['note']);
         self::assertSame(['ack'], $this->control->calls);
+    }
+
+    public function testTheSameFailedDeliveryProcessedTwoTimesGivesOneOpenRowWithTheDataOfTheSecondFailure(): void
+    {
+        $failures = 0;
+        $this->failingDispatch = static function () use (&$failures): void {
+            ++$failures;
+
+            throw new RuntimeException("failure {$failures}");
+        };
+        $control = new class() implements DeliveryControl {
+            /** @var list<string> */
+            public array $calls = [];
+
+            private bool $stopped = false;
+
+            public function ack(): void
+            {
+                if (!$this->stopped) {
+                    $this->stopped = true;
+
+                    throw new RuntimeException('the process stops before the ack');
+                }
+                $this->calls[] = 'ack';
+            }
+
+            public function retry(int $delayMs, int $nextAttempt): void
+            {
+                $this->calls[] = 'retry';
+            }
+        };
+        $processor = $this->processor(maxAttempts: 3);
+        $delivery = $this->delivery('m-9', attempt: 3);
+
+        try {
+            $processor->process($delivery, $control);
+            self::fail('the first ack must throw');
+        } catch (RuntimeException $stop) {
+            self::assertSame('the process stops before the ack', $stop->getMessage());
+        }
+        $firstId = $this->deadLetters()[0]->id;
+        $processor->process($delivery, $control);
+
+        self::assertSame(['ack'], $control->calls);
+        self::assertCount(1, $this->deadLetters(), 'one open row for the message and the work queue');
+        $letter = $this->deadLetters()[0];
+        self::assertSame($firstId, $letter->id, 'the row keeps its id');
+        self::assertSame('m-9', $letter->messageId);
+        self::assertSame(self::SOURCE, $letter->source);
+        self::assertSame('failure 2', $letter->errorMessage, 'the data of the second failure');
+        self::assertNull($letter->replayedAt);
     }
 
     public function testADiscardDecisionAcksWithoutRetryOrDeadLetter(): void

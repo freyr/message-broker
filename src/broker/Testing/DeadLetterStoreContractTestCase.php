@@ -136,6 +136,168 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         self::assertFalse($found->replayable);
     }
 
+    public function testASecondStoreOfAnOpenPairUpdatesTheRowAndKeepsItsId(): void
+    {
+        $first = $this->deadLetter(messageId: 'm-1', source: 'orders_q', failedAt: self::at(-300));
+        $failedAt = intdiv(EpochMillis::now(), 1000) * 1000 - 60_000 + 456;
+        $second = new DeadLetter(
+            id: self::newId(),
+            source: 'orders_q',
+            messageId: 'm-1',
+            messageName: 'order.renamed',
+            body: "raw\xffbytes",
+            headers: [
+                'x-second' => 'yes',
+            ],
+            errorClass: 'LogicException',
+            errorMessage: 'second failure',
+            errorTrace: '#0 second-trace',
+            attempts: 9,
+            failedAt: $failedAt,
+            replayable: false,
+        );
+        $this->store()->store($first);
+
+        $this->store()->store($second);
+
+        self::assertSame(1, $this->store()->count(), 'one open row for the pair');
+        self::assertNull($this->store()->find($second->id), 'the id of the second dead letter is discarded');
+        $found = $this->store()->find($first->id);
+        self::assertNotNull($found);
+        self::assertSame('orders_q', $found->source);
+        self::assertSame('m-1', $found->messageId);
+        self::assertSame('order.renamed', $found->messageName);
+        self::assertSame("raw\xffbytes", $found->body);
+        self::assertSame([
+            'x-second' => 'yes',
+        ], $found->headers);
+        self::assertSame('LogicException', $found->errorClass);
+        self::assertSame('second failure', $found->errorMessage);
+        self::assertSame('#0 second-trace', $found->errorTrace);
+        self::assertSame(9, $found->attempts);
+        self::assertSame($failedAt, $found->failedAt);
+        self::assertNull($found->replayedAt, 'the row stays open');
+        self::assertFalse($found->replayable);
+    }
+
+    public function testAStoreAfterAReplayOfThePairAddsANewOpenRow(): void
+    {
+        $replayed = $this->deadLetter(messageId: 'm-1', failedAt: self::at(-300));
+        $this->store()->store($replayed);
+        $this->store()->markReplayed($replayed->id);
+        $again = $this->deadLetter(messageId: 'm-1', failedAt: self::at(-100));
+
+        $this->store()->store($again);
+
+        self::assertSame(2, $this->store()->count());
+        $kept = $this->store()->find($replayed->id);
+        self::assertNotNull($kept?->replayedAt, 'the replayed row stays as it was');
+        self::assertSame($replayed->failedAt, $kept->failedAt);
+        $open = $this->store()->find($again->id);
+        self::assertNotNull($open, 'a new row with the id of the new dead letter');
+        self::assertNull($open->replayedAt);
+    }
+
+    public function testAStoreOfAnIdThatIsAnOpenRowChangesNothing(): void
+    {
+        $first = $this->deadLetter(messageName: 'order.placed', messageId: 'm-1', failedAt: self::at(-300));
+        $this->store()->store($first);
+        $samePair = new DeadLetter(
+            id: $first->id,
+            source: $first->source,
+            messageId: 'm-1',
+            messageName: 'order.changed',
+            body: '{"other":"bytes"}',
+            headers: [],
+            errorClass: 'LogicException',
+            errorMessage: 'other failure',
+            errorTrace: '#0 other',
+            attempts: 8,
+            failedAt: self::at(-100),
+            replayable: false,
+        );
+        $otherPair = new DeadLetter(
+            id: $first->id,
+            source: 'billing_q',
+            messageId: 'm-other',
+            messageName: 'order.other',
+            body: '{"other":"bytes"}',
+            headers: [],
+            errorClass: 'LogicException',
+            errorMessage: 'other failure',
+            errorTrace: '#0 other',
+            attempts: 8,
+            failedAt: self::at(-100),
+        );
+
+        $this->store()->store($samePair);
+        $this->store()->store($otherPair);
+
+        self::assertSame(1, $this->store()->count());
+        $found = $this->store()->find($first->id);
+        self::assertNotNull($found);
+        self::assertSame('orders_q', $found->source);
+        self::assertSame('m-1', $found->messageId);
+        self::assertSame('order.placed', $found->messageName);
+        self::assertSame('boom', $found->errorMessage);
+        self::assertSame(3, $found->attempts);
+        self::assertSame($first->failedAt, $found->failedAt);
+        self::assertTrue($found->replayable);
+    }
+
+    public function testAStoreOfAnIdThatIsAReplayedRowChangesNothing(): void
+    {
+        $deadLetter = $this->deadLetter(messageId: 'm-1');
+        $this->store()->store($deadLetter);
+        $this->store()->markReplayed($deadLetter->id);
+        $replayedAt = $this->store()->find($deadLetter->id)?->replayedAt;
+
+        $this->store()->store($deadLetter);
+
+        self::assertSame(1, $this->store()->count(), 'no second row');
+        self::assertNotNull($replayedAt);
+        self::assertSame($replayedAt, $this->store()->find($deadLetter->id)?->replayedAt);
+    }
+
+    public function testTheSameMessageIdOnTwoSourcesGivesTwoRows(): void
+    {
+        $orders = $this->deadLetter(source: 'orders_q', messageId: 'm-1');
+        $billing = $this->deadLetter(source: 'billing_q', messageId: 'm-1');
+
+        $this->store()->store($orders);
+        $this->store()->store($billing);
+
+        self::assertSame(2, $this->store()->count());
+        self::assertSame('orders_q', $this->store()->find($orders->id)?->source);
+        self::assertSame('billing_q', $this->store()->find($billing->id)?->source);
+    }
+
+    public function testTwoMessageIdsOnOneSourceGiveTwoRows(): void
+    {
+        $first = $this->deadLetter(source: 'orders_q', messageId: 'm-1');
+        $second = $this->deadLetter(source: 'orders_q', messageId: 'm-2');
+
+        $this->store()->store($first);
+        $this->store()->store($second);
+
+        self::assertSame(2, $this->store()->count());
+        self::assertSame('m-1', $this->store()->find($first->id)?->messageId);
+        self::assertSame('m-2', $this->store()->find($second->id)?->messageId);
+    }
+
+    public function testAnUpsertChangesTheReplayableMarkInEachDirection(): void
+    {
+        $canonical = $this->deadLetter(messageId: 'm-1', replayable: true);
+        $this->store()->store($canonical);
+
+        $this->store()->store($this->deadLetter(messageId: 'm-1', replayable: false));
+        self::assertFalse($this->store()->find($canonical->id)?->replayable, 'true to false');
+
+        $this->store()->store($this->deadLetter(messageId: 'm-1', replayable: true));
+        self::assertTrue($this->store()->find($canonical->id)?->replayable, 'false to true');
+        self::assertSame(1, $this->store()->count());
+    }
+
     public function testFindOfAnUnknownIdReturnsNull(): void
     {
         $this->store()->store($this->deadLetter());
@@ -320,14 +482,14 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         string $messageName = 'order.placed',
         string $source = 'orders_q',
         ?int $failedAt = null,
-        string $messageId = 'msg-1',
+        ?string $messageId = null,
         array $headers = [],
         bool $replayable = true,
     ): DeadLetter {
         return new DeadLetter(
             id: self::newId(),
             source: $source,
-            messageId: $messageId,
+            messageId: $messageId ?? 'msg-'.self::newId(), // a new message by default: no upsert
             messageName: $messageName,
             body: '{"some":"bytes"}',
             headers: $headers,
