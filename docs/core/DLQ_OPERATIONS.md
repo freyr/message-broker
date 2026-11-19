@@ -324,18 +324,27 @@ The import maps each message to one of three cases:
   the message (`x-attempt` for AMQP), never the delivery count of the
   transport. `failed_at` is the time of the move, else the time of the import.
 - The row keeps all headers of the message, also the broker headers
-  (`x-death`, `x-first-death-*`, `x-last-death-*`, `x-delivery-count`).
+  (`x-death`, `x-first-death-*`, `x-last-death-*`, `x-delivery-count`). A
+  replay of the row removes them from the new outbox row (see *Replay to one
+  consumer*), so a stale `x-delivery-count` does not trip the delivery limit.
+- A replay of an imported row follows the rules of *Replaying*: one
+  transaction, the refusals, and the target `x-replay-target` = the `source` of
+  the row.
 - `DeliveryLimitExceeded` and `MovedByTransport` are synthetic error classes:
   the import uses only their names and never throws them. Select the moved rows
   with `--error`, for example
   `dlq:list --error='Freyr\MessageBroker\DeadLetter\MovedByTransport'`.
 - A row of the third case has the dead letter queue as `source`. No consumer
-  has that source, so the row is not replayable. Find it with `dlq:list
-  --source=orders_q.dlq`, then purge it or publish its message again by hand.
+  has that source, so the row is not replayable: a single replay refuses it
+  with "not replayable", and the default filter of `dlq:replay --all` leaves it
+  out. Find it with `dlq:list --source=orders_q.dlq`, then purge it or publish
+  its message again by hand.
 - Each import gives a new row `id`. The sequence "a store, a stop before the
   ack, a replay of that row, the next import run" thus gives a second open row
-  for the same message. A second replay of it is absorbed by the deduplication
-  of the consumer while its deduplication row exists.
+  for the same message. A new replay of the first row fails with "already
+  replayed". A replay of the second row sends the message again; the
+  deduplication of the consumer absorbs it while its deduplication row
+  exists.
 
 **A message that stops each import run.** The import runs the queue in order.
 When the store of one message fails each time (an infrastructure fault that

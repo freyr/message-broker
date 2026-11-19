@@ -14,6 +14,7 @@ use Freyr\MessageBroker\Retry\RetryAction;
 use Freyr\MessageBroker\Retry\RetryPolicy;
 use Freyr\MessageBroker\Serializer\Deserializer;
 use Freyr\MessageBroker\Serializer\MalformedMessage;
+use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Storage\Transaction;
 use InvalidArgumentException;
 use Psr\Log\LoggerInterface;

@@ -278,9 +278,9 @@ final class TransportDeadLetterQueueTest extends AmqpFunctionalTestCase
                 return $this->inner->stats($filter);
             }
 
-            public function markReplayed(string $id): void
+            public function markReplayed(string $id): bool
             {
-                $this->inner->markReplayed($id);
+                return $this->inner->markReplayed($id);
             }
 
             public function purge(DeadLetterFilter $filter): int
@@ -477,7 +477,8 @@ final class TransportDeadLetterQueueTest extends AmqpFunctionalTestCase
         $this->publish('m-1');
         $this->moveByTheDeliveryLimit();
         $firstId = $this->importAndStopBeforeTheAck();
-        (new ReplayService($this->store, new InMemoryOutboxStore(), new JsonWireFormat()))->replay($firstId, 'orders');
+        (new ReplayService($this->store, new InMemoryOutboxStore(), new PdoTransaction(self::$pdo), new JsonWireFormat()))
+            ->replay($firstId, 'orders');
 
         self::assertSame(1, $this->import()->run());
 
