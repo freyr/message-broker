@@ -131,7 +131,9 @@ and `dead_letters` tables plus these events:
   (it must exist). The command also prints the abandoned rows that it dropped.
 - **Consumer lag** — broker queue depth (AMQP).
 - **DLQ depth** — `SELECT COUNT(*) FROM dead_letters WHERE replayed_at IS NULL`,
-  optionally grouped by `source`/`message_name`.
+  optionally grouped by `source`/`message_name`. `message-broker:dlq:stats
+  --not-replayed` gives the open dead letters by message name, work queue and
+  error class (see [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md)).
 
 ## Scaling
 

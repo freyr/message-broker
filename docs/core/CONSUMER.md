@@ -52,6 +52,18 @@ exists:
 The log of a transient deserialize failure writes no row, so its `message_id`
 stays `unknown` when the delivery has no ID.
 
+A raw dead letter has `replayable` `false`: its body is the raw wire bytes. A
+dead letter of a failed handler, and a dead letter at the delivery limit that
+the deserializer can read, has `replayable` `true`: its body is the canonical
+document.
+
+The store keeps one open row for each message ID and work queue. When the
+process stops after the dead letter write and before the ack, the delivery
+comes back and fails again: the second write updates the open row with the
+data of the second failure, so the table holds one row (see
+[DLQ_OPERATIONS.md](DLQ_OPERATIONS.md)). A raw dead letter with a generated ID
+gets a second row in this case, because its second ID is a new value.
+
 Each `DeadLetter` holds text that each store can keep. The constructor of
 `DeadLetter\DeadLetter` (and thus `DeadLetter::fromFailure()`) applies three
 rules:
