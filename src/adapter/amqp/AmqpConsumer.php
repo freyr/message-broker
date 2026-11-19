@@ -98,31 +98,29 @@ final class AmqpConsumer
             while (!$this->shouldStop && $this->channel->is_consuming()) {
                 $secondsLeft = $this->guard->secondsLeft();
                 if ($secondsLeft === 0.0) {
-                    $this->stopAtLimit(WorkerStopReason::TimeLimit);
+                    $reason = WorkerStopReason::TimeLimit;
+                } else {
+                    // One clock read for each wait: the note of the source of the
+                    // timeout alone decides the path of an AMQPTimeoutException.
+                    $timeoutIsTimeLeft = $secondsLeft !== null
+                        && ($idleTimeout === null || $secondsLeft <= $idleTimeout);
 
-                    continue;
-                }
-                // One clock read for each wait: the note of the source of the
-                // timeout alone decides the path of an AMQPTimeoutException.
-                $timeoutIsTimeLeft = $secondsLeft !== null && ($idleTimeout === null || $secondsLeft <= $idleTimeout);
-
-                try {
-                    $this->channel->wait(timeout: $timeoutIsTimeLeft ? $secondsLeft : $idleTimeout ?? 0);
-                } catch (AMQPTimeoutException $timeout) {
-                    if ($this->inWork !== null) {
-                        // A confirm timeout of the retry republish, from inside
-                        // the processor: a failure of the delivery, not silence.
-                        throw $timeout;
+                    try {
+                        $this->channel->wait(timeout: $timeoutIsTimeLeft ? $secondsLeft : $idleTimeout ?? 0);
+                        $reason = $this->guard->stopReason();
+                    } catch (AMQPTimeoutException $timeout) {
+                        if ($this->inWork !== null) {
+                            // A confirm timeout of the retry republish, from inside
+                            // the processor: a failure of the delivery, not silence.
+                            throw $timeout;
+                        }
+                        if (!$timeoutIsTimeLeft) {
+                            break; // queue stayed silent for the whole idle window
+                        }
+                        $reason = WorkerStopReason::TimeLimit;
                     }
-                    if (!$timeoutIsTimeLeft) {
-                        break; // queue stayed silent for the whole idle window
-                    }
-                    $this->stopAtLimit(WorkerStopReason::TimeLimit);
-
-                    continue;
                 }
 
-                $reason = $this->guard->stopReason();
                 if ($reason !== null) {
                     $this->stopAtLimit($reason);
                 }
