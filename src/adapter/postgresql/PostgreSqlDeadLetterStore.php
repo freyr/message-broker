@@ -103,11 +103,10 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
         $statement = $this->pdo->prepare(
             "SELECT * FROM dead_letters {$where} ORDER BY failed_at DESC, id DESC LIMIT :limit OFFSET :offset",
         );
-        self::bind($statement, $parameters + [
+        $statement->execute($parameters + [
             'limit' => $limit,
             'offset' => $offset,
         ]);
-        $statement->execute();
 
         /** @var list<array<string, mixed>> $rows */
         $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
@@ -119,8 +118,7 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
     {
         [$where, $parameters] = self::where($filter);
         $statement = $this->pdo->prepare("SELECT COUNT(*) FROM dead_letters {$where}");
-        self::bind($statement, $parameters);
-        $statement->execute();
+        $statement->execute($parameters);
 
         return (int) $statement->fetchColumn();
     }
@@ -135,10 +133,9 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
         $statement = $this->pdo->prepare(
             "SELECT id FROM dead_letters {$where} ORDER BY failed_at ASC, id ASC LIMIT :limit",
         );
-        self::bind($statement, $parameters + [
+        $statement->execute($parameters + [
             'limit' => $limit,
         ]);
-        $statement->execute();
 
         /** @var list<string> $ids */
         $ids = $statement->fetchAll(PDO::FETCH_COLUMN);
@@ -157,8 +154,7 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
             GROUP BY message_name, source, error_class
             ORDER BY count DESC, message_name ASC, source ASC, error_class ASC
             SQL);
-        self::bind($statement, $parameters);
-        $statement->execute();
+        $statement->execute($parameters);
 
         /** @var list<array<string, mixed>> $rows */
         $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
@@ -187,8 +183,7 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
     {
         [$where, $parameters] = self::where($filter);
         $statement = $this->pdo->prepare("DELETE FROM dead_letters {$where}");
-        self::bind($statement, $parameters);
-        $statement->execute();
+        $statement->execute($parameters);
 
         return $statement->rowCount();
     }
@@ -239,14 +234,6 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
         }
 
         return [$conditions === [] ? '' : 'WHERE '.implode(' AND ', $conditions), $parameters];
-    }
-
-    /** @param array<string, int|string> $parameters */
-    private static function bind(PDOStatement $statement, array $parameters): void
-    {
-        foreach ($parameters as $name => $value) {
-            $statement->bindValue($name, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
-        }
     }
 
     private static function bindBody(PDOStatement $statement, string $name, string $body): void
