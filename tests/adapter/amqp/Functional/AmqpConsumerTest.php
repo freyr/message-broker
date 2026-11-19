@@ -73,8 +73,12 @@ final class AmqpConsumerTest extends AmqpFunctionalTestCase
         $this->channel->close();
     }
 
-    private function consumer(int $maxAttempts = 5, ?\PDO $pdo = null, ?RecordingLogger $logger = null): AmqpConsumer
-    {
+    private function consumer(
+        int $maxAttempts = 5,
+        ?\PDO $pdo = null,
+        ?RecordingLogger $logger = null,
+        ?RecordingLogger $consumerLogger = null,
+    ): AmqpConsumer {
         $pdo ??= self::$pdo;
         $dispatch = function (IncomingMessage $incoming): void {
             if ($this->failingDispatch !== null) {
@@ -99,7 +103,15 @@ final class AmqpConsumerTest extends AmqpFunctionalTestCase
                 name: 'orders_consumer',
                 logger: $logger ?? new RecordingLogger(),
             ),
+            logger: $consumerLogger ?? new RecordingLogger(),
         );
+    }
+
+    private function readyCount(): int
+    {
+        [, $ready] = $this->channel->queue_declare(self::isolated(self::QUEUE), true);
+
+        return (int) $ready;
     }
 
     /** @param array<string, mixed> $metadata */
@@ -246,6 +258,40 @@ final class AmqpConsumerTest extends AmqpFunctionalTestCase
             1,
             self::fetchInt("SELECT COUNT(*) FROM dead_letters WHERE message_name = 'nobody.handles.this'"),
         );
+    }
+
+    public function testAMessageLimitOfTwoHandlesTwoOfThreeMessagesAndLeavesTheThirdInTheQueue(): void
+    {
+        foreach (['m-1', 'm-2', 'm-3'] as $messageId) {
+            [$body, $meta] = $this->message($messageId);
+            $this->publish($body, $meta, $messageId);
+        }
+
+        $this->consumer()->run(new WorkerLimits(maxMessages: 2));
+
+        self::assertSame(['m-1', 'm-2'], array_map(
+            static fn (IncomingMessage $incoming): string => $incoming->messageId,
+            $this->dispatched,
+        ));
+        $this->channel->close();
+        $this->channel = self::$amqp->channel();
+        self::assertSame(1, $this->readyCount(), 'the third message is in the queue after the channel closes');
+    }
+
+    public function testATimeLimitEndsARunOnAnEmptyQueueWithNoIdleTimeoutAfterTheLimit(): void
+    {
+        $logger = new RecordingLogger();
+        $started = hrtime(true);
+
+        $this->consumer(consumerLogger: $logger)->run(new WorkerLimits(maxSeconds: 2));
+
+        $elapsedSeconds = (hrtime(true) - $started) / 1e9;
+        self::assertGreaterThanOrEqual(1.9, $elapsedSeconds, 'the wait lasts until the limit');
+        self::assertLessThan(4.0, $elapsedSeconds, 'the wait ends at the limit, not never');
+        self::assertCount(1, $logger->records);
+        self::assertSame('Worker limit reached; the worker stops', $logger->records[0]['message']);
+        self::assertSame('time limit', $logger->records[0]['context']['reason']);
+        self::assertTrue($this->channel->is_open(), 'a limit stop is a graceful stop');
     }
 
     public function testHandlerFailureRetriesViaWaitQueueThenDeadLetters(): void

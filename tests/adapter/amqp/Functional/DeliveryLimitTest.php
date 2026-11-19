@@ -265,6 +265,7 @@ final class DeliveryLimitTest extends AmqpFunctionalTestCase
         self::assertNull($deliveries[0]->deliveryCount, 'the wait-queue pass starts the count again');
     }
 
+    /** The graceful stop of this test is a limit stop (maxMessages: 1): it adds no count either. */
     public function testAGracefulStopReturnsTheBufferedDeliveriesWithNoCount(): void
     {
         $this->publish('m-1', 'm-2', 'm-3', 'm-4', 'm-5');
