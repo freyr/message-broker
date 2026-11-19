@@ -41,7 +41,9 @@ has `sql(int $daysAhead)` (the DDL of a new database) and `install(int $daysAhea
 ## `message-broker:outbox:maintain`
 
 Outbox retention. Creates the upcoming daily partitions and drops the expired
-ones. Run it daily (cron). It must run outside a transaction.
+ones. Run it daily (a Kubernetes `CronJob`, see
+[Scheduled commands in PRODUCTION.md](PRODUCTION.md#scheduled-commands)). It
+must run outside a transaction.
 
 **Constructor:** `new OutboxMaintainCommand(OutboxRetention $retention)`,
 for example `new OutboxMaintainCommand(new PostgreSqlOutboxRetention($pdo))`.
@@ -151,10 +153,11 @@ a signal or a failure, as before.
 Exit codes: `0` after the callable returned, also after a limit stop; `1` with
 `--require-signals` and no `ext-pcntl`; `2` for an unknown lane or an invalid
 option value (the callable does not run). A publisher failure is not caught: the
-process ends with an error, and the supervisor restarts it.
+process ends with an error, and Kubernetes starts the container again.
 
-**Supervisor rule.** A limit stop exits with code `0`, so the supervisor must
-start a new process after each exit, exit code `0` included. See
+**Restart rule.** A limit stop exits with code `0`, so the container must start
+again after each exit, exit code `0` included: run the command in a
+`Deployment` (`restartPolicy: Always`). See
 [Worker limits in PRODUCTION.md](PRODUCTION.md#worker-limits).
 
 ## `message-broker:consume <name>`
@@ -193,10 +196,12 @@ before.
 Exit codes: `0` after the callable returned, also after a limit stop; `1` with
 `--require-signals` and no `ext-pcntl`; `2` for an unknown consumer or an
 invalid option value (the callable does not run). A failure of a delivery is
-not caught: the process ends with an error, and the supervisor restarts it.
+not caught: the process ends with an error, and Kubernetes starts the
+container again.
 
-**Supervisor rule.** A limit stop exits with code `0`, so the supervisor must
-start a new process after each exit, exit code `0` included. See
+**Restart rule.** A limit stop exits with code `0`, so the container must start
+again after each exit, exit code `0` included: run the command in a
+`Deployment` (`restartPolicy: Always`). See
 [Worker limits in PRODUCTION.md](PRODUCTION.md#worker-limits).
 
 ## `message-broker:webhook:setup`
@@ -221,7 +226,8 @@ Exit codes: `0` success; `2` invalid `--premake-days` (an integer of 0 or more).
 
 Retention of `webhook_deliveries`, with the options and the exit codes of
 `outbox:maintain`. Creates the upcoming daily partitions and drops the
-expired ones. Run it daily (cron). It must run outside a transaction.
+expired ones. Run it daily (a Kubernetes `CronJob`). It must run outside a
+transaction.
 
 **Constructor:** `new WebhookMaintainCommand(DeliveryRetention $retention)`,
 for example `new WebhookMaintainCommand(new PostgreSqlDeliveryRetention($pdo))`.
@@ -291,10 +297,11 @@ Exit codes: `0` after the loop returned, also after a limit stop; `1` with
 `--require-signals` and no `ext-pcntl`; `2` for an invalid option value (no
 loop is made). A failed start check of the loop (the lease is not longer than
 `maxSendMs()` of the sender) and a database error are not caught: the process
-ends with an error, and the supervisor restarts it.
+ends with an error, and Kubernetes starts the container again.
 
-**Supervisor rule.** A limit stop exits with code `0`, so the supervisor must
-start a new process after each exit, exit code `0` included. See
+**Restart rule.** A limit stop exits with code `0`, so the container must start
+again after each exit, exit code `0` included: run the command in a
+`Deployment` (`restartPolicy: Always`). See
 [Worker limits in PRODUCTION.md](PRODUCTION.md#worker-limits).
 
 ## `message-broker:webhook:abandon`
@@ -467,7 +474,7 @@ body and no error message.
 Imports the messages of a dead letter queue of the transport into the
 `dead_letters` table, and prints `Imported <n> dead letters from '<name>'.`
 with the exit code 0. It is a batch command: it ends when the queue is empty
-or the limit is reached. Run it from a scheduler, for example cron. The import
+or the limit is reached. Run it from a Kubernetes `CronJob`. The import
 cases are in [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md#importing-a-dead-letter-queue-of-the-transport).
 
 **Constructor:** `new DlqImportCommand(array $importers)` —

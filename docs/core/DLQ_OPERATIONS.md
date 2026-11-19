@@ -181,7 +181,7 @@ php bin/console message-broker:dlq:replay --all --source=orders_q --since=24h --
 ```
 
 Without `--force`, a `--all` replay asks for interactive confirmation
-(`[y/N]`). If standard input is not a TTY (a cron job, a CI step, a
+(`[y/N]`). If standard input is not a TTY (a Kubernetes `Job`, a CI step, a
 non-interactive shell), the command **refuses to run** rather than silently
 proceeding — pass `--force` explicitly for any non-interactive batch replay.
 
@@ -378,7 +378,7 @@ a lost connection), or after a dead letter write that fails at each delivery.
 where the filters, the statistics and the replay apply:
 
 ```bash
-# For example every 10 minutes from cron.
+# For example every 10 minutes from a Kubernetes CronJob.
 php bin/console message-broker:dlq:import orders_q.dlq --limit=1000
 ```
 
@@ -494,7 +494,8 @@ x-dead-letter: {"id":"0190f7e2-1234-7000-8000-abc123456789","source":"orders_q",
 
 Consumer-side deduplication only ever inserts into `message_deduplication` —
 nothing else prunes it, so it grows without bound unless you run
-`dedup:cleanup` on a schedule (e.g. a daily cron):
+`dedup:cleanup` on a schedule (for example a daily Kubernetes `CronJob`, see
+[Scheduled commands in PRODUCTION.md](PRODUCTION.md#scheduled-commands)):
 
 ```bash
 php bin/console message-broker:dedup:cleanup --older-than=7d --dry-run

@@ -12,11 +12,11 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * Outbox retention, meant for a daily schedule: create the daily partitions
- * ahead of time, then drop the expired ones (DETACH ... CONCURRENTLY, then
- * DROP). An expired partition that still holds unpublished rows is kept by
- * default: it is reported and the command exits with FAILURE, so a scheduler
- * alerts. --drop-unpublished makes the retention period a hard age limit: such
+ * Outbox retention, meant for a daily Kubernetes CronJob: create the daily
+ * partitions ahead of time, then drop the expired ones (DETACH ...
+ * CONCURRENTLY, then DROP). An expired partition that still holds unpublished
+ * rows is kept by default: it is reported and the command exits with FAILURE,
+ * so the Job fails and alerts. --drop-unpublished makes the retention period a hard age limit: such
  * a partition is dropped with its unpublished rows, and the command warns.
  * An abandoned row does not keep its partition: the command prints the count
  * of abandoned rows of each dropped partition, and the exit code does not change.

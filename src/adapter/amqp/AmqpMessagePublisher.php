@@ -26,7 +26,7 @@ use PhpAmqpLib\Wire\AMQPTable;
  * Failure handling: a nack backs off only the nacked rows and the channel
  * stays usable. A channel, connection or confirm-timeout failure throws; the
  * relay then backs off the rows of the call and stops the worker (crash-only),
- * and the supervisor restarts it with a fresh connection.
+ * and Kubernetes starts the container again with a fresh connection.
  *
  * Messages are published without the mandatory flag: a message that no queue
  * binding matches is dropped by the broker and confirmed. That is the design —

@@ -17,9 +17,9 @@ final class SignalSupport
     {
         return $pcntlLoaded
             ? null
-            : 'ext-pcntl is not loaded: SIGTERM and SIGINT end the process at once, with no graceful shutdown. '
-                .'The current delivery or batch is not completed; the broker redelivers the delivery, the relay publishes the batch again, and deduplication absorbs the repeat. '
-                .'As PID 1 of a container, the process ignores SIGTERM and SIGINT until the runtime sends SIGKILL after its stop timeout. '
-                .'Run it under an init process (for example docker run --init or tini), or load ext-pcntl.';
+            : 'ext-pcntl is not loaded: there is no graceful shutdown. '
+                .'As PID 1 of a container, the process ignores SIGTERM and SIGINT until Kubernetes sends SIGKILL at the end of the termination grace period; as another PID, SIGTERM and SIGINT end it at once. '
+                .'The current delivery, batch or webhook pass is not completed; the broker redelivers the delivery, the relay publishes the batch again, the webhook rows are due again after their lease, and deduplication absorbs the repeat. '
+                .'Load ext-pcntl in the container image.';
     }
 }

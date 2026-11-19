@@ -43,7 +43,8 @@ Consumers must be order-insensitive.
   continues.
 - **Channel, connection or confirm timeout.** The worker backs off the rows of
   the failed publish, commits, and then lets the error propagate: the worker
-  stops (crash-only), and the supervisor restarts it with a new connection. A
+  stops (crash-only), and Kubernetes starts the container again with a new
+  connection. A
   broken worker never keeps a lane in backoff.
 - **A row that failed before is published alone.** A claimed row with
   `attempts > 0` gets its own publish and its own confirm wait. A message
