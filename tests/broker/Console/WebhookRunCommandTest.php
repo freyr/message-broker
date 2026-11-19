@@ -16,6 +16,8 @@ use Freyr\MessageBroker\Webhook\DeliveryRecord;
 use Freyr\MessageBroker\Webhook\Subscription;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use ReflectionClass;
+use ReflectionNamedType;
 use Symfony\Component\Clock\Clock;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Clock\NativeClock;
@@ -232,6 +234,61 @@ final class WebhookRunCommandTest extends TestCase
 
         self::assertSame(Command::SUCCESS, $status);
         self::assertSame(1, $this->store->claimCalls);
+    }
+
+    public function testEachFieldOfTheBaseConfigThatNoOptionSetsReachesTheLoop(): void
+    {
+        $this->stopAtFirstClaim = true;
+        $base = self::configWithNoDefaultValue();
+        $overridden = [
+            'batchSize' => 10,
+            'limitForEachLane' => 3,
+            'laneFilter' => ['crm'],
+        ];
+
+        (new CommandTester($this->command($base)))->execute([
+            '--batch-size' => '10',
+            '--lane-limit' => '3',
+            '--lane' => ['crm'],
+        ]);
+
+        self::assertCount(1, $this->configs);
+        $expected = $overridden + get_object_vars($base);
+        self::assertSame(array_keys(get_object_vars($base)), array_keys(get_object_vars($this->configs[0])));
+        foreach (get_object_vars($this->configs[0]) as $name => $value) {
+            self::assertSame($expected[$name], $value, "the field {$name}");
+        }
+    }
+
+    /**
+     * A config in which each constructor parameter has a value that is not its
+     * default, found by reflection, so a field that a later change adds is
+     * covered with no change of this test.
+     */
+    private static function configWithNoDefaultValue(): DeliveryLoopConfig
+    {
+        $arguments = [];
+        $constructor = (new ReflectionClass(DeliveryLoopConfig::class))->getConstructor();
+        self::assertNotNull($constructor);
+        foreach ($constructor->getParameters() as $position => $parameter) {
+            $type = $parameter->getType();
+            self::assertInstanceOf(ReflectionNamedType::class, $type);
+            $default = $parameter->isDefaultValueAvailable() ? $parameter->getDefaultValue() : null;
+            $arguments[$parameter->getName()] = match ($type->getName()) {
+                'int' => (is_int($default) ? $default : 0) + 1_000 + $position,
+                'array' => ["lane-{$position}"],
+                'bool' => $default !== true,
+                'string' => "value-{$position}",
+                default => self::fail("Give the test a value for the type {$type->getName()} of \${$parameter->getName()}"),
+            };
+        }
+        // The lease must stay longer than maxSendMs() of the sender, and the maximum age
+        // plus the longest retry delay shorter than the retention period, for the start checks.
+        $arguments['maxAgeMs'] = 3_600_000;
+        // A short idle sleep (not the default 200) keeps the one pass of the test fast.
+        $arguments['idleSleepMs'] = 1;
+
+        return new DeliveryLoopConfig(...$arguments);
     }
 
     private function command(?DeliveryLoopConfig $base = null): WebhookRunCommand

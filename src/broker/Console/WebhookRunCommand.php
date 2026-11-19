@@ -112,23 +112,26 @@ final class WebhookRunCommand extends Command
         return Command::SUCCESS;
     }
 
-    /** @throws InvalidArgumentException when an option value is not valid */
+    /**
+     * The base config with the fields of the options that the operator gave.
+     * Each other field, also one that a later release adds, keeps its base value:
+     * the fields are the promoted constructor parameters.
+     *
+     * @throws InvalidArgumentException when an option value is not valid
+     */
     private function config(InputInterface $input): DeliveryLoopConfig
     {
         /** @var list<string> $lanes */
         $lanes = $input->getOption('lane');
-        $base = $this->config;
+        $overrides = array_filter([
+            'batchSize' => WorkerLimitOptions::intOption(WorkerLimitOptions::stringOption($input, 'batch-size'), 'batch-size'),
+            'limitForEachLane' => WorkerLimitOptions::intOption(WorkerLimitOptions::stringOption($input, 'lane-limit'), 'lane-limit'),
+            'laneFilter' => $lanes === [] ? null : array_values(array_unique($lanes)),
+        ], static fn (mixed $value): bool => $value !== null);
 
-        return new DeliveryLoopConfig(
-            leaseMs: $base->leaseMs,
-            batchSize: WorkerLimitOptions::intOption(WorkerLimitOptions::stringOption($input, 'batch-size'), 'batch-size') ?? $base->batchSize,
-            limitForEachLane: WorkerLimitOptions::intOption(WorkerLimitOptions::stringOption($input, 'lane-limit'), 'lane-limit') ?? $base->limitForEachLane,
-            laneRefreshMs: $base->laneRefreshMs,
-            laneFilter: $lanes === [] ? $base->laneFilter : array_values(array_unique($lanes)),
-            maxAgeMs: $base->maxAgeMs,
-            expiredCheckIntervalMs: $base->expiredCheckIntervalMs,
-            retentionDays: $base->retentionDays,
-            idleSleepMs: $base->idleSleepMs,
-        );
+        // The values come from a DeliveryLoopConfig, so each has the type of its parameter;
+        // get_object_vars() is typed array<string, mixed>.
+        // @phpstan-ignore argument.type
+        return new DeliveryLoopConfig(...[...get_object_vars($this->config), ...$overrides]);
     }
 }
