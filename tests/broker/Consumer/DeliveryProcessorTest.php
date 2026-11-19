@@ -464,8 +464,12 @@ final class DeliveryProcessorTest extends TestCase
         self::assertNotInstanceOf(DeadLetterStore::class, $sink);
         $this->failingDispatch = self::failure('final failure');
 
-        $this->processor(maxAttempts: 3, deadLetters: $sink)->process($this->delivery('m-9', attempt: 3), $this->control);
+        $outcome = $this->processor(maxAttempts: 3, deadLetters: $sink)->process(
+            $this->delivery('m-9', attempt: 3),
+            $this->control,
+        );
 
+        self::assertSame(DeliveryOutcome::DeadLettered, $outcome);
         self::assertSame(['ack'], $this->control->calls);
         self::assertCount(1, $sink->stored);
         self::assertSame('m-9', $sink->stored[0]->messageId);
@@ -492,7 +496,7 @@ final class DeliveryProcessorTest extends TestCase
 
         try {
             $this->processor(maxAttempts: 3, deadLetters: $sink)->process($this->delivery('m-9', attempt: 3), $this->control);
-            self::fail('a failed sink write must propagate');
+            self::fail('a failed sink write must propagate, so there is no outcome');
         } catch (RuntimeException $e) {
             self::assertSame($error, $e);
         }

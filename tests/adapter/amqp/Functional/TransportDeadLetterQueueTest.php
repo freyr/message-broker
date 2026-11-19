@@ -581,7 +581,7 @@ final class TransportDeadLetterQueueTest extends AmqpFunctionalTestCase
 
         // The first failure retries through the wait queue (the message comes back with an x-death entry
         // 'expired'), the second failure dead-letters through the sink.
-        $this->consumerWithTheSink($sink, maxAttempts: 2)->run(messageLimit: 2, idleTimeoutSec: 5);
+        $this->consumerWithTheSink($sink, maxAttempts: 2)->run(new WorkerLimits(maxMessages: 2), idleTimeoutSec: 5);
         $sinkChannel->close();
 
         self::assertCount(1, $this->sinkGot, 'the sink waited for its confirm on its own channel inside the consumer callback');
@@ -660,7 +660,7 @@ final class TransportDeadLetterQueueTest extends AmqpFunctionalTestCase
         $sink = $this->recordingSink('no-binding', $sinkChannel);
 
         try {
-            $this->consumerWithTheSink($sink, maxAttempts: 1)->run(messageLimit: 1, idleTimeoutSec: 5);
+            $this->consumerWithTheSink($sink, maxAttempts: 1)->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 5);
             self::fail('a returned dead letter must stop the consumer');
         } catch (RuntimeException $e) {
             self::assertStringStartsWith('The broker returned the dead letter ', $e->getMessage());
