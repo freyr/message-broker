@@ -8,6 +8,7 @@ use Freyr\MessageBroker\Adapter\Http\HttpDeliverySender;
 use Freyr\MessageBroker\Adapter\Http\HttpSenderConfig;
 use Freyr\MessageBroker\Adapter\Http\StandardWebhooksSigner;
 use Freyr\MessageBroker\Testing\RecordingLogger;
+use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Webhook\ClaimedDelivery;
 use Freyr\MessageBroker\Webhook\DeliveryPair;
 use Freyr\MessageBroker\Webhook\DeliveryRecord;
@@ -528,12 +529,213 @@ final class HttpDeliverySenderTest extends TestCase
         }
     }
 
+    public function testThePairsAfterTheDnsAllowanceGetTheCategoryDnsAndNoRequest(): void
+    {
+        $clock = $this->clock;
+        $looked = [];
+        $resolver = static function (string $host) use ($clock, &$looked): string {
+            $looked[] = $host;
+            $clock->sleep(2.0); // a slow name server
+
+            return '93.184.215.14';
+        };
+        $client = new MockHttpClient(static fn (): MockResponse => new MockResponse('ok', [
+            'http_code' => 200,
+        ]));
+        $start = EpochMillis::now();
+        $sender = new HttpDeliverySender(new HttpSenderConfig(dnsAllowanceMs: 5_000), $client, resolver: $resolver);
+
+        $results = $sender->send([
+            self::pair('d-1', url: 'https://a.example/'),
+            self::pair('d-2', url: 'https://b.example/'),
+            self::pair('d-3', url: 'https://c.example/'),
+            self::pair('d-4', url: 'https://d.example/'),
+            self::pair('d-5', url: 'https://93.184.215.14/no-lookup'),
+            self::pair('d-6', url: 'https://[2606:2800:21f:cb07:6820:80da:af6b:8b2c]/no-lookup'),
+        ]);
+
+        self::assertSame(['a.example', 'b.example', 'c.example'], $looked, 'No lookup starts after the allowance');
+        self::assertSame(4, $client->getRequestsCount(), 'd-1, d-2 and the IP literals d-5 and d-6');
+        self::assertSame(2, \count(array_filter($results, static fn ($r): bool => $r->kind === DeliveryResultKind::Failed)));
+        self::assertSame(['d-1', 'd-2', 'd-3', 'd-4', 'd-5', 'd-6'], array_keys($results));
+        self::assertSame(DeliveryResultKind::Delivered, $results['d-1']->kind);
+        self::assertSame(DeliveryResultKind::Delivered, $results['d-2']->kind);
+        self::assertSame(DeliveryResultKind::Failed, $results['d-3']->kind);
+        self::assertSame('dns allowance used up (dns)', $results['d-3']->text, 'The lookup ended after the allowance');
+        self::assertSame(2_000, $results['d-3']->requestMs);
+        self::assertSame(DeliveryResultKind::Failed, $results['d-4']->kind);
+        self::assertSame('dns allowance used up (dns)', $results['d-4']->text);
+        self::assertSame(0, $results['d-4']->requestMs);
+        self::assertSame(DeliveryResultKind::Delivered, $results['d-5']->kind);
+        self::assertSame(DeliveryResultKind::Delivered, $results['d-6']->kind);
+        self::assertLessThanOrEqual($start + $sender->maxSendMs(), EpochMillis::now());
+    }
+
+    public function testALookupThatEndsExactlyAtTheAllowanceStillSends(): void
+    {
+        $clock = $this->clock;
+        $resolver = static function () use ($clock): string {
+            $clock->sleep(5.0);
+
+            return '93.184.215.14';
+        };
+        $client = new MockHttpClient(static fn (): MockResponse => new MockResponse('ok', [
+            'http_code' => 200,
+        ]));
+        $sender = new HttpDeliverySender(new HttpSenderConfig(dnsAllowanceMs: 5_000), $client, resolver: $resolver);
+
+        $results = $sender->send([self::pair('d-1', url: 'https://a.example/'), self::pair('d-2', url: 'https://b.example/')]);
+
+        self::assertSame(DeliveryResultKind::Delivered, $results['d-1']->kind);
+        self::assertSame('dns allowance used up (dns)', $results['d-2']->text, 'No lookup starts at the end of the allowance');
+        self::assertSame(0, $results['d-2']->requestMs);
+        self::assertSame(1, $client->getRequestsCount());
+    }
+
+    public function testTheResolvedAddressIsPinnedAndKeptUntilTheReset(): void
+    {
+        $looked = [];
+        $resolver = static function (string $host) use (&$looked): string {
+            $looked[] = $host;
+
+            return '93.184.215.'.\count($looked);
+        };
+        $resolves = [];
+        $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$resolves): MockResponse {
+            $resolves[] = $options['resolve'];
+
+            return new MockResponse('ok', [
+                'http_code' => 200,
+            ]);
+        });
+        $sender = new HttpDeliverySender(new HttpSenderConfig(clientResetIntervalMs: 60_000), $client, resolver: $resolver);
+
+        $sender->send([self::pair('d-1', url: 'https://Hooks.Example/a'), self::pair('d-2', url: 'https://hooks.example/b')]);
+        $this->clock->sleep(60.0);
+        $sender->send([self::pair('d-3', url: 'https://hooks.example/c')]);
+
+        self::assertSame(['hooks.example', 'hooks.example'], $looked, 'One lookup for each host until the reset');
+        self::assertSame([
+            [
+                'hooks.example' => '93.184.215.1',
+            ],
+            [
+                'hooks.example' => '93.184.215.1',
+            ],
+            [
+                'hooks.example' => '93.184.215.2',
+            ],
+        ], $resolves);
+    }
+
+    public function testAHostThatDoesNotResolveHasTheCategoryDns(): void
+    {
+        $client = new MockHttpClient(static fn (): MockResponse => new MockResponse('ok', [
+            'http_code' => 200,
+        ]));
+        $clock = $this->clock;
+        $resolver = static function () use ($clock): ?string {
+            $clock->sleep(0.25);
+
+            return null;
+        };
+        $sender = new HttpDeliverySender(new HttpSenderConfig(), $client, resolver: $resolver);
+
+        $results = $sender->send([self::pair('d-1', url: 'https://no-such-host.invalid/'), self::pair('d-2')]);
+
+        self::assertSame(DeliveryResultKind::Failed, $results['d-1']->kind);
+        self::assertSame('no address (dns)', $results['d-1']->text);
+        self::assertSame(250, $results['d-1']->requestMs);
+        self::assertSame(DeliveryResultKind::Delivered, $results['d-2']->kind);
+        self::assertSame(1, $client->getRequestsCount());
+    }
+
+    public function testAFailedLookupIsNotKept(): void
+    {
+        $calls = 0;
+        $resolver = static function () use (&$calls): ?string {
+            ++$calls;
+
+            return null;
+        };
+        $sender = new HttpDeliverySender(new HttpSenderConfig(), new MockHttpClient(), resolver: $resolver);
+
+        $sender->send([self::pair('d-1', url: 'https://flaky.example/')]);
+        $sender->send([self::pair('d-2', url: 'https://flaky.example/')]);
+
+        self::assertSame(2, $calls);
+    }
+
+    public function testThereIsNoLookupWhenThePrivateNetworkCheckIsOff(): void
+    {
+        $calls = 0;
+        $resolver = static function () use (&$calls): string {
+            ++$calls;
+
+            return '93.184.215.14';
+        };
+        $response = new MockResponse('ok', [
+            'http_code' => 200,
+        ]);
+        $sender = new HttpDeliverySender(new HttpSenderConfig(blockPrivateNetworks: false), new MockHttpClient($response), resolver: $resolver);
+
+        $sender->send([self::pair('d-1', url: 'https://hooks.example/')]);
+
+        self::assertSame(0, $calls);
+        self::assertSame([], $response->getRequestOptions()['resolve']);
+    }
+
+    public function testTheTransferDeadlineEndsAtMaxSendMsAfterTheStartOfSend(): void
+    {
+        $clock = $this->clock;
+        $open = (static function () use ($clock): Generator {
+            yield 'a';
+            $clock->sleep(30.0);
+            yield ''; // no activity
+        })();
+        // Each request takes 3 s to start: the transfers start 9 s after the start of send().
+        $client = new RecordingHttpClient(new MockHttpClient([
+            new MockResponse('ok', [
+                'http_code' => 200,
+            ]),
+            new MockResponse('ok', [
+                'http_code' => 200,
+            ]),
+            new MockResponse($open, [
+                'http_code' => 200,
+            ]),
+        ]), static fn () => $clock->sleep(3.0));
+        $sender = new HttpDeliverySender(new HttpSenderConfig(blockPrivateNetworks: false), $client);
+
+        $results = $sender->send([self::pair('d-1'), self::pair('d-2'), self::pair('d-3')]);
+
+        self::assertSame([6.0], $client->streamTimeouts, 'The deadline is 15 s after the start of send(), not 10 s after the transfers start');
+        self::assertSame('deadline (timeout)', $results['d-3']->text);
+    }
+
+    public function testAControlCharacterInAHeaderValueIsEncodedAndTheRequestIsSent(): void
+    {
+        $response = new MockResponse('ok', [
+            'http_code' => 200,
+        ]);
+        $sender = new HttpDeliverySender(new HttpSenderConfig(), new MockHttpClient($response));
+
+        $results = $sender->send([self::pair('d-1', messageName: "order\r\nx-evil: 1\0")]);
+
+        self::assertSame(DeliveryResultKind::Delivered, $results['d-1']->kind);
+        self::assertSame(
+            ['x-message-name: order%0D%0Ax-evil: 1%00'],
+            $response->getRequestOptions()['normalized_headers']['x-message-name'],
+        );
+    }
+
     /** @param list<string> $secrets */
     private static function pair(
         string $id,
         string $url = self::URL,
         array $secrets = [self::SECRET],
         string $lane = 'lane-a',
+        string $messageName = 'order.placed',
     ): DeliveryPair {
         return new DeliveryPair(
             new ClaimedDelivery(
@@ -541,7 +743,7 @@ final class HttpDeliverySenderTest extends TestCase
                     id: $id,
                     messageId: 'msg-'.$id,
                     lane: $lane,
-                    messageName: 'order.placed',
+                    messageName: $messageName,
                     body: self::BODY,
                     headers: [
                         'x-tenant' => 'tenant-7',

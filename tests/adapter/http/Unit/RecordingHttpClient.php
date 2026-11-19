@@ -21,13 +21,18 @@ final class RecordingHttpClient implements HttpClientInterface
     /** @var list<float|null> */
     public array $streamTimeouts = [];
 
+    /** @param (\Closure(): mixed)|null $onRequest runs before each request, for example to advance a clock */
     public function __construct(
         private readonly MockHttpClient $client,
+        private readonly ?\Closure $onRequest = null,
     ) {}
 
     /** @param array<string, mixed> $options */
     public function request(string $method, string $url, array $options = []): ResponseInterface
     {
+        if ($this->onRequest !== null) {
+            ($this->onRequest)();
+        }
         $response = $this->client->request($method, $url, $options);
         $this->responses[] = $response;
 
@@ -44,6 +49,6 @@ final class RecordingHttpClient implements HttpClientInterface
     /** @param array<string, mixed> $options */
     public function withOptions(array $options): static
     {
-        return new self($this->client->withOptions($options));
+        return new self($this->client->withOptions($options), $this->onRequest);
     }
 }

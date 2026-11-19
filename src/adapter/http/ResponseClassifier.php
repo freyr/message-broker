@@ -69,6 +69,18 @@ final readonly class ResponseClassifier
         return DeliveryResult::failed($requestMs, \sprintf('%s (%s)', $error::class, $this->category($error)));
     }
 
+    /** A host name that does not resolve, with the private network check on: no request. */
+    public function noAddress(int $requestMs): DeliveryResult
+    {
+        return DeliveryResult::failed($requestMs, 'no address ('.self::CATEGORY_DNS.')');
+    }
+
+    /** A pair whose lookup cannot start or end inside the DNS allowance of the send() call: no request. */
+    public function dnsAllowanceUsedUp(int $requestMs): DeliveryResult
+    {
+        return DeliveryResult::failed($requestMs, 'dns allowance used up ('.self::CATEGORY_DNS.')');
+    }
+
     /** A request that is still open at the deadline of the send() call. */
     public function deadline(int $requestMs): DeliveryResult
     {
@@ -144,7 +156,8 @@ final readonly class ResponseClassifier
             return $nowMs + (int) $value * 1000;
         }
         $date = DateTimeImmutable::createFromFormat('!D, d M Y H:i:s \G\M\T', $value, new DateTimeZone('UTC'));
-        if ($date === false) {
+        // createFromFormat() moves an out-of-range field (31 Feb, 99:99:99) forward and reports a warning.
+        if ($date === false || DateTimeImmutable::getLastErrors() !== false) {
             return null;
         }
 

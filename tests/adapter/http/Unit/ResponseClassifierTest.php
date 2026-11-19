@@ -132,6 +132,12 @@ final class ResponseClassifierTest extends TestCase
         yield 'too many digits' => [[
             'retry-after' => ['12345678901'],
         ]];
+        yield 'date out of range' => [[
+            'retry-after' => ['Mon, 31 Feb 2026 99:99:99 GMT'],
+        ]];
+        yield 'date with day 32' => [[
+            'retry-after' => ['Wed, 32 Oct 2015 07:28:00 GMT'],
+        ]];
         yield 'date with a trailing text' => [[
             'retry-after' => ['Wed, 21 Oct 2015 07:28:00 GMT x'],
         ]];
