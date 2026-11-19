@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\DeadLetter;
 
+use Freyr\MessageBroker\BrokerHeader;
 use Freyr\MessageBroker\Consumer\Delivery;
 use Freyr\MessageBroker\Consumer\DeliveryLimitExceeded;
 use Freyr\MessageBroker\Serializer\Deserializer;
@@ -14,6 +15,12 @@ use Throwable;
  * Turns one message of a dead letter queue (a Delivery and an optional
  * TransportMove) into a DeadLetter and stores it:
  *
+ *   a valid header x-dead-letter              → the dead letter of the header
+ *                                               (a transport sink wrote it):
+ *                                               its id and each field, the
+ *                                               message body, the headers
+ *                                               without x-dead-letter; it has
+ *                                               priority over a move
  *   a move, the message deserializes          → the canonical document, the
  *                                               source queue of the move,
  *                                               replayable
@@ -31,8 +38,13 @@ use Throwable;
  * delivery, never the delivery count. The time is the time of the move, else
  * now.
  *
- * Each import gives a new id. The store keeps one open row for each message id
- * and source, so a repeat of an import changes that row.
+ * A header x-dead-letter that does not decode ({@see DeadLetterHeader::decode()}
+ * returns null) counts as absent, and the error message says so.
+ *
+ * With a valid header, the id comes from the header, and the store, idempotent
+ * by id, changes nothing on a repeat (also when the row is replayed). Else
+ * each import gives a new id; the store keeps one open row for each message
+ * id and source, so a repeat of an import changes that row.
  */
 final readonly class DeadLetterImporter
 {
@@ -51,6 +63,29 @@ final readonly class DeadLetterImporter
      */
     public function import(Delivery $delivery, ?TransportMove $move = null): DeadLetter
     {
+        $header = DeadLetterHeader::decode($delivery->headers[BrokerHeader::DEAD_LETTER] ?? null);
+        if ($header !== null) {
+            $headers = $delivery->headers;
+            unset($headers[BrokerHeader::DEAD_LETTER]);
+            $deadLetter = new DeadLetter(
+                id: $header['id'],
+                source: $header['source'],
+                messageId: $header['message_id'],
+                messageName: $header['message_name'],
+                body: $delivery->body,
+                headers: $headers,
+                errorClass: $header['error_class'],
+                errorMessage: $header['error_message'],
+                errorTrace: $header['error_trace'],
+                attempts: $header['attempts'],
+                failedAt: $header['failed_at'],
+                replayable: $header['replayable'],
+            );
+            $this->store->store($deadLetter);
+
+            return $deadLetter;
+        }
+
         if ($move === null) {
             $source = $delivery->source;
             $errorClass = MovedByTransport::class;
@@ -63,6 +98,9 @@ final readonly class DeadLetterImporter
                 : MovedByTransport::class;
             $errorMessage = "Moved by the transport: reason '{$move->reason}', queue '{$move->sourceQueue}', count {$move->count}";
             $failedAt = $move->movedAt ?? EpochMillis::now();
+        }
+        if (array_key_exists(BrokerHeader::DEAD_LETTER, $delivery->headers)) {
+            $errorMessage .= '; x-dead-letter header did not decode';
         }
 
         try {

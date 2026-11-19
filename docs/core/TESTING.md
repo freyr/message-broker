@@ -18,6 +18,7 @@ A contract test case is an abstract PHPUnit test case. It checks that an impleme
 | `DeadLetterStoreContractTestCase` | `DeadLetter\DeadLetterStore` |
 | `TransactionContractTestCase` | `Storage\Transaction` (with a deduplication store, an outbox store and a dead letter store on the same connection) |
 | `OutboxPublisherContractTestCase` | `Outbox\OutboxPublisher` |
+| `DeadLetterSinkContractTestCase` | `DeadLetter\DeadLetterSink` (each field of a stored dead letter, the raw bytes and the mark, two dead letters; no rule on two failures of one message) |
 
 To test an adapter, extend the test case and return the implementation from the abstract factory method:
 
@@ -39,6 +40,7 @@ Each factory must return a store that is empty at the start of the test. Some te
 - `TransactionContractTestCase::createOutboxStore()` returns an outbox store on the connection of the transaction. Without it, the tests of the outbox insert are skipped.
 - `TransactionContractTestCase::createDeadLetterStore()` returns a dead letter store on the connection of the transaction. Without it, the tests of the replay mark are skipped. The test of a mark and an outbox insert in one committed transaction needs both hooks.
 - `OutboxPublisherContractTestCase::assertDelivered()` checks that the records arrived on the transport. For example, the AMQP test reads them from a bound queue.
+- `DeadLetterSinkContractTestCase` has two abstract methods: `createSink()` returns a sink whose destination is empty, and `storedDeadLetters()` reads the destination back (a list of `DeadLetter`, in any order). A store returns `list()`. The AMQP test reads the dead letter queue with `basic.get` and decodes each message through `DeadLetterImporter` (the header `x-dead-letter`). The tests use texts below the cuts of 1024 and 16384 bytes.
 
 `OutboxStoreContractTestCase` has these cases for `abandon()` and `failing()`:
 

@@ -291,6 +291,21 @@ to confirm; a non-interactive session (no TTY) is refused outright rather
 than defaulting to "no" silently or "yes" dangerously. Always pass `--force`
 in scripted/scheduled purges.
 
+## The two destinations of a dead letter
+
+Each consumer writes its dead letters to one sink (`DeadLetter\DeadLetterSink`):
+
+- The `dead_letters` table (a `DeadLetterStore`, the default). The row is
+  there at once.
+- A queue of the transport (for AMQP, `AmqpDeadLetterSink`, see
+  [../amqp/DEAD_LETTERS.md](../amqp/DEAD_LETTERS.md)). The message waits in the
+  dead letter queue until `message-broker:dlq:import` moves it into the table
+  (case 1 below).
+
+The table is the store of record: the commands of this document read only the
+table. A message in a dead letter queue is a transport copy that waits for the
+import.
+
 ## Importing a dead letter queue of the transport
 
 The consumer writes its dead letters to the table. The transport can also move
@@ -353,6 +368,60 @@ stops at that message, and no later message is imported. The command error
 names the cause. Remove that message from the dead letter queue by hand (for
 RabbitMQ, with the management UI or `rabbitmqadmin`, after you copied it), and
 run the import again.
+
+### Case 1: a message of a queue sink
+
+Before the three cases above, the import reads the header `x-dead-letter`.
+When it decodes, the message came from a queue sink, and this case has
+priority over a move of the transport:
+
+- The row gets the `id`, `source`, message ID, message name, error class,
+  error message, error trace, attempts, `failed_at` and `replayable` of the
+  header, the body of the message, and the headers of the message without
+  `x-dead-letter`. It is equal to the dead letter that the sink got (with the
+  error texts cut, see below).
+- A repeat of the import (a stop before the ack) gives the same `id`. The
+  store, idempotent by `id`, changes nothing, also when the row is already
+  replayed, and the import acks the message.
+- When an open row of the same message ID and source already exists with a
+  different `id` (the consumer wrote to the table before a change of its
+  sink), that row keeps its `id`.
+- A header `x-dead-letter` that does not decode counts as absent: the message
+  goes to one of the three cases above, with a new `id`, and the error message
+  gets `; x-dead-letter header did not decode` after the text of the case.
+
+### The header `x-dead-letter`
+
+The header holds the error data of a dead letter as one JSON object (the core
+class `DeadLetter\DeadLetterHeader` encodes and decodes it; the name is
+`BrokerHeader::DEAD_LETTER`). One header fits the limit of 10 attributes of
+SQS too. Example:
+
+```
+x-dead-letter: {"id":"0190f7e2-1234-7000-8000-abc123456789","source":"orders_q","message_id":"m-1","message_name":"order.placed","error_class":"App\\PaymentDeclined","error_message":"card expired","error_trace":"#0 ...","attempts":5,"failed_at":1795219200123,"replayable":true}
+```
+
+| Key | JSON type | Value |
+| --- | --- | --- |
+| `id` | string (a UUID) | the `id` of the dead letter |
+| `source` | string | the work queue |
+| `message_id` | string | the message ID (also the fallback transport ID or `unknown-<UUID>` of a raw dead letter) |
+| `message_name` | string | the message name |
+| `error_class` | string | the error class |
+| `error_message` | string | the error message, cut to 1024 bytes |
+| `error_trace` | string | the error trace, cut to 16384 bytes |
+| `attempts` | integer | the attempt of the delivery |
+| `failed_at` | integer | epoch milliseconds |
+| `replayable` | boolean | the replayable mark |
+
+- The cut is at a UTF-8 character boundary, so the text stays valid UTF-8.
+  The row that the import writes holds the cut text.
+- A value that is not a JSON object, has a key that is absent or of the wrong
+  type, or has an `id` that is not a UUID does not decode. A key that the
+  decoder does not know is ignored: a new key is an addition, and a removal or
+  a type change of a key is a breaking change of the header.
+- A replay strips `x-dead-letter` from the new outbox row (see *Replay to one
+  consumer*).
 
 ## Dedup cleanup
 

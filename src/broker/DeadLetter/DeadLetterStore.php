@@ -16,19 +16,18 @@ use InvalidArgumentException;
  * The store holds at most one open row (not replayed) for one message id and
  * source. Each read and the delete take a {@see DeadLetterFilter}; an empty
  * filter matches every row.
+ *
+ * A store is the table sink of the consumers: it extends {@see DeadLetterSink}
+ * and keeps its store() method. store() is idempotent by id: when a row with
+ * the same id exists (open or replayed), nothing changes. Otherwise, when an
+ * open row of the same message id and source exists, that row keeps its id,
+ * source and message id and gets the message name, error class, error
+ * message, error trace, attempts, failed_at, body, headers and replayable mark
+ * of the new dead letter. With no open row, a new row with the id of the dead
+ * letter.
  */
-interface DeadLetterStore
+interface DeadLetterStore extends DeadLetterSink
 {
-    /**
-     * Idempotent by id: when a row with the same id exists (open or replayed),
-     * nothing changes. Otherwise, when an open row of the same message id and
-     * source exists, that row keeps its id, source and message id and gets the
-     * message name, error class, error message, error trace, attempts,
-     * failed_at, body, headers and replayable mark of the new dead letter.
-     * With no open row, a new row with the id of the dead letter.
-     */
-    public function store(DeadLetter $deadLetter): void;
-
     public function find(string $id): ?DeadLetter;
 
     /**

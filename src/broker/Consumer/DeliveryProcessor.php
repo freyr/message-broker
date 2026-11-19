@@ -7,7 +7,7 @@ namespace Freyr\MessageBroker\Consumer;
 use Freyr\MessageBroker\BrokerHeader;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterBuilder;
-use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
+use Freyr\MessageBroker\DeadLetter\DeadLetterSink;
 use Freyr\MessageBroker\ErrorHandler;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Retry\RetryAction;
@@ -43,11 +43,16 @@ use Throwable;
  *     → the error propagates; no ack, no attempt used
  *   dispatch exception → ROLLBACK → retryPolicy->decide(attempt) →
  *     retry  : control->retry() (delayed redelivery, confirmed), ack
- *     dlq    : dead_letters row, ack
+ *     dlq    : a dead letter through the sink, ack
  *     discard: ack
  *
  * The transport reaches the outcome through the DeliveryControl of the
  * delivery. Every path that returns normally has acked the delivery.
+ *
+ * Each dead letter goes to the one DeadLetterSink of the consumer: the
+ * dead_letters table (a DeadLetterStore) or a queue of the transport. A sink
+ * that throws gives no ack. The processor never rejects or nacks a delivery
+ * as a result of a handler failure.
  */
 final class DeliveryProcessor
 {
@@ -66,7 +71,7 @@ final class DeliveryProcessor
         private readonly Transaction $transaction,
         private readonly DeduplicationStore $deduplication,
         private readonly RetryPolicy $retryPolicy,
-        private readonly DeadLetterStore $deadLetters,
+        private readonly DeadLetterSink $deadLetters,
         private readonly string $name = 'default', // dedup scope
         private readonly ?ErrorHandler $errorHandler = null,
         private readonly LoggerInterface $logger = new NullLogger(),

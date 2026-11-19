@@ -23,6 +23,29 @@ ports and extends the contract test cases of the test kit (see
 | `Serializer\Deserializer` | Decode a delivery to an `IncomingMessage`. | `JsonDeserializer` (core) |
 | `Observability\BrokerEvents` | Receive the lifecycle events (see [PRODUCTION.md](PRODUCTION.md), *Observability*). | Your own class |
 | `ErrorHandler` | Receive each handled failure with its context. | Your own class |
+| `DeadLetter\DeadLetterSink` | Make a dead letter durable at the destination of a consumer (`store()`), the table or a queue of the transport. `DeadLetterStore` extends it. `DeliveryProcessor` takes a sink as `deadLetters`. | `PostgreSqlDeadLetterStore` (PostgreSQL adapter); `AmqpDeadLetterSink` (AMQP adapter); `InMemoryDeadLetterStore` (test kit) |
+
+`DeliveryControl` has no reject: the processor never rejects or nacks a
+delivery as a result of a handler failure. A dead letter goes through the sink,
+and a sink that throws leaves the delivery unacked.
+
+### The contract of `DeadLetterSink`
+
+- `store(DeadLetter $deadLetter): void` returns only when the dead letter is
+  durable at the destination; else it throws. The caller acks the delivery
+  only after `store()` returns.
+- A call that throws can still have made the dead letter durable (for example,
+  a confirm that arrives after the timeout). The caller then repeats the call;
+  the table absorbs the repeat by its upsert, and the import absorbs a second
+  queue message in the same way.
+- `store()` is idempotent by `id`. A queue sink cannot see its earlier
+  messages; the import applies the rule when it stores the message in the
+  table.
+- The `source`, message ID, message name, `failedAt`, attempts and
+  `replayable` reach the destination as given. A sink can cut the error
+  message to 1024 bytes and the error trace to 16384 bytes
+  (`AmqpDeadLetterSink` does). A store that holds an open row of the same
+  message ID and source keeps the `id` of that row.
 
 ### The methods of `DeadLetterStore`
 

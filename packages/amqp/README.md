@@ -60,6 +60,6 @@ $consumer = new AmqpConsumer(
 
 - [Transport](../../docs/amqp/TRANSPORT.md): routing, config classes, dedicated channel, publisher, topology
 - [Consumer](../../docs/amqp/CONSUMER.md): TTL wait queues, dead-letter exchange
-- [Dead letters](../../docs/amqp/DEAD_LETTERS.md): the import of a dead letter queue, the read of `x-death`, the permissions
+- [Dead letters](../../docs/amqp/DEAD_LETTERS.md): the queue sink (`AmqpDeadLetterSink`), the import of a dead letter queue, the read of `x-death`, the permissions
 - [Quickstart](../../docs/QUICKSTART.md): a complete example with all three packages
 - [Delivery processor and retry](../../docs/core/CONSUMER.md)
