@@ -663,10 +663,12 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
 
     public function testIdsAreOldestFirstAndThenByIdAscending(): void
     {
+        // One value for the two rows with the same time: two reads of the clock can differ by a millisecond.
+        $sameTime = self::at(-100);
         $rows = [
             $this->deadLetter(id: '01900000-0000-7000-8000-000000000003', failedAt: self::at(-300)),
-            $this->deadLetter(id: '01900000-0000-7000-8000-000000000002', failedAt: self::at(-100)),
-            $this->deadLetter(id: '01900000-0000-7000-8000-000000000001', failedAt: self::at(-100)),
+            $this->deadLetter(id: '01900000-0000-7000-8000-000000000002', failedAt: $sameTime),
+            $this->deadLetter(id: '01900000-0000-7000-8000-000000000001', failedAt: $sameTime),
         ];
         $this->storeAll(...$rows);
 
