@@ -24,6 +24,7 @@ use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Testing\OrderPlaced;
 use Freyr\MessageBroker\Testing\RecordingEvents;
+use Freyr\MessageBroker\Worker\WorkerLimits;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 
@@ -112,7 +113,7 @@ final class ParallelConsumptionTest extends AmqpFunctionalTestCase
      * process exits (closing its connection/channel) once its run finishes,
      * which is what returns any message the broker already pushed onto that
      * channel's prefetch buffer — but never got to hand off to the
-     * dispatcher before messageLimit was hit — back to the queue for the
+     * dispatcher before the message limit was hit — back to the queue for the
      * next worker. AmqpConsumer::run()'s own docblock documents this
      * requeue-on-close contract.
      */
@@ -154,9 +155,9 @@ final class ParallelConsumptionTest extends AmqpFunctionalTestCase
         // guarantee; what the library must prove is that a shared dedup
         // scope stays correct when more than one worker feeds it.)
         $this->consumer()
-            ->run(messageLimit: 2, idleTimeoutSec: 2);
+            ->run(new WorkerLimits(maxMessages: 2), idleTimeoutSec: 2);
         $this->consumer()
-            ->run(messageLimit: 2, idleTimeoutSec: 2);
+            ->run(new WorkerLimits(maxMessages: 2), idleTimeoutSec: 2);
 
         $dispatchedIds = array_map(static fn (IncomingMessage $m): string => $m->messageId, $this->dispatched);
         sort($dispatchedIds);
@@ -177,9 +178,9 @@ final class ParallelConsumptionTest extends AmqpFunctionalTestCase
 
         $events = new RecordingEvents();
         $this->consumer()
-            ->run(messageLimit: 1, idleTimeoutSec: 2);          // worker A dispatches
+            ->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 2);          // worker A dispatches
         $this->consumer($events)
-            ->run(messageLimit: 1, idleTimeoutSec: 2);   // worker B gets the duplicate
+            ->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 2);   // worker B gets the duplicate
 
         self::assertCount(1, $this->dispatched, 'the duplicate must not dispatch');
         self::assertContains('message.deduplicated', $events->names(), 'worker B absorbed it via dedup');

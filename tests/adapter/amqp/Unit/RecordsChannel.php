@@ -75,6 +75,12 @@ trait RecordsChannel
 
     private ?\Closure $callback = null;
 
+    /** Runs inside basic_consume, after the consumer started its run (for example to move a MockClock). */
+    private ?\Closure $onConsume = null;
+
+    /** Runs at the start of each wait, before the delivery or the timeout. */
+    private ?\Closure $onWait = null;
+
     private AMQPChannel&Stub $channel;
 
     private function setUpChannel(): void
@@ -93,6 +99,9 @@ trait RecordsChannel
                 }
             }
             $this->consumedQueue = (string) ($args[0] ?? '');
+            if ($this->onConsume !== null) {
+                ($this->onConsume)();
+            }
 
             return 'ctag';
         });
@@ -101,6 +110,9 @@ trait RecordsChannel
         );
         $this->channel->method('wait')->willReturnCallback(function (...$args) {
             $this->waitTimeouts[] = $args;
+            if ($this->onWait !== null) {
+                ($this->onWait)();
+            }
             $this->failIfConfigured('wait');
             if ($this->pending === []) {
                 throw new AMQPTimeoutException('idle');

@@ -18,6 +18,7 @@ use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Testing\RecordingLogger;
 use Freyr\MessageBroker\Time\EpochMillis;
+use Freyr\MessageBroker\Worker\WorkerLimits;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
@@ -159,7 +160,7 @@ final class AmqpConsumerTest extends AmqpFunctionalTestCase
 
         $logger = new RecordingLogger();
         try {
-            $this->consumer(pdo: $pdo, logger: $logger)->run(messageLimit: 1, idleTimeoutSec: 2);
+            $this->consumer(pdo: $pdo, logger: $logger)->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 2);
             self::fail('a database failure must stop the consumer');
         } catch (\PDOException) {
         }
@@ -185,7 +186,7 @@ final class AmqpConsumerTest extends AmqpFunctionalTestCase
         $this->publish($body, $meta);
 
         $this->consumer()
-            ->run(messageLimit: 1, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 10);
 
         self::assertCount(1, $this->dispatched);
         $incoming = $this->dispatched[0];
@@ -208,7 +209,7 @@ final class AmqpConsumerTest extends AmqpFunctionalTestCase
         $this->publish($body, $meta);
 
         $this->consumer()
-            ->run(messageLimit: 2, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 2), idleTimeoutSec: 10);
 
         self::assertCount(1, $this->dispatched, 'second delivery of the same message id must be skipped');
     }
@@ -218,7 +219,7 @@ final class AmqpConsumerTest extends AmqpFunctionalTestCase
         $this->publish('{{{not json', $this->message('m-bad')[1], messageId: 'm-bad');
 
         $this->consumer()
-            ->run(messageLimit: 1, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 10);
 
         self::assertCount(0, $this->dispatched);
         self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM dead_letters'));
@@ -238,7 +239,7 @@ final class AmqpConsumerTest extends AmqpFunctionalTestCase
         $this->publish($body, $meta);
 
         $this->consumer(maxAttempts: 1)
-            ->run(messageLimit: 1, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 10);
 
         self::assertCount(0, $this->dispatched);
         self::assertSame(
@@ -261,7 +262,7 @@ final class AmqpConsumerTest extends AmqpFunctionalTestCase
         // maxAttempts=2, backoff fixed at 100ms: attempt 1 → wait queue →
         // redelivered after TTL → attempt 2 → exhausted → DLQ.
         $this->consumer(maxAttempts: 2)
-            ->run(messageLimit: 2, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 2), idleTimeoutSec: 10);
 
         self::assertSame(2, $attempts, 'handler must be attempted exactly maxAttempts times');
         self::assertCount(0, $this->dispatched);

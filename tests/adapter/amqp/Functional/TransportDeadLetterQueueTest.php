@@ -29,6 +29,7 @@ use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Testing\InMemoryOutboxStore;
+use Freyr\MessageBroker\Worker\WorkerLimits;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Exception\AMQPTimeoutException;
@@ -358,7 +359,7 @@ final class TransportDeadLetterQueueTest extends AmqpFunctionalTestCase
             ),
         );
 
-        $consumer->run(messageLimit: 1, idleTimeoutSec: 2);
+        $consumer->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 2);
 
         $channel = self::$amqp->channel();
         $returned = null;
