@@ -16,8 +16,9 @@ $application->add(new SetupSchemaCommand(new PostgreSqlSchemaInstaller($pdo)));
 Commands are then run through your application's own console entry point
 (commonly `bin/console`), e.g. `php bin/console message-broker:setup:schema`.
 
-Duration options (`--since`, `--older-than`) share one format:
-`<number><s|m|h|d>`, e.g. `30s`, `15m`, `24h`, `7d`.
+A duration has one format: `<number><s|m|h|d>`, e.g. `30s`, `15m`, `24h`, `7d`.
+`--older-than` takes a duration only. `--since` and `--until` take a duration
+or an ISO 8601 date-time with an offset or `Z`.
 
 ## `message-broker:setup:schema`
 
