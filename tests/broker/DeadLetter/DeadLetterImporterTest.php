@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\DeadLetter;
 
+use Freyr\MessageBroker\BrokerHeader;
 use Freyr\MessageBroker\Consumer\Delivery;
 use Freyr\MessageBroker\Consumer\DeliveryLimitExceeded;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterBuilder;
 use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterHeader;
 use Freyr\MessageBroker\DeadLetter\DeadLetterImporter;
 use Freyr\MessageBroker\DeadLetter\MovedByTransport;
 use Freyr\MessageBroker\DeadLetter\TransportMove;
@@ -17,6 +19,7 @@ use Freyr\MessageBroker\Serializer\MalformedMessage;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Testing\InMemoryDeadLetterStore;
 use Freyr\MessageBroker\Time\EpochMillis;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\Clock;
 use Symfony\Component\Clock\MockClock;
@@ -24,12 +27,15 @@ use Symfony\Component\Clock\NativeClock;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * The import of one message of a dead letter queue into the store: case 2 (a
- * broker move, the message deserializes), case 3 (a broker move, the message
- * does not deserialize) and case 4 (no broker move).
+ * The import of one message of a dead letter queue into the store: case 1 (a
+ * valid header x-dead-letter), case 2 (a broker move, the message
+ * deserializes), case 3 (a broker move, the message does not deserialize) and
+ * case 4 (no broker move).
  */
 final class DeadLetterImporterTest extends TestCase
 {
+    private const string SINK_ID = '0190f7e2-1234-7000-8000-abc123456789';
+
     private const string WORK_QUEUE = 'orders_q';
 
     private const string DEAD_LETTER_QUEUE = 'orders_q.dlq';
@@ -277,5 +283,181 @@ final class DeadLetterImporterTest extends TestCase
         self::assertCount(1, $this->rows());
         self::assertSame($firstId, $this->rows()[0]->id, 'the open row keeps its id');
         self::assertSame(3, $this->rows()[0]->attempts, 'the data of the second import');
+    }
+
+    // case 1: a valid header x-dead-letter
+
+    private static function sinkDeadLetter(
+        string $body = '{"metadata":{"message_id":"m-1"},"payload":{}}',
+        bool $replayable = true,
+    ): DeadLetter {
+        return new DeadLetter(
+            id: self::SINK_ID,
+            source: self::WORK_QUEUE,
+            messageId: 'm-1',
+            messageName: 'order.placed',
+            body: $body,
+            headers: [
+                'x-custom' => 'h',
+                'x-attempt' => 5,
+            ],
+            errorClass: 'App\PaymentDeclined',
+            errorMessage: 'card expired',
+            errorTrace: '#0 trace-line',
+            attempts: 5,
+            failedAt: 1_795_219_000_456,
+            replayable: $replayable,
+        );
+    }
+
+    /**
+     * A message that the sink published: the headers of the dead letter plus x-dead-letter.
+     *
+     * @param array<string, mixed> $extraHeaders
+     */
+    private static function sinkDelivery(DeadLetter $deadLetter, array $extraHeaders = []): Delivery
+    {
+        return new Delivery(
+            $deadLetter->body,
+            $deadLetter->headers + $extraHeaders + [
+                BrokerHeader::DEAD_LETTER => DeadLetterHeader::encode($deadLetter),
+            ],
+            1,
+            self::DEAD_LETTER_QUEUE,
+            null,
+            0,
+        );
+    }
+
+    public function testAValidHeaderKeepsTheIdAndEachFieldAndRemovesOnlyTheHeader(): void
+    {
+        $returned = $this->importer->import(self::sinkDelivery(self::sinkDeadLetter()));
+
+        self::assertCount(1, $this->rows());
+        $row = $this->rows()[0];
+        self::assertSame($returned, $row, 'import() returns the dead letter that it stored');
+        self::assertSame(self::SINK_ID, $row->id);
+        self::assertSame(self::WORK_QUEUE, $row->source);
+        self::assertSame('m-1', $row->messageId);
+        self::assertSame('order.placed', $row->messageName);
+        self::assertSame('{"metadata":{"message_id":"m-1"},"payload":{}}', $row->body);
+        self::assertSame([
+            'x-custom' => 'h',
+            'x-attempt' => 5,
+        ], $row->headers, 'only x-dead-letter is removed');
+        self::assertSame('App\PaymentDeclined', $row->errorClass);
+        self::assertSame('card expired', $row->errorMessage);
+        self::assertSame('#0 trace-line', $row->errorTrace);
+        self::assertSame(5, $row->attempts);
+        self::assertSame(1_795_219_000_456, $row->failedAt);
+        self::assertNull($row->replayedAt);
+        self::assertTrue($row->replayable);
+    }
+
+    public function testAValidHeaderKeepsTheRawBytesAndTheMarkThatIsNotReplayable(): void
+    {
+        $this->importer->import(self::sinkDelivery(self::sinkDeadLetter(body: "raw\xffbytes", replayable: false)));
+
+        $row = $this->rows()[0];
+        self::assertSame("raw\xffbytes", $row->body);
+        self::assertFalse($row->replayable);
+    }
+
+    public function testAValidHeaderHasPriorityOverAMove(): void
+    {
+        $copiedDeath = [[
+            'queue' => 'orders_q.wait.1000',
+            'reason' => 'expired',
+            'count' => 1,
+        ]];
+
+        $this->importer->import(
+            self::sinkDelivery(self::sinkDeadLetter(), [
+                'x-death' => $copiedDeath,
+            ]),
+            self::move(),
+        );
+
+        $row = $this->rows()[0];
+        self::assertSame(self::SINK_ID, $row->id);
+        self::assertSame('App\PaymentDeclined', $row->errorClass);
+        self::assertSame(1_795_219_000_456, $row->failedAt);
+        self::assertSame($copiedDeath, $row->headers['x-death'], 'the other headers stay');
+        self::assertArrayNotHasKey(BrokerHeader::DEAD_LETTER, $row->headers);
+    }
+
+    /** @return iterable<string, array{mixed}> */
+    public static function headersThatDoNotDecode(): iterable
+    {
+        $valid = json_decode(DeadLetterHeader::encode(self::sinkDeadLetter()), true);
+        self::assertIsArray($valid);
+        $valid['id'] = 'not-a-uuid';
+
+        yield 'an id that is not a UUID' => [(string) json_encode($valid)];
+        yield 'invalid JSON' => ['{"id":'];
+        yield 'not a string' => [[
+            'id' => self::SINK_ID,
+        ]];
+    }
+
+    #[DataProvider('headersThatDoNotDecode')]
+    public function testAHeaderThatDoesNotDecodeFallsBackToTheMoveWithANewId(mixed $header): void
+    {
+        $delivery = self::delivery(self::xDeath() + [
+            BrokerHeader::DEAD_LETTER => $header,
+        ]);
+
+        $this->importer->import($delivery, self::move());
+
+        self::assertCount(1, $this->rows());
+        $row = $this->rows()[0];
+        self::assertNotSame(self::SINK_ID, $row->id, 'a new id');
+        self::assertTrue(Uuid::isValid($row->id));
+        self::assertSame(self::WORK_QUEUE, $row->source);
+        self::assertSame('m-1', $row->messageId);
+        self::assertSame(DeliveryLimitExceeded::class, $row->errorClass);
+        self::assertSame(
+            "Moved by the transport: reason 'delivery_limit', queue 'orders_q', count 1; x-dead-letter header did not decode",
+            $row->errorMessage,
+        );
+        self::assertSame('', $row->errorTrace);
+        self::assertSame(2, $row->attempts);
+        self::assertSame(self::MOVED_AT, $row->failedAt);
+        self::assertTrue($row->replayable);
+        self::assertSame($delivery->headers, $row->headers, 'case 2 keeps all message headers');
+    }
+
+    public function testAHeaderThatDoesNotDecodeWithNoMoveGivesCase4WithTheText(): void
+    {
+        $delivery = self::delivery([
+            BrokerHeader::DEAD_LETTER => 'garbage',
+        ], body: 'raw');
+
+        $this->importer->import($delivery);
+
+        $row = $this->rows()[0];
+        self::assertSame(self::DEAD_LETTER_QUEUE, $row->source);
+        self::assertSame(MovedByTransport::class, $row->errorClass);
+        self::assertSame(
+            "Moved by the transport: reason 'unknown', queue 'orders_q.dlq'; x-dead-letter header did not decode;"
+            .' the body did not deserialize: '.self::deserializerError($delivery),
+            $row->errorMessage,
+        );
+        self::assertFalse($row->replayable);
+    }
+
+    public function testASecondImportOfACase1MessageWhoseRowIsReplayedChangesNothing(): void
+    {
+        $deadLetter = self::sinkDeadLetter();
+        $this->importer->import(self::sinkDelivery($deadLetter));
+        self::assertTrue($this->store->markReplayed(self::SINK_ID));
+        $replayed = $this->store->find(self::SINK_ID);
+        self::assertNotNull($replayed?->replayedAt);
+
+        $returned = $this->importer->import(self::sinkDelivery($deadLetter));
+
+        self::assertSame(self::SINK_ID, $returned->id);
+        self::assertCount(1, $this->store->list(new DeadLetterFilter()), 'no new row');
+        self::assertEquals($replayed, $this->store->find(self::SINK_ID), 'the replayed row is unchanged');
     }
 }
