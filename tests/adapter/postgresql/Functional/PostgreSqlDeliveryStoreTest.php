@@ -371,6 +371,84 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
         self::assertSame([$secondLetter->id], array_map(static fn (DeadLetter $d): string => $d->id, $open));
     }
 
+    public function testAnAbandonSkipsARowThatADifferentSessionLocks(): void
+    {
+        $locked = $this->record(createdAt: EpochMillis::now() - 50_000);
+        $free = $this->record(lane: 'store_other', createdAt: EpochMillis::now() - 50_000);
+        $this->store->insert([$locked, $free]);
+        $rival = self::newConnection();
+        $rival->exec("SET lock_timeout = '2s'");
+        self::$pdo->exec("SET lock_timeout = '2s'");
+
+        // The claim of the rival runs inside its open transaction, so it holds the row lock.
+        $rival->beginTransaction();
+        (new PostgreSqlDeliveryStore($rival))->claim([self::LANE], 10, 10, self::LEASE_MS);
+        $first = $this->store->abandon(EpochMillis::now(), null, 10);
+        $rival->commit();
+        self::$pdo->exec('RESET lock_timeout');
+
+        self::assertSame(1, $first, 'the locked row is skipped, with no wait');
+        self::assertTrue($this->rowState($free->id)['completed']);
+        self::assertFalse($this->rowState($locked->id)['completed']);
+        self::assertSame(1, $this->store->abandon(EpochMillis::now(), null, 10), 'after the commit of the rival, its leased row is abandoned');
+        self::assertSame(0, $this->store->abandon(EpochMillis::now(), null, 10));
+    }
+
+    public function testAnAbandonStoresTheFinalStateDeadAndKeepsTheAttemptsAndTheAvailableAt(): void
+    {
+        $availableAt = intdiv(EpochMillis::now(), 1000) * 1000 + 60_789;
+        $row = new DeliveryRecord(
+            id: self::newId(),
+            messageId: self::newId(),
+            lane: self::LANE,
+            messageName: 'order.placed',
+            body: '{}',
+            headers: [],
+            createdAt: EpochMillis::now() - 50_000,
+            attempts: 4,
+            availableAt: $availableAt,
+        );
+        $this->store->insert([$row]);
+
+        self::assertSame(1, $this->store->abandon(EpochMillis::now(), [self::LANE, self::LANE], 10));
+
+        self::assertSame(
+            [
+                'outcome' => 2,
+                'attempts' => 4,
+                'completed' => true,
+                'available_at' => $availableAt,
+            ],
+            $this->rowState($row->id),
+        );
+    }
+
+    public function testTheDeadLetterInsertAndTheFinalStatesOfAnAbandonRollBackTogether(): void
+    {
+        $first = $this->record(createdAt: EpochMillis::now() - 50_000);
+        $second = $this->record(createdAt: EpochMillis::now() - 40_000);
+        $this->store->insert([$first, $second]);
+        // The second dead letter insert fails in the database.
+        self::$pdo->exec(
+            "ALTER TABLE dead_letters ADD CONSTRAINT test_abandon_fails CHECK (message_id <> '{$second->messageId}') NOT VALID",
+        );
+
+        try {
+            $this->store->abandon(EpochMillis::now(), null, 10);
+            self::fail('the failed insert must propagate');
+        } catch (PDOException $error) {
+            self::assertStringContainsString('test_abandon_fails', $error->getMessage());
+        } finally {
+            self::$pdo->exec('ALTER TABLE dead_letters DROP CONSTRAINT IF EXISTS test_abandon_fails');
+        }
+
+        self::assertFalse(self::$pdo->inTransaction(), 'the transaction is rolled back');
+        self::assertFalse($this->rowState($first->id)['completed']);
+        self::assertFalse($this->rowState($second->id)['completed']);
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM dead_letters'));
+        self::assertSame(2, $this->store->abandon(EpochMillis::now(), null, 10), 'the connection works');
+    }
+
     /** @return list<string> the lanes: "busy" with 10,000 due rows, and 19 lanes with 2 due rows each */
     private function insertTwentyLanesWithOneBacklog(): array
     {

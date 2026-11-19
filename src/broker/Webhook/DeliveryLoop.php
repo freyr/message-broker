@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Webhook;
 
-use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\IdleSleep;
 use Freyr\MessageBroker\Time\EpochMillis;
@@ -14,7 +13,6 @@ use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Random\Randomizer;
-use Symfony\Component\Uid\Uuid;
 use UnexpectedValueException;
 
 /**
@@ -48,9 +46,9 @@ use UnexpectedValueException;
  */
 final class DeliveryLoop
 {
-    public const string SOURCE_PREFIX = 'webhook:';
-    public const string REASON_FAILED = 'failed';
-    public const string REASON_REFUSED = 'refused';
+    public const string SOURCE_PREFIX = DeliveryDeadLetter::SOURCE_PREFIX;
+    public const string REASON_FAILED = DeliveryDeadLetter::REASON_FAILED;
+    public const string REASON_REFUSED = DeliveryDeadLetter::REASON_REFUSED;
 
     private bool $shouldStop = false;
 
@@ -245,30 +243,13 @@ final class DeliveryLoop
         $message = $refused ? "{$result->reasonCode}: {$result->text}" : $result->text;
 
         return [
-            DeliveryCompletion::dead($claimed, $this->deadLetter($record, $reason, $message, $attempts)),
+            DeliveryCompletion::dead($claimed, DeliveryDeadLetter::of($record, $reason, $message, $attempts, EpochMillis::now())),
             [BrokerEvents::WEBHOOK_DEAD_LETTERED, self::context($record) + [
                 'attempts' => $attempts,
                 'reason' => $reason,
                 'reason_code' => $result->reasonCode,
             ]],
         ];
-    }
-
-    private function deadLetter(DeliveryRecord $record, string $reason, string $message, int $attempts): DeadLetter
-    {
-        return new DeadLetter(
-            id: Uuid::v7()->toString(),
-            source: self::SOURCE_PREFIX.$record->lane,
-            messageId: $record->messageId,
-            messageName: $record->messageName,
-            body: $record->body,
-            headers: $record->headers,
-            errorClass: $reason,
-            errorMessage: $message,
-            errorTrace: '',
-            attempts: $attempts,
-            failedAt: EpochMillis::now(),
-        );
     }
 
     /** @return array{lane: string, message_id: string, delivery_id: string} */

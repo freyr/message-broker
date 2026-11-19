@@ -57,4 +57,9 @@ final class FailingDeliveryStore implements DeliveryStore
 
         return $this->inner->complete($outcomes);
     }
+
+    public function abandon(int $before, ?array $lanes, int $limit): int
+    {
+        return $this->inner->abandon($before, $lanes, $limit);
+    }
 }

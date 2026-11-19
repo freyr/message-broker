@@ -43,6 +43,7 @@ abstract class DeliveryStoreContractTestCase extends TestCase
 
     private const string LANE = 'contract';
     private const string OTHER_LANE = 'contract_other';
+    private const string THIRD_LANE = 'contract_third';
     private const int LEASE_MS = 60_000;
 
     private ?DeliveryStore $store = null;
@@ -354,6 +355,160 @@ abstract class DeliveryStoreContractTestCase extends TestCase
         self::assertCount(1, $rows, 'the open row rule: one open row for each message ID and source');
         self::assertSame($first->id, $rows[0]->id, 'the open row keeps its first id');
         self::assertSame(5, $rows[0]->attempts, 'and gets the data of the second dead letter');
+    }
+
+    public function testAnAbandonMovesOnlyTheUnfinishedRowsBeforeTheDateOfTheGivenLanesAndReturnsTheirNumber(): void
+    {
+        $now = EpochMillis::now();
+        $before = $now - 30_000;
+        $old = $this->record(createdAt: $now - 50_000);
+        $oldOtherLane = $this->record(lane: self::OTHER_LANE, createdAt: $now - 40_000);
+        $oldNotGiven = $this->record(lane: self::THIRD_LANE, createdAt: $now - 50_000);
+        $atTheDate = $this->record(createdAt: $before);
+        $justBefore = $this->record(createdAt: $before - 1);
+        $young = $this->record(createdAt: $now - 5_000);
+        $oldFinished = $this->record(createdAt: $now - 50_000);
+        $this->store()->insert([$old, $oldOtherLane, $oldNotGiven, $atTheDate, $justBefore, $young, $oldFinished]);
+        $finished = self::byId($this->store()->claim([self::LANE], 10, 10, 0), [$oldFinished->id]);
+        $this->store()->complete([DeliveryCompletion::delivered($finished[0])]);
+
+        $count = $this->store()->abandon($before, [self::LANE, self::OTHER_LANE], 10);
+
+        self::assertSame(3, $count, 'created_at at the date is not earlier than it');
+        self::assertEqualsCanonicalizing(
+            [$oldNotGiven->id, $atTheDate->id, $young->id],
+            self::claimedIds($this->store()->claim([self::LANE, self::OTHER_LANE, self::THIRD_LANE], 10, 10, self::LEASE_MS)),
+            'the other rows stay unfinished and due',
+        );
+        self::assertEqualsCanonicalizing(
+            [$old->messageId, $oldOtherLane->messageId, $justBefore->messageId],
+            array_map(static fn (DeadLetter $d): string => $d->messageId, $this->deadLetterStore()->list(new DeadLetterFilter())),
+            'one dead letter for each abandoned row, none for the finished row',
+        );
+    }
+
+    public function testAnAbandonWithNoLaneListTakesTheRowsOfAllLanes(): void
+    {
+        $now = EpochMillis::now();
+        $rows = [
+            $this->record(createdAt: $now - 50_000),
+            $this->record(lane: self::OTHER_LANE, createdAt: $now - 50_000),
+            $this->record(lane: self::THIRD_LANE, createdAt: $now - 50_000),
+        ];
+        $young = $this->record(createdAt: $now - 5_000);
+        $this->store()->insert([...$rows, $young]);
+
+        self::assertSame(3, $this->store()->abandon($now - 30_000, null, 10));
+
+        self::assertSame([$young->id], self::claimedIds($this->store()->claim([self::LANE, self::OTHER_LANE, self::THIRD_LANE], 10, 10, self::LEASE_MS)));
+    }
+
+    public function testAnAbandonWithAnEmptyLaneListTakesNothing(): void
+    {
+        $row = $this->record(createdAt: EpochMillis::now() - 50_000);
+        $this->store()->insert([$row]);
+
+        self::assertSame(0, $this->store()->abandon(EpochMillis::now(), [], 10));
+
+        self::assertSame([$row->id], self::claimedIds($this->claim()));
+    }
+
+    public function testAnAbandonKeepsTheLimitAndAFinishedRowIsNotAbandonedAgain(): void
+    {
+        $now = EpochMillis::now();
+        $this->store()->insert([
+            $this->record(createdAt: $now - 50_000),
+            $this->record(createdAt: $now - 45_000),
+            $this->record(lane: self::OTHER_LANE, createdAt: $now - 40_000),
+        ]);
+
+        self::assertSame(2, $this->store()->abandon($now, null, 2));
+        self::assertSame(1, $this->store()->abandon($now, null, 2));
+        self::assertSame(0, $this->store()->abandon($now, null, 2));
+
+        self::assertSame(3, $this->deadLetterStore()->count(new DeadLetterFilter()));
+        self::assertSame([], $this->claim([self::LANE, self::OTHER_LANE]));
+    }
+
+    public function testTheDeadLetterOfAnAbandonedRowHasTheErrorClassAbandonedAndTheSourceOfItsLane(): void
+    {
+        $now = EpochMillis::now();
+        $row = new DeliveryRecord(
+            id: self::newId(),
+            messageId: self::newId(),
+            lane: self::OTHER_LANE,
+            messageName: 'order.placed',
+            body: "\x00raw{\"order_id\":\"o-1\"}",
+            headers: [
+                'correlation_id' => 'c-7',
+            ],
+            createdAt: $now - 50_000,
+            attempts: 3,
+        );
+        $this->store()->insert([$row]);
+        $before = intdiv($now, 1000) * 1000 - 10_000 + 456;
+
+        $start = EpochMillis::now();
+        $this->store()->abandon($before, [self::OTHER_LANE], 10);
+        $end = EpochMillis::now();
+
+        $all = $this->deadLetterStore()->list(new DeadLetterFilter());
+        self::assertCount(1, $all);
+        $deadLetter = $all[0];
+        self::assertSame('webhook:'.self::OTHER_LANE, $deadLetter->source);
+        self::assertSame($row->messageId, $deadLetter->messageId);
+        self::assertSame('order.placed', $deadLetter->messageName);
+        self::assertSame($row->body, $deadLetter->body);
+        self::assertSame($row->headers, $deadLetter->headers);
+        self::assertSame('abandoned', $deadLetter->errorClass);
+        self::assertSame(
+            'Abandoned by an operator: created before '.EpochMillis::toDateTime($before)->format('Y-m-d H:i:s.v').' UTC',
+            $deadLetter->errorMessage,
+        );
+        self::assertSame('', $deadLetter->errorTrace);
+        self::assertSame(3, $deadLetter->attempts, 'the attempts of the row: an abandon sends no request');
+        self::assertGreaterThanOrEqual($start - self::CLOCK_TOLERANCE_MS, $deadLetter->failedAt);
+        self::assertLessThanOrEqual($end + self::CLOCK_TOLERANCE_MS, $deadLetter->failedAt);
+        self::assertTrue($deadLetter->replayable);
+        self::assertNull($deadLetter->replayedAt);
+    }
+
+    public function testTwoAbandonedRowsOfOneMessageInOneLaneHaveOneOpenDeadLetter(): void
+    {
+        $now = EpochMillis::now();
+        $messageId = self::newId();
+        $this->store()->insert([
+            $this->record(messageId: $messageId, createdAt: $now - 50_000),
+            $this->record(messageId: $messageId, createdAt: $now - 40_000),
+            $this->record(lane: self::OTHER_LANE, messageId: $messageId, createdAt: $now - 40_000),
+        ]);
+
+        self::assertSame(3, $this->store()->abandon($now, null, 10));
+
+        self::assertEqualsCanonicalizing(
+            ['webhook:'.self::LANE, 'webhook:'.self::OTHER_LANE],
+            array_map(static fn (DeadLetter $d): string => $d->source, $this->deadLetterStore()->list(new DeadLetterFilter(messageId: $messageId))),
+            'the open row rule: one open row for each message ID and source',
+        );
+    }
+
+    public function testALeasedRowIsAbandonedAndTheLateResultOfItsWorkerChangesNothing(): void
+    {
+        $row = $this->record(createdAt: EpochMillis::now() - 50_000);
+        $this->store()->insert([$row]);
+        $leased = $this->claim()[0];
+
+        self::assertSame(1, $this->store()->abandon(EpochMillis::now(), [self::LANE], 10), 'a lease does not protect a row from the abandon');
+
+        self::assertSame([], $this->store()->complete([DeliveryCompletion::delivered($leased)]), 'the lease check: the row is finished');
+        self::assertSame([], $this->store()->complete([
+            DeliveryCompletion::retry($leased, EpochMillis::now() - 1_000),
+            DeliveryCompletion::dead($leased, $this->deadLetter($leased)),
+        ]));
+        self::assertSame([], $this->store()->claim([self::LANE], 10, 10, 0), 'the row stays finished');
+        $all = $this->deadLetterStore()->list(new DeadLetterFilter());
+        self::assertCount(1, $all);
+        self::assertSame('abandoned', $all[0]->errorClass, 'only the dead letter of the abandon');
     }
 
     protected function store(): DeliveryStore

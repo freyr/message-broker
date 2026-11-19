@@ -73,4 +73,29 @@ interface DeliveryStore
      * @return list<string> the ids of the rows that this call changed (the rows that passed the lease check)
      */
     public function complete(array $outcomes): array;
+
+    /**
+     * Abandon old rows, for an operator: at most $limit unfinished rows with
+     * created_at earlier than $before, of the given lanes (null: of all
+     * lanes; an empty list: of no lane), in no defined order. Each row gets
+     * its dead letter ({@see DeliveryDeadLetter::abandoned()}: error class
+     * `abandoned`, source `webhook:<lane>`) and the final state dead with
+     * completed_at, in one transaction of the store. The dead letter follows
+     * the open row rule, as in complete(). When the transaction fails,
+     * nothing is written and the error propagates.
+     *
+     * A lease does not protect a row: a leased row is abandoned too, and the
+     * later complete() of its worker changes nothing (the row is finished).
+     * Concurrent writers skip the rows of each other: a row that a different
+     * session locks at this time is skipped (for a database: FOR UPDATE SKIP
+     * LOCKED), so a call can return fewer than $limit rows while more are
+     * left. Call it again until it returns 0.
+     *
+     * @param int $before epoch milliseconds: a row whose created_at is earlier is abandoned
+     * @param list<string>|null $lanes the lanes to abandon rows of; null = all lanes
+     * @param int $limit the most rows of this call
+     *
+     * @return int the number of rows that this call abandoned
+     */
+    public function abandon(int $before, ?array $lanes, int $limit): int;
 }

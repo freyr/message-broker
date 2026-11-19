@@ -7,6 +7,7 @@ namespace Freyr\MessageBroker\Testing;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Webhook\ClaimedDelivery;
 use Freyr\MessageBroker\Webhook\DeliveryCompletionKind;
+use Freyr\MessageBroker\Webhook\DeliveryDeadLetter;
 use Freyr\MessageBroker\Webhook\DeliveryRecord;
 use Freyr\MessageBroker\Webhook\DeliveryStore;
 use LogicException;
@@ -14,8 +15,9 @@ use LogicException;
 /**
  * In-memory delivery store that implements the contract of
  * {@see DeliveryStore}: the claim with a lease (available_at = now + lease),
- * the row limit for each lane and the total, and the lease check of
- * complete(). The dead letters of complete() go to an
+ * the row limit for each lane and the total, the lease check of complete(),
+ * and the abandon of old rows. The dead letters of complete() and abandon()
+ * go to an
  * {@see InMemoryDeadLetterStore} through store(), which keeps one open row
  * for each pair of message ID and source.
  *
@@ -116,7 +118,26 @@ final class InMemoryDeliveryStore implements DeliveryStore, TransactionParticipa
         return $changed;
     }
 
-    /** The dead letter store that complete() writes to. */
+    public function abandon(int $before, ?array $lanes, int $limit): int
+    {
+        $now = EpochMillis::now();
+        $count = 0;
+        foreach ($this->rows as $row) {
+            if ($count >= $limit) {
+                break;
+            }
+            if (isset($this->finished[$row->id]) || $row->createdAt >= $before || ($lanes !== null && !in_array($row->lane, $lanes, true))) {
+                continue;
+            }
+            $this->deadLetters->store(DeliveryDeadLetter::abandoned($row, $before, $now));
+            $this->finished[$row->id] = DeliveryCompletionKind::Dead;
+            ++$count;
+        }
+
+        return $count;
+    }
+
+    /** The dead letter store that complete() and abandon() write to. */
     public function deadLetters(): InMemoryDeadLetterStore
     {
         return $this->deadLetters;
