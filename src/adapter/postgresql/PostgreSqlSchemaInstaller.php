@@ -103,7 +103,8 @@ final readonly class PostgreSqlSchemaInstaller implements SchemaInstaller
                     error_trace TEXT NOT NULL,
                     attempts INTEGER NOT NULL DEFAULT 0,
                     failed_at TIMESTAMP(3) NOT NULL,
-                    replayed_at TIMESTAMP(3) NULL
+                    replayed_at TIMESTAMP(3) NULL,
+                    replayable BOOLEAN NOT NULL DEFAULT TRUE
                 )
                 SQL,
         ];

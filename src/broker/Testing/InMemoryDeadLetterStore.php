@@ -91,6 +91,7 @@ final class InMemoryDeadLetterStore implements DeadLetterStore, TransactionParti
             $item->attempts,
             $item->failedAt,
             EpochMillis::now(),
+            $item->replayable,
         );
     }
 

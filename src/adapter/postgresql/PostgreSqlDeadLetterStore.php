@@ -27,10 +27,10 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
         $statement = $this->pdo->prepare(<<<'SQL'
             INSERT INTO dead_letters
                 (id, source, message_id, message_name, body, headers, error_class, error_message, error_trace,
-                 attempts, failed_at, replayed_at)
+                 attempts, failed_at, replayed_at, replayable)
             VALUES
                 (:id, :source, :message_id, :message_name, :body, :headers, :error_class, :error_message, :error_trace,
-                 :attempts, :failed_at, NULL)
+                 :attempts, :failed_at, NULL, :replayable)
             SQL);
         $statement->bindValue('id', $deadLetter->id);
         $statement->bindValue('source', $deadLetter->source);
@@ -46,6 +46,7 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
             'failed_at',
             EpochMillis::toDateTime($deadLetter->failedAt)->format(self::DATETIME_FORMAT),
         );
+        $statement->bindValue('replayable', $deadLetter->replayable, PDO::PARAM_BOOL);
         $statement->execute();
     }
 
@@ -226,6 +227,7 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
             replayedAt: isset($row['replayed_at']) && is_string($row['replayed_at'])
                 ? self::epochMilliseconds($row['replayed_at'])
                 : null,
+            replayable: self::bool($row, 'replayable'),
         );
     }
 
@@ -238,6 +240,17 @@ final readonly class PostgreSqlDeadLetterStore implements DeadLetterStore
         }
         if (!is_string($value)) {
             throw new \RuntimeException("Dead letter column '{$column}' is not a string");
+        }
+
+        return $value;
+    }
+
+    /** @param array<string, mixed> $row */
+    private static function bool(array $row, string $column): bool
+    {
+        $value = $row[$column] ?? null;
+        if (!is_bool($value)) {
+            throw new \RuntimeException("Dead letter column '{$column}' is not a boolean");
         }
 
         return $value;

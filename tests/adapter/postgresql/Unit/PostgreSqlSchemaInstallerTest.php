@@ -32,6 +32,16 @@ final class PostgreSqlSchemaInstallerTest extends TestCase
         self::assertStringContainsString('CREATE TABLE IF NOT EXISTS dead_letters', $ddl);
     }
 
+    public function testDeadLettersHaveTheReplayableColumnAfterReplayedAt(): void
+    {
+        $deadLetters = $this->installer()->sql(0)[4];
+
+        self::assertStringContainsString(
+            "replayed_at TIMESTAMP(3) NULL,\n    replayable BOOLEAN NOT NULL DEFAULT TRUE\n)",
+            $deadLetters,
+        );
+    }
+
     public function testOutboxHasNoKeyOrMetadataColumn(): void
     {
         $ddl = implode("\n", $this->installer()->sql(0));

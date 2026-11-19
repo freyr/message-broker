@@ -349,6 +349,7 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame(RuntimeException::class, $letter->errorClass);
         self::assertSame('final failure', $letter->errorMessage);
         self::assertSame('h', $letter->headers['x-custom']);
+        self::assertTrue($letter->replayable, 'the canonical document is replayable');
         self::assertSame([
             'metadata' => [
                 'message_name' => 'order.placed',
@@ -455,6 +456,7 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame('order.placed', $letter->messageName);
         self::assertSame('{{{not json', $letter->body);
         self::assertSame(1, $letter->attempts);
+        self::assertFalse($letter->replayable, 'raw wire bytes are not replayable');
         self::assertSame([[
             'event' => BrokerEvents::DEAD_LETTERED,
             'context' => [
@@ -653,6 +655,7 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame('Delivery limit reached: 3 deliveries ended with no ack (limit 3)', $letter->errorMessage);
         self::assertSame(2, $letter->attempts, 'attempts is the attempt of the delivery, never the count');
         self::assertSame('h', $letter->headers['x-custom']);
+        self::assertTrue($letter->replayable, 'the canonical document is replayable');
         self::assertSame([
             'metadata' => [
                 'message_name' => 'order.placed',
@@ -759,6 +762,7 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame(DeliveryLimitExceeded::class, $letter->errorClass);
         self::assertSame('Delivery limit reached: 2 deliveries ended with no ack (limit 2)', $letter->errorMessage);
         self::assertSame(3, $letter->attempts);
+        self::assertFalse($letter->replayable, 'raw wire bytes are not replayable');
     }
 
     /** @return iterable<string, array{Throwable}> */
@@ -780,6 +784,7 @@ final class DeliveryProcessorTest extends TestCase
         self::assertCount(1, $this->deadLetters());
         $letter = $this->deadLetters()[0];
         self::assertSame('raw-bytes', $letter->body);
+        self::assertFalse($letter->replayable);
         self::assertSame([], $letter->headers);
         self::assertSame('prop-id', $letter->messageId);
         self::assertSame('unknown', $letter->messageName);

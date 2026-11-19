@@ -68,6 +68,7 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         self::assertSame(7, $found->attempts);
         self::assertSame($failedAt, $found->failedAt, 'failed_at keeps its milliseconds');
         self::assertNull($found->replayedAt, 'a new dead letter is not replayed');
+        self::assertTrue($found->replayable, 'replayable by default');
     }
 
     public function testStoresTextThatEachSinkCanStore(): void
@@ -110,6 +111,29 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         ]), self::sortKeys($found->headers));
         self::assertSame("bad {$fffd} text {$fffd} here", $found->errorMessage);
         self::assertSame($body, $found->body, 'the body stays the exact bytes');
+    }
+
+    public function testTheReplayableMarkRoundTripsAsFalseAndAsTrue(): void
+    {
+        $raw = $this->deadLetter(messageId: 'm-raw', replayable: false);
+        $canonical = $this->deadLetter(messageId: 'm-canonical', replayable: true);
+        $this->store()->store($raw);
+        $this->store()->store($canonical);
+
+        self::assertFalse($this->store()->find($raw->id)?->replayable);
+        self::assertTrue($this->store()->find($canonical->id)?->replayable);
+    }
+
+    public function testMarkReplayedOfARowThatIsNotReplayableKeepsTheMark(): void
+    {
+        $raw = $this->deadLetter(replayable: false);
+        $this->store()->store($raw);
+
+        $this->store()->markReplayed($raw->id);
+
+        $found = $this->store()->find($raw->id);
+        self::assertNotNull($found?->replayedAt);
+        self::assertFalse($found->replayable);
     }
 
     public function testFindOfAnUnknownIdReturnsNull(): void
@@ -298,6 +322,7 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
         ?int $failedAt = null,
         string $messageId = 'msg-1',
         array $headers = [],
+        bool $replayable = true,
     ): DeadLetter {
         return new DeadLetter(
             id: self::newId(),
@@ -311,6 +336,7 @@ abstract class DeadLetterStoreContractTestCase extends TestCase
             errorTrace: '#0 trace-line',
             attempts: 3,
             failedAt: $failedAt ?? self::at(-10),
+            replayable: $replayable,
         );
     }
 
