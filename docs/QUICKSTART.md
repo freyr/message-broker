@@ -204,11 +204,14 @@ use Freyr\MessageBroker\Console\RelayRunCommand;
 use Freyr\MessageBroker\Worker\WorkerLimits;
 
 $application->add(new RelayRunCommand(['orders' => static fn (WorkerLimits $limits) => $relay->run($limits)]));
-$application->add(new ConsumeCommand(['orders' => static fn () => $consumer->run()]));
+$application->add(new ConsumeCommand(['orders' => static fn (WorkerLimits $limits) => $consumer->run($limits)]));
 ```
 
 Run them with `php bin/console message-broker:relay:run orders` and
-`php bin/console message-broker:consume orders`. Deploy both under a process
+`php bin/console message-broker:consume orders`. Each command gives the
+callable a `WorkerLimits` from its options (`--limit`, `--time-limit`,
+`--memory-limit`, and `--failure-limit` for `consume`), for example
+`php bin/console message-broker:consume orders --time-limit=3600 --memory-limit=128M`. Deploy both under a process
 supervisor with restart-always — see [core/PRODUCTION.md](core/PRODUCTION.md) for the
 crash-only deployment model and why it is safe.
 

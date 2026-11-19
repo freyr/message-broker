@@ -66,14 +66,17 @@ php bin/console message-broker:consume orders --require-signals
 
 ## Worker limits
 
-`message-broker:relay:run` takes `--limit`, `--time-limit` and `--memory-limit`.
-A worker that stops after a limit starts again with a fresh process, so memory
-growth and long-lived connections do not build up. The options and the callable
-type are in [CLI_REFERENCE.md](CLI_REFERENCE.md#message-brokerrelayrun-lane).
+`message-broker:relay:run` and `message-broker:consume` take `--limit`,
+`--time-limit` and `--memory-limit`; `message-broker:consume` also takes
+`--failure-limit`. A worker that stops after a limit starts again with a fresh
+process, so memory growth and long-lived connections do not build up. The
+options and the callable type are in
+[CLI_REFERENCE.md](CLI_REFERENCE.md#message-brokerrelayrun-lane) (relay) and
+[CLI_REFERENCE.md](CLI_REFERENCE.md#message-brokerconsume-name) (consumer).
 
 A limit stop ends the process with exit code `0`. **The supervisor must start a
 new process after each exit, exit code `0` included.** A supervisor that restarts
-only after a failure leaves the lane with no worker.
+only after a failure leaves the lane or the queue with no worker.
 
 | Supervisor | Setting that restarts after exit code 0 | Setting that does not |
 | --- | --- | --- |
@@ -82,11 +85,21 @@ only after a failure leaves the lane with no worker.
 | Kubernetes | `restartPolicy: Always` (the default of a `Deployment`) | `OnFailure` or `Never` |
 
 Set `--memory-limit` below the PHP `memory_limit`. The relay checks the memory
-after each pass, so a pass that goes above the PHP `memory_limit` ends the
-process with a fatal error before the check. The check uses
+after each pass and the consumer after each delivery, so a pass or a delivery
+that goes above the PHP `memory_limit` ends the process with a fatal error
+before the check. The check uses
 `memory_get_usage(true)`, the memory that PHP took from the system; it seldom
 goes down, so a worker can stop after a short peak, which a recycle limit
 accepts.
+
+**Failure limit (consumer).** `--failure-limit=<n>` stops the consumer after
+`<n>` handler failures in one run: deliveries that the retry policy retried,
+dead-lettered or discarded. It is a total, not a sequence of consecutive
+failures. A worker whose handler fails at each delivery (for example, because a
+dependency is down) then stops and starts again with fresh connections, instead
+of running on with the same connections. A consumer limit stop is a graceful
+stop: the consumer returns its buffered deliveries with no delivery count (see
+[the return rule](../amqp/CONSUMER.md#the-return-rule)).
 
 ## Observability
 

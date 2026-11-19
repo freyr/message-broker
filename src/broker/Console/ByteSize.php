@@ -12,7 +12,7 @@ final readonly class ByteSize
 {
     public static function toBytes(string $size): int
     {
-        if (preg_match('/^([1-9]\d*)([KMG]?)$/i', $size, $matches) !== 1) {
+        if (preg_match('/^([1-9]\d*)([KMG]?)\z/i', $size, $matches) !== 1) {
             throw self::invalid($size, 'expected <number>[K|M|G], 1 or more, e.g. \'128M\'');
         }
 

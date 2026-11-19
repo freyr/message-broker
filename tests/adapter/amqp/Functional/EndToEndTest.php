@@ -29,6 +29,7 @@ use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Testing\OrderPlaced;
 use Freyr\MessageBroker\Testing\RecordingEvents;
+use Freyr\MessageBroker\Worker\WorkerLimits;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use RuntimeException;
@@ -179,7 +180,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
 
         self::assertSame(1, $this->relay->drainOnce());
         $this->consumer()
-            ->run(messageLimit: 1, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 10);
 
         self::assertCount(1, $this->dispatched);
         self::assertSame('o-42', $this->dispatched[0]->payload['order_id']);
@@ -199,7 +200,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
         // Handler is broken: attempt 1 → 100ms wait queue → attempt 2 → DLQ.
         $this->handlerFails = true;
         $this->consumer()
-            ->run(messageLimit: 2, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 2), idleTimeoutSec: 10);
 
         self::assertSame(2, $this->handlerAttempts);
         self::assertCount(0, $this->dispatched);
@@ -214,7 +215,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
 
         self::assertSame(1, $this->relay->drainOnce());
         $this->consumer()
-            ->run(messageLimit: 1, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 10);
 
         self::assertCount(1, $this->dispatched, 'replayed message must reach the fixed dispatcher');
         self::assertSame($message->id, $this->dispatched[0]->messageId);
@@ -230,7 +231,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
         self::assertSame(1, $this->relay->drainOnce());
 
         $this->consumer($events)
-            ->run(messageLimit: 1, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 10);
 
         self::assertCount(1, $this->dispatched);
         self::assertContains(BrokerEvents::DISPATCHED, $events->names());
@@ -250,7 +251,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
         $this->producer->produce($message);
         self::assertSame(1, $this->relay->drainOnce());
         $this->consumer($events)
-            ->run(messageLimit: 1, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 10);
 
         self::assertCount(0, $this->dispatched, 'duplicate is not dispatched');
         self::assertContains(BrokerEvents::DEDUPLICATED, $events->names());
@@ -264,7 +265,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
 
         $this->handlerFails = true;
         $this->consumer($events)
-            ->run(messageLimit: 2, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 2), idleTimeoutSec: 10);
 
         self::assertContains(BrokerEvents::DEAD_LETTERED, $events->names());
     }
@@ -279,14 +280,14 @@ final class EndToEndTest extends AmqpFunctionalTestCase
         self::assertSame(1, $this->relay->drainOnce());
 
         $this->consumer()
-            ->run(messageLimit: 1, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 10);
         self::assertCount(1, $this->dispatched, 'consumer A processes the replay');
         self::assertSame($message->id, $this->dispatched[0]->messageId);
 
         $attemptsBefore = $this->handlerAttempts;
         $eventsB = new RecordingEvents();
         $this->consumer($eventsB, self::QUEUE_B, 'e2e_consumer_b')
-            ->run(messageLimit: 1, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 10);
 
         self::assertSame($attemptsBefore, $this->handlerAttempts, 'consumer B calls no handler');
         self::assertSame([BrokerEvents::REPLAY_SKIPPED], $eventsB->names());
@@ -312,7 +313,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
         self::assertSame(1, $this->relay->drainOnce());
         $this->failuresLeft = 1;
         $this->consumer()
-            ->run(messageLimit: 2, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 2), idleTimeoutSec: 10);
 
         self::assertCount(1, $this->dispatched, 'the second delivery is processed');
         self::assertSame(self::isolated(self::QUEUE), $this->dispatched[0]->headers[BrokerHeader::REPLAY_TARGET] ?? null);
@@ -349,7 +350,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
         $this->replayService()->replay($deadLetter->id, lane: self::LANE);
         self::assertSame(1, $this->relay->drainOnce());
         $this->consumer()
-            ->run(messageLimit: 1, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 10);
 
         self::assertCount(1, $this->dispatched, 'the first delivery of the replay is processed');
         self::assertArrayNotHasKey('x-delivery-count', $this->dispatched[0]->headers);
@@ -363,7 +364,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
         self::assertSame(1, $this->relay->drainOnce());
         $this->handlerFails = true;
         $this->consumer()
-            ->run(messageLimit: 2, idleTimeoutSec: 10);
+            ->run(new WorkerLimits(maxMessages: 2), idleTimeoutSec: 10);
         $this->handlerFails = false;
         $this->handlerAttempts = 0;
         // A new consumer puts its channel in confirm mode again: give it a new channel.

@@ -18,6 +18,7 @@ use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
 use Freyr\MessageBroker\Serializer\Deserializer;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
 use Freyr\MessageBroker\Serializer\MetadataHeader;
+use Freyr\MessageBroker\Worker\WorkerLimits;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Exception\AMQPTimeoutException;
@@ -241,7 +242,7 @@ final class DeliveryLimitTest extends AmqpFunctionalTestCase
         $this->receiveAndCloseWithNoAck();
         $this->failingDispatch = static fn () => throw new RuntimeException('handler failed');
 
-        $this->consumer()->run(messageLimit: 1, idleTimeoutSec: 2);
+        $this->consumer()->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 2);
 
         $this->failingDispatch = null;
         $channel = self::$amqp->channel();
@@ -264,11 +265,12 @@ final class DeliveryLimitTest extends AmqpFunctionalTestCase
         self::assertNull($deliveries[0]->deliveryCount, 'the wait-queue pass starts the count again');
     }
 
+    /** The graceful stop of this test is a limit stop (maxMessages: 1): it adds no count either. */
     public function testAGracefulStopReturnsTheBufferedDeliveriesWithNoCount(): void
     {
         $this->publish('m-1', 'm-2', 'm-3', 'm-4', 'm-5');
 
-        $this->consumer()->run(messageLimit: 1);
+        $this->consumer()->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 10);
 
         self::assertSame(['m-1'], $this->handled);
         self::assertSame([

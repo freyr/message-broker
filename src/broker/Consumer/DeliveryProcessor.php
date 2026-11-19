@@ -47,7 +47,10 @@ use Throwable;
  *     discard: ack
  *
  * The transport reaches the outcome through the DeliveryControl of the
- * delivery. Every path that returns normally has acked the delivery.
+ * delivery. Every path that returns normally has acked the delivery and
+ * returns its DeliveryOutcome: ReplaySkipped, DeliveryLimitExceeded,
+ * Malformed, Deduplicated, Dispatched, or for a handler failure Retried,
+ * DeadLettered or Discarded. A path that throws has no outcome.
  *
  * Each dead letter goes to the one DeadLetterSink of the consumer: the
  * dead_letters table (a DeadLetterStore) or a queue of the transport. A sink
@@ -84,7 +87,7 @@ final class DeliveryProcessor
         $this->builder = new DeadLetterBuilder();
     }
 
-    public function process(Delivery $delivery, DeliveryControl $control): void
+    public function process(Delivery $delivery, DeliveryControl $control): DeliveryOutcome
     {
         // A replay goes to one consumer: a delivery whose target is another
         // queue is acked before any write, whatever its delivery count, so it
@@ -102,7 +105,7 @@ final class DeliveryProcessor
             ]);
             $control->ack();
 
-            return;
+            return DeliveryOutcome::ReplaySkipped;
         }
 
         $attempt = $delivery->attempt;
@@ -112,7 +115,7 @@ final class DeliveryProcessor
             $this->deadLetterOverLimit($delivery, $deliveryCount, $this->maxDeliveries);
             $control->ack();
 
-            return;
+            return DeliveryOutcome::DeliveryLimitExceeded;
         }
 
         try {
@@ -125,7 +128,7 @@ final class DeliveryProcessor
             $this->deadLetterRaw($delivery, $error);
             $control->ack();
 
-            return;
+            return DeliveryOutcome::Malformed;
         } catch (Throwable $error) {
             // Observe-then-rethrow: a transient dependency failure (e.g. the
             // database briefly unreachable) must surface to operators before
@@ -164,7 +167,7 @@ final class DeliveryProcessor
                 ]);
                 $control->ack();
 
-                return;
+                return DeliveryOutcome::Deduplicated;
             }
 
             $this->dispatcher->dispatch($incoming);
@@ -176,6 +179,8 @@ final class DeliveryProcessor
                 'message_name' => $incoming->messageName,
             ]);
             $control->ack();
+
+            return DeliveryOutcome::Dispatched;
         } catch (Throwable $error) {
             try {
                 $this->transaction->rollBack();
@@ -187,7 +192,8 @@ final class DeliveryProcessor
 
                 throw $error;
             }
-            $this->afterFailure($delivery, $control, $incoming, $error);
+
+            return $this->afterFailure($delivery, $control, $incoming, $error);
         }
     }
 
@@ -245,7 +251,7 @@ final class DeliveryProcessor
         DeliveryControl $control,
         IncomingMessage $incoming,
         Throwable $error,
-    ): void {
+    ): DeliveryOutcome {
         $attempt = $delivery->attempt;
         $decision = $this->retryPolicy->decide($attempt, $error, $incoming);
 
@@ -275,6 +281,12 @@ final class DeliveryProcessor
         $this->errorHandler?->handle($error, $context);
 
         $control->ack();
+
+        return match ($decision->action) {
+            RetryAction::Retry => DeliveryOutcome::Retried,
+            RetryAction::DeadLetter => DeliveryOutcome::DeadLettered,
+            RetryAction::Discard => DeliveryOutcome::Discarded,
+        };
     }
 
     private function retry(

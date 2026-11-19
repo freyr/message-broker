@@ -2,7 +2,7 @@
 
 `AmqpConsumer` is the AMQP loop around the core `DeliveryProcessor`. It owns the
 channel (qos, consume, wait, cancel), the signals, the idle timeout and the
-message limit. It maps each `AMQPMessage` to a `Delivery` and gives the
+worker limits. It maps each `AMQPMessage` to a `Delivery` and gives the
 processor an `AmqpDeliveryControl` for it. The exactly-once algorithm and the
 retry policy are in [../core/CONSUMER.md](../core/CONSUMER.md). The routing and
 the topology are in [TRANSPORT.md](TRANSPORT.md).
@@ -29,10 +29,32 @@ a `NullLogger` by default). The consumer logs a failure inside the return of
 its unacked deliveries (see *The return rule*) to the `logger`. A complete
 example, with the `DeliveryProcessor`, is in [../QUICKSTART.md](../QUICKSTART.md).
 
-`run()` sets `basic_qos` to the `prefetch` of the queue config and consumes
-until it stops. It stops on SIGTERM or SIGINT when `ext-pcntl` is loaded. For
-tests and batch-style operation, `run()` accepts `messageLimit` and
-`idleTimeoutSec`.
+`run(?WorkerLimits $limits = null, ?int $idleTimeoutSec = null)` sets
+`basic_qos` to the `prefetch` of the queue config and consumes until it stops.
+It stops on SIGTERM or SIGINT when `ext-pcntl` is loaded, and when a limit of
+the `Freyr\MessageBroker\Worker\WorkerLimits` is reached:
+
+```php
+$consumer->run(new WorkerLimits(maxMessages: 10_000, maxSeconds: 3_600, maxFailures: 50));
+```
+
+- The consumer checks the limits after each delivery (after the processor
+  committed and acked it) and after each wait with no delivery. Each delivery
+  counts toward `maxMessages`; the deliveries that the retry policy retried,
+  dead-lettered or discarded count toward `maxFailures`
+  (`DeliveryOutcome::isHandlerFailure()`).
+- With `maxSeconds`, no wait is longer than the time that is left: the wait
+  timeout is the time left when there is no idle timeout or when the time left
+  is not larger than the idle timeout, else the idle timeout.
+- A limit stop logs one `info` line ("Worker limit reached; the worker stops",
+  with the queue, the reason, the counts, the elapsed seconds and the memory) to
+  the `logger` and is a graceful stop (see *The return rule*).
+- `idleTimeoutSec` stops the consumer when the queue stays silent for that
+  long; 0 or `null` is no idle timeout. It exists for tests and batch-style
+  operation.
+
+The command `message-broker:consume` builds the `WorkerLimits` from its options
+(see [../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md)).
 
 ## Delivery mapping
 
@@ -76,7 +98,7 @@ that was in work, and not the buffered deliveries of the prefetch window.
 
 | Stop | What the consumer sends before `run()` ends | Effect on `x-delivery-count` |
 | --- | --- | --- |
-| Graceful stop (a signal, `stop()`, the message limit, the idle timeout): no delivery is in work | `basic.cancel`, then one `basic.nack` (tag 0, `multiple`, `requeue`) | none |
+| Graceful stop (a signal, `stop()`, a worker limit, the idle timeout): no delivery is in work | `basic.cancel`, then one `basic.nack` (tag 0, `multiple`, `requeue`) | none |
 | A `Throwable` leaves the processor (a failed dead letter write, a failed or not confirmed wait-queue publish, a deserialize error that is not `MalformedMessage`, a database failure) | `basic.cancel`, then `basic.reject` of the delivery in work with `requeue`, then one `basic.nack` (tag 0, `multiple`, `requeue`); then the same `Throwable` goes on | +1 for the delivery in work only |
 | The return itself fails (for example, the connection is lost) | nothing more; the original `Throwable` goes on | +1 for each unacked delivery (the broker returns them at the close) |
 | A stop that the consumer does not control (a killed process, a memory fatal error, a lost connection, a broker restart) | nothing | +1 for each unacked delivery |
@@ -163,8 +185,8 @@ its route has no queue, the broker drops the message.
 ## Sequential consumers over one connection
 
 **Running `AmqpConsumer` sequentially over one connection.** `run()` accepts
-`messageLimit`/`idleTimeoutSec` — these exist for tests and batch-style
-operation; production workers normally run with neither, blocking forever.
+a `WorkerLimits` and `idleTimeoutSec`; a limit or the idle timeout ends one run,
+and the next consumer starts on the same channel.
 At each stop that it controls, `run()` cancels its consumer and returns its
 unacked deliveries (see *The return rule*), so the next consumer on the same
 channel or connection receives them. After a stop that the consumer does not

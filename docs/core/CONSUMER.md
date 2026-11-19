@@ -54,6 +54,23 @@ The processor acks only after `store()` returns. A sink that throws leaves the
 delivery unacked and gives no event `message.dead_lettered`. The processor
 never rejects or nacks a delivery as a result of a handler failure.
 
+## The outcome of a delivery
+
+`process()` returns a `Consumer\DeliveryOutcome` for each path that returns
+normally. A path that throws has no outcome. A transport loop reads it to count
+handler failures (the failure limit of `message-broker:consume`).
+
+| Path | Outcome | `isHandlerFailure()` |
+| --- | --- | --- |
+| Replay for a different queue | `ReplaySkipped` | `false` |
+| Delivery limit | `DeliveryLimitExceeded` | `false` |
+| `MalformedMessage` | `Malformed` | `false` |
+| Duplicate | `Deduplicated` | `false` |
+| Handler ran, commit | `Dispatched` | `false` |
+| Handler failed, policy `Retry` | `Retried` | `true` |
+| Handler failed, policy `DeadLetter` | `DeadLettered` | `true` |
+| Handler failed, policy `Discard` | `Discarded` | `true` |
+
 ## The fields of a dead letter
 
 A raw dead letter (a malformed message, or a message at the delivery limit that

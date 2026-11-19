@@ -6,6 +6,9 @@ namespace Freyr\MessageBroker\Adapter\Amqp;
 
 use Freyr\MessageBroker\Consumer\Delivery;
 use Freyr\MessageBroker\Consumer\DeliveryProcessor;
+use Freyr\MessageBroker\Worker\WorkerLimitGuard;
+use Freyr\MessageBroker\Worker\WorkerLimits;
+use Freyr\MessageBroker\Worker\WorkerStopReason;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Exception\AMQPTimeoutException;
 use PhpAmqpLib\Message\AMQPMessage;
@@ -16,7 +19,7 @@ use Throwable;
 /**
  * Long-running AMQP worker: the thin loop around the DeliveryProcessor. It
  * owns the channel (qos, consume, wait, cancel), the signals, the idle
- * timeout and the message limit. It maps each AMQPMessage to a Delivery and
+ * timeout and the worker limits. It maps each AMQPMessage to a Delivery and
  * gives the processor an AmqpDeliveryControl for it.
  *
  * The exactly-once algorithm (deserialize, transaction, dedup, dispatch,
@@ -31,7 +34,8 @@ final class AmqpConsumer
 {
     private bool $shouldStop = false;
 
-    private int $handled = 0;
+    /** Counts the deliveries and the handler failures of the current run. */
+    private WorkerLimitGuard $guard;
 
     /** The delivery that the processor works on; null between deliveries. */
     private ?AMQPMessage $inWork = null;
@@ -40,7 +44,7 @@ final class AmqpConsumer
 
     private readonly AmqpDeliveryMapper $mapper;
 
-    /** @param LoggerInterface $logger receives a failure inside the return of the unacked deliveries */
+    /** @param LoggerInterface $logger receives a failure inside the return of the unacked deliveries, and the line of a limit stop */
     public function __construct(
         private readonly AMQPChannel $channel,
         private readonly AmqpQueueConfig $queue,
@@ -50,16 +54,26 @@ final class AmqpConsumer
     ) {
         $this->waitQueues = new WaitQueuePublisher($channel, $queue->queue, $confirmTimeoutSec);
         $this->mapper = new AmqpDeliveryMapper($queue->queue);
+        $this->guard = new WorkerLimitGuard(new WorkerLimits());
     }
 
     /**
-     * Blocks until stopped (SIGTERM/SIGINT via pcntl), the optional message
-     * limit is reached, or — when an idle timeout is set — the queue stays
-     * silent for that long. Limit and timeout exist for tests and batch-style
-     * operation; production workers run with neither.
+     * Blocks until stopped (SIGTERM/SIGINT via pcntl), a limit of
+     * {@see WorkerLimits} is reached, or — when an idle timeout is set — the
+     * queue stays silent for that long. The idle timeout exists for tests and
+     * batch-style operation; an idle timeout of 0 or null is no idle timeout.
+     *
+     * A limit is checked after each delivery (after process() returned, so
+     * after the commit and the ack) and after each wait with no delivery. A
+     * limit stop logs one info line and calls {@see stop()}, as a signal
+     * does. With a time limit, no wait is longer than the time that is left:
+     * the wait timeout is the time left when there is no idle timeout or when
+     * the time left is not larger than the idle timeout, else the idle
+     * timeout. A timeout of a wait with no delivery in work is a time limit
+     * stop when the time left gave the timeout, else an idle stop.
      *
      * After basic_consume, every stop returns the unacked deliveries:
-     *  - a graceful stop (stop(), a signal, the message limit, the idle
+     *  - a graceful stop (stop(), a signal, a worker limit, the idle
      *    timeout): basic.cancel, then one basic.nack (tag 0, multiple,
      *    requeue), which adds no delivery count. A failure of this return is
      *    the error of run().
@@ -71,28 +85,44 @@ final class AmqpConsumer
      * basic.cancel comes first: else the broker delivers the returned
      * deliveries again to this consumer before the close.
      */
-    public function run(?int $messageLimit = null, ?int $idleTimeoutSec = null): void
+    public function run(?WorkerLimits $limits = null, ?int $idleTimeoutSec = null): void
     {
+        $this->guard = new WorkerLimitGuard($limits ?? new WorkerLimits());
+        $this->guard->start();
         $this->registerSignalHandlers();
         $this->channel->basic_qos(0, $this->queue->prefetch, false);
         $consumerTag = $this->channel->basic_consume(queue: $this->queue->queue, callback: $this->handle(...));
+        $idleTimeout = $idleTimeoutSec === 0 ? null : $idleTimeoutSec;
 
         try {
             while (!$this->shouldStop && $this->channel->is_consuming()) {
-                if ($messageLimit !== null && $this->handled >= $messageLimit) {
-                    break;
+                $secondsLeft = $this->guard->secondsLeft();
+                if ($secondsLeft === 0.0) {
+                    $reason = WorkerStopReason::TimeLimit;
+                } else {
+                    // One clock read for each wait: the note of the source of the
+                    // timeout alone decides the path of an AMQPTimeoutException.
+                    $timeoutIsTimeLeft = $secondsLeft !== null
+                        && ($idleTimeout === null || $secondsLeft <= $idleTimeout);
+
+                    try {
+                        $this->channel->wait(timeout: $timeoutIsTimeLeft ? $secondsLeft : $idleTimeout ?? 0);
+                        $reason = $this->guard->stopReason();
+                    } catch (AMQPTimeoutException $timeout) {
+                        if ($this->inWork !== null) {
+                            // A confirm timeout of the retry republish, from inside
+                            // the processor: a failure of the delivery, not silence.
+                            throw $timeout;
+                        }
+                        if (!$timeoutIsTimeLeft) {
+                            break; // queue stayed silent for the whole idle window
+                        }
+                        $reason = WorkerStopReason::TimeLimit;
+                    }
                 }
 
-                try {
-                    $this->channel->wait(timeout: $idleTimeoutSec ?? 0);
-                } catch (AMQPTimeoutException $timeout) {
-                    if ($this->inWork !== null) {
-                        // A confirm timeout of the retry republish, from inside
-                        // the processor: a failure of the delivery, not silence.
-                        throw $timeout;
-                    }
-
-                    break; // queue stayed silent for the whole idle window
+                if ($reason !== null) {
+                    $this->stopAtLimit($reason);
                 }
             }
         } catch (Throwable $error) {
@@ -110,18 +140,34 @@ final class AmqpConsumer
         $this->shouldStop = true;
     }
 
+    private function stopAtLimit(WorkerStopReason $reason): void
+    {
+        $this->logger->info('Worker limit reached; the worker stops', [
+            'queue' => $this->queue->queue,
+            'reason' => $reason->value,
+            'messages' => $this->guard->messages(),
+            'failures' => $this->guard->failures(),
+            'elapsedSeconds' => $this->guard->elapsedMs() / 1_000.0,
+            'memoryBytes' => $this->guard->usedMemory(),
+        ]);
+        $this->stop();
+    }
+
     private function handle(AMQPMessage $message): void
     {
         $this->inWork = $message;
-        $this->processor->process(
+        $outcome = $this->processor->process(
             $this->deliveryFrom($message),
             new AmqpDeliveryControl($message, $this->waitQueues),
         );
         $this->inWork = null;
 
         // process() returns only after it acked the delivery; a failure that
-        // stops the process throws instead, so the counter never runs ahead.
-        ++$this->handled;
+        // stops the process throws instead, so the counts never run ahead.
+        $this->guard->recordMessages(1);
+        if ($outcome->isHandlerFailure()) {
+            $this->guard->recordFailure();
+        }
     }
 
     private function returnAfterFailure(string $consumerTag, Throwable $error): void

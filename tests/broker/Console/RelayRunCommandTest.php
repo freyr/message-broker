@@ -83,6 +83,15 @@ final class RelayRunCommandTest extends TestCase
         yield 'limit fraction' => [[
             '--limit' => '1.5',
         ], '--limit'];
+        yield 'limit trailing newline' => [[
+            '--limit' => "5\n",
+        ], '--limit'];
+        yield 'time limit trailing newline' => [[
+            '--time-limit' => "60\n",
+        ], '--time-limit'];
+        yield 'memory limit trailing newline' => [[
+            '--memory-limit' => "128M\n",
+        ], '--memory-limit'];
         yield 'time limit zero' => [[
             '--time-limit' => '0',
         ], '--time-limit'];
