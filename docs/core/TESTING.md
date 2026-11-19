@@ -19,6 +19,7 @@ A contract test case is an abstract PHPUnit test case. It checks that an impleme
 | `TransactionContractTestCase` | `Storage\Transaction` (with a deduplication store, an outbox store and a dead letter store on the same connection) |
 | `OutboxPublisherContractTestCase` | `Outbox\OutboxPublisher` |
 | `DeadLetterSinkContractTestCase` | `DeadLetter\DeadLetterSink` (each field of a stored dead letter, the raw bytes and the mark, two dead letters; no rule on two failures of one message) |
+| `DeliveryStoreContractTestCase` | `Webhook\DeliveryStore` (insert, claim with the row limit of each lane and the total, the lease, the lease check of `complete()`, the dead letters, the claim of expired rows) |
 
 To test an adapter, extend the test case and return the implementation from the abstract factory method:
 
@@ -40,6 +41,7 @@ Each factory must return a store that is empty at the start of the test. Some te
 - `TransactionContractTestCase::createOutboxStore()` returns an outbox store on the connection of the transaction. Without it, the tests of the outbox insert are skipped.
 - `TransactionContractTestCase::createDeadLetterStore()` returns a dead letter store on the connection of the transaction. Without it, the tests of the replay mark are skipped. The test of a mark and an outbox insert in one committed transaction needs both hooks.
 - `OutboxPublisherContractTestCase::assertDelivered()` checks that the records arrived on the transport. For example, the AMQP test reads them from a bound queue.
+- `DeliveryStoreContractTestCase` has two abstract methods: `createStore()` returns an empty delivery store, and `deadLetterStore()` returns the dead letter store that reads the dead letters of that store. The test calls `createStore()` first. The tests use the real time, because a database store reads the database time: they show the lease rules with leases of 0 ms (due again at once) and 60 s, with no sleep, and they accept a lease value up to `CLOCK_TOLERANCE_MS` (1 s) from the time of PHP. The `created_at` values are of the last minutes.
 - `DeadLetterSinkContractTestCase` has two abstract methods: `createSink()` returns a sink whose destination is empty, and `storedDeadLetters()` reads the destination back (a list of `DeadLetter`, in any order). A store returns `list()`. The AMQP test reads the dead letter queue with `basic.get` and decodes each message through `DeadLetterImporter` (the header `x-dead-letter`). The tests use texts below the cuts of 1024 and 16384 bytes.
 
 `OutboxStoreContractTestCase` has these cases for `abandon()` and `failing()`:
@@ -81,6 +83,9 @@ The fakes are correct in-memory implementations of the ports. Each fake passes t
 | `InMemoryTransaction` | `Transaction` |
 | `FakeOutboxPublisher` | `OutboxPublisher`: it records the calls, and it can refuse ids or throw |
 | `RecordingDeliveryControl` | `DeliveryControl`: it records `ack()` and `retry()` |
+| `InMemoryDeliveryStore` | `Webhook\DeliveryStore`: the claim with a lease (the lanes in the order of the list, the rows of a lane by `available_at`), the lease check of `complete()`, and the claim of expired rows. The dead letters go to an `InMemoryDeadLetterStore` (a constructor argument, else a new one; `deadLetters()` gives it) through `store()`. `row()`, `outcome()` (`Delivered`, `Dead` or `null` while unfinished) and `records()` show the rows; `$claims`, `$expiredClaims` and `$claimCalls` record the calls, and `$onClaim` runs at the start of each claim |
+| `FakeDeliverySender` | `Webhook\DeliverySender`: it records the calls (`$calls`, `sentIds()`) and returns the result of `$respond` for each pair (default: delivered). `$onSend` runs at the start of each call; `maxSendMs()` is a constructor argument (default 1000) |
+| `InMemorySubscriptionProvider` | `Webhook\SubscriptionProvider`: `add()` registers a subscription with its message names, `remove()` takes it away. `$lanesCalls` counts the reads of `lanes()`, and `$finds` records the `find()` calls |
 
 An application test uses a fake in place of a real store:
 

@@ -24,6 +24,11 @@ ports and extends the contract test cases of the test kit (see
 | `Observability\BrokerEvents` | Receive the lifecycle events (see [PRODUCTION.md](PRODUCTION.md), *Observability*). | Your own class |
 | `ErrorHandler` | Receive each handled failure with its context. | Your own class |
 | `DeadLetter\DeadLetterSink` | Make a dead letter durable at the destination of a consumer (`store()`), the table or a queue of the transport. `DeadLetterStore` extends it. `DeliveryProcessor` takes a sink as `deadLetters`. | `PostgreSqlDeadLetterStore` (PostgreSQL adapter); `AmqpDeadLetterSink` (AMQP adapter); `InMemoryDeadLetterStore` (test kit) |
+| `Webhook\SubscriptionProvider` | Give the webhook subscriptions: by message name (`forMessage()`), by lane (`find()`), and all lanes (`lanes()`). See [WEBHOOKS.md](WEBHOOKS.md). | Your own class; `InMemorySubscriptionProvider` (test kit) |
+| `Webhook\DeliveryStore` | Insert delivery rows. Claim due rows of many lanes with a lease (`claim()`), write the results with the lease check and the dead letters (`complete()`), and claim the expired rows (`claimExpired()`). | `InMemoryDeliveryStore` (test kit) |
+| `Webhook\DeliverySender` | Send a batch of deliveries, each with its subscription, and return one result for each (`send()`). State the longest time of one call (`maxSendMs()`). | `FakeDeliverySender` (test kit) |
+| `Webhook\DeliveryRetryPolicy` | Decide between a retry at a time and a dead letter after a failed or refused result. State the longest retry delay (`longestDelayMs()`). | `DefaultDeliveryRetryPolicy` (core); your own policy |
+| `Webhook\DeliveryRetention` | Create the upcoming partitions of `webhook_deliveries` and drop the expired ones that hold no unfinished row. | — |
 
 `DeliveryControl` has no reject: the processor never rejects or nacks a
 delivery as a result of a handler failure. A dead letter goes through the sink,
@@ -114,3 +119,31 @@ The claim, `failing()` and the outcome writes ignore an abandoned row.
 Retention does not keep a partition for an abandoned row (see
 `Outbox\OutboxRetention`: "unpublished" means `published_at IS NULL AND
 abandoned_at IS NULL`).
+
+### The methods of `DeliveryStore`
+
+- `insert(array $records): void` writes the rows on the connection of the
+  caller, so they commit or roll back with the transaction of the
+  application. It opens no transaction. An empty list writes nothing.
+- `claim(array $lanes, int $limitForEachLane, int $total, int $leaseMs):
+  array` claims due, unfinished rows of the lanes: at most `$limitForEachLane`
+  of each lane and at most `$total` in all. It sets `available_at` to now plus
+  the lease and commits before it returns. Each `ClaimedDelivery` has the
+  record and its lease value (the new `available_at`). Concurrent claimers
+  skip the rows of each other. An empty lane list returns an empty list.
+- `complete(array $outcomes): array` writes the `DeliveryCompletion` values in
+  one transaction: delivered (final state), retry (attempts and
+  `available_at`) and dead (the dead letter and the final state). The lease
+  check applies to each outcome: a row changes only when it is unfinished and
+  its `available_at` is equal to the lease value of the claim. The dead letter
+  follows the open row rule of `DeadLetterStore::store()`. It returns the IDs
+  of the rows that it changed.
+- `claimExpired(int $before, int $limit, int $leaseMs): array` claims due,
+  unfinished rows of any lane with `created_at` earlier than `$before`, the
+  oldest first, with the same lease as `claim()`.
+
+`DeliveryRetention` has the methods of `OutboxRetention` without
+`dropUnpublished`: `ensureCapacity(int $daysAhead)` and `purge(int
+$retentionDays, bool $dryRun = false)`. `purge()` returns a
+`RetentionReport` whose `kept` lists the expired partitions with unfinished
+rows; `unpublished` and `abandoned` stay empty.
