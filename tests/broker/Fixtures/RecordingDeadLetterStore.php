@@ -8,15 +8,26 @@ use Closure;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
+use Throwable;
 
 /**
  * Delegates to an inner store; reports each markReplayed() call to $log and
- * can force its result (a race: another process set the mark first).
+ * can force its result (a race: another process set the mark first), make it
+ * throw for one id, or hide a row from find() (a purge after ids()).
  */
 final class RecordingDeadLetterStore implements DeadLetterStore
 {
     /** @var bool|null the forced result of markReplayed(); null delegates */
     public ?bool $markReplayedResult = null;
+
+    /** @var array<string, bool> id => the forced result of markReplayed() for that id */
+    public array $markReplayedResultFor = [];
+
+    /** @var array<string, Throwable> id => the throwable that markReplayed() throws for that id */
+    public array $markReplayedFails = [];
+
+    /** @var array<string, true> ids that find() does not find (a purge after ids()) */
+    public array $missing = [];
 
     /** @param (Closure(string): void)|null $log */
     public function __construct(
@@ -31,7 +42,7 @@ final class RecordingDeadLetterStore implements DeadLetterStore
 
     public function find(string $id): ?DeadLetter
     {
-        return $this->inner->find($id);
+        return isset($this->missing[$id]) ? null : $this->inner->find($id);
     }
 
     public function list(DeadLetterFilter $filter, int $limit = 100, int $offset = 0): array
@@ -60,7 +71,11 @@ final class RecordingDeadLetterStore implements DeadLetterStore
             ($this->log)('markReplayed');
         }
 
-        return $this->markReplayedResult ?? $this->inner->markReplayed($id);
+        if (isset($this->markReplayedFails[$id])) {
+            throw $this->markReplayedFails[$id];
+        }
+
+        return $this->markReplayedResultFor[$id] ?? $this->markReplayedResult ?? $this->inner->markReplayed($id);
     }
 
     public function purge(DeadLetterFilter $filter): int
