@@ -89,7 +89,8 @@ row for each pair of message ID and source, so one message has one open dead
 letter for each lane. `dlq:list`, `dlq:show` and `dlq:stats` read it as each
 other dead letter. `dlq:replay` inserts a new delivery row for the lane of the
 source, with the message ID and the body of the dead letter, and no outbox
-row (see
+row. Its output names that webhook lane, and the summary of `--all` counts the
+webhook replays apart (see
 [Replay of a webhook dead letter](DLQ_OPERATIONS.md#replay-of-a-webhook-dead-letter)).
 
 ## The ports that your application implements

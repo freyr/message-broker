@@ -44,7 +44,8 @@ use Throwable;
  * instead: a new delivery row for that lane, with the message id, the message
  * name and the body bytes of the dead letter (no decode), attempts 0, and the
  * headers minus the strip list of BrokerHeader, with no x-replay-target. The
- * lane argument has no effect on it. The same transaction holds the
+ * lane argument has no effect on it. replay() and check() return the
+ * destination ({@see ReplayDestination}), so a caller can name it. The same transaction holds the
  * conditional markReplayed() first and the delivery insert second, so the
  * delivery store must work on the connection of the transaction too. A
  * service with no delivery store refuses a webhook dead letter.
@@ -72,9 +73,11 @@ final class ReplayService
     /**
      * @throws DeadLetterNotFound
      * @throws AlreadyReplayed
+     * @return ReplayDestination the outbox lane $lane, or the webhook lane of the source
+     *
      * @throws NotReplayable
      */
-    public function replay(string $deadLetterId, string $lane = 'default'): void
+    public function replay(string $deadLetterId, string $lane = 'default'): ReplayDestination
     {
         $deadLetter = $this->open($deadLetterId);
         if (self::isWebhook($deadLetter)) {
@@ -82,7 +85,7 @@ final class ReplayService
             $this->markAndInsert($deadLetter, static fn () => $deliveries->insert([$delivery]));
             $this->recordReplayed($deadLetter, $deadLetter->messageName, $delivery->lane);
 
-            return;
+            return new ReplayDestination($delivery->lane, webhook: true);
         }
 
         [$messageName, $payload] = $this->decode($deadLetter);
@@ -101,23 +104,28 @@ final class ReplayService
 
         $this->markAndInsert($deadLetter, fn () => $this->outbox->insert($record));
         $this->recordReplayed($deadLetter, $messageName, $lane);
+
+        return new ReplayDestination($lane, webhook: false);
     }
 
     /**
      * The read-only checks of replay() for a dry run; changes nothing.
      *
+     * @return ReplayDestination the destination that replay() with the same arguments uses
+     *
      * @throws DeadLetterNotFound
      * @throws AlreadyReplayed
      * @throws NotReplayable
      */
-    public function check(string $deadLetterId): void
+    public function check(string $deadLetterId, string $lane = 'default'): ReplayDestination
     {
         $deadLetter = $this->open($deadLetterId);
         if (self::isWebhook($deadLetter)) {
-            $this->delivery($deadLetter);
-        } else {
-            $this->decode($deadLetter);
+            return new ReplayDestination($this->delivery($deadLetter)[1]->lane, webhook: true);
         }
+        $this->decode($deadLetter);
+
+        return new ReplayDestination($lane, webhook: false);
     }
 
     /**

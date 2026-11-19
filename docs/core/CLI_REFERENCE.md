@@ -351,7 +351,8 @@ the normal relay path. Each replay is one transaction: the replay mark, then
 a new outbox row with the original message id, a new `created_at` and the
 header `x-replay-target` (the `source` of the dead letter), then the commit.
 A webhook dead letter (source `webhook:<lane>`) gets a new delivery row for
-that lane instead, and `--lane` has no effect on it (see
+that lane instead, and `--lane` has no effect on it; the output names the
+webhook lane (see
 [Replay of a webhook dead letter](DLQ_OPERATIONS.md#replay-of-a-webhook-dead-letter)).
 See [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md) for the worked dry-run-then-force
 workflow, the refusals and the replay to one consumer.
@@ -373,8 +374,11 @@ run keeps only the ids of the rows that it skipped or that failed.
 | `--dry-run` | Show what would be replayed and change nothing. One id: the checks of the replay ("would replay", or the refusal). `--all`: the count (at most `--limit`) and the first 5 candidates. |
 | `--force` | Required to run `--all` non-interactively (no TTY); a single-id replay never prompts. |
 
-The last line of `--all` gives four counts, for example
+The summary line of `--all` gives four counts, for example
 `Replayed 120, skipped 3 (not replayable), skipped 1 (already replayed), failed 0 into lane 'orders'.`
+The first count is the outbox replays. When the run replayed webhook dead
+letters, a second line counts them and names their lanes:
+`Replayed 4 webhook dead letter(s) into the webhook lanes of their sources (--lane has no effect on them): crm, erp.`
 
 | Case | Exit code |
 | --- | --- |

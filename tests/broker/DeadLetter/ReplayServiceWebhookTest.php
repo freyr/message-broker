@@ -7,6 +7,7 @@ namespace Freyr\MessageBroker\Tests\DeadLetter;
 use Freyr\MessageBroker\DeadLetter\AlreadyReplayed;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\NotReplayable;
+use Freyr\MessageBroker\DeadLetter\ReplayDestination;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
@@ -343,6 +344,25 @@ final class ReplayServiceWebhookTest extends TestCase
             'x-replay-target' => $source,
         ], $this->outbox->row('m-42')->headers);
         self::assertSame([], $this->deliveries->records());
+    }
+
+    public function testReplayAndCheckOfAWebhookDeadLetterReturnTheLaneOfTheSourceAsAWebhookDestination(): void
+    {
+        $this->store->add(DeadLetterFactory::make('dl-1', source: 'webhook:crm'));
+        $service = $this->service();
+
+        self::assertEquals(new ReplayDestination('crm', webhook: true), $service->check('dl-1', 'orders'));
+        self::assertEquals(new ReplayDestination('crm', webhook: true), $service->replay('dl-1', 'orders'));
+    }
+
+    public function testReplayAndCheckOfAConsumerDeadLetterReturnTheLaneArgumentAsAnOutboxDestination(): void
+    {
+        $this->store->add(DeadLetterFactory::make('dl-1', source: 'orders_q'));
+        $service = $this->service();
+
+        self::assertEquals(new ReplayDestination('orders', webhook: false), $service->check('dl-1', 'orders'));
+        self::assertEquals(new ReplayDestination('default', webhook: false), $service->check('dl-1'));
+        self::assertEquals(new ReplayDestination('orders', webhook: false), $service->replay('dl-1', 'orders'));
     }
 
     private function service(

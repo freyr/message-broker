@@ -278,10 +278,27 @@ then sends it as each other row. The new row has:
 
 The rules of the outbox replay apply: one transaction, the replay mark first
 and the delivery insert second, the same refusals, `--dry-run`, `--all`,
-`--limit` and `--rate`. `--lane` has no effect, and the output names the
-`--lane` value, not the lane of the source. A `--all` run can replay outbox
-rows and webhook rows together; use `--source=webhook:<lane>` to select the
-rows of one lane.
+`--limit` and `--rate`. `--lane` has no effect. The output names the
+webhook lane, also on `--dry-run`:
+
+```
+Replayed 0190f7e2-... into webhook lane 'crm' (a webhook dead letter goes to the lane of its source; --lane has no effect).
+```
+
+A `--all` run can replay outbox rows and webhook rows together. The summary
+line counts the outbox replays, and a second line, only when the run replayed
+a webhook dead letter, counts the webhook replays and names their lanes:
+
+```
+Replayed 120, skipped 3 (not replayable), skipped 1 (already replayed), failed 0 into lane 'orders'.
+Replayed 4 webhook dead letter(s) into the webhook lanes of their sources (--lane has no effect on them): crm, erp.
+```
+
+Use `--source=webhook:<lane>` to select the rows of one lane.
+
+`ReplayService::replay()` and `check()` return a `ReplayDestination`: the
+`lane` that the replay uses and `webhook` (`true` for a webhook delivery lane,
+`false` for an outbox lane).
 
 Give the service the delivery store as its last argument, on the connection of
 the transaction. A service with no delivery store refuses a webhook dead
