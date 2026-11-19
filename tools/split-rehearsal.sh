@@ -6,7 +6,8 @@
 #
 # The script runs inside the PHP environment (the `php` service of compose, or the CI runner).
 # It is POSIX sh (the PHP image is Alpine and has no bash). It needs PHP, Composer and the extensions of the packages. It does not call Docker or Git.
-# Functional tests need the PostgreSQL and RabbitMQ settings in the environment (see compose.yaml).
+# Functional tests need the PostgreSQL and RabbitMQ settings and the URL of the webhook test server (WEBHOOK_SERVER_URL)
+# in the environment (see compose.yaml).
 #
 # Steps:
 #   1. Assemble the four future repos in a temporary folder: the files of packages/<name>/ at the
@@ -40,7 +41,7 @@ case "${PACKAGE}" in
     core) NEEDS="" ;;
     postgresql) NEEDS="core" ;;
     amqp) NEEDS="core postgresql" ;;
-    http) NEEDS="core" ;;
+    http) NEEDS="core postgresql" ;;
     *) usage ;;
 esac
 

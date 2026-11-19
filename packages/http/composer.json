@@ -23,6 +23,7 @@
         "symfony/http-foundation": "^8.1"
     },
     "require-dev": {
+        "freyr/message-broker-postgresql": "^0.12",
         "infection/infection": "^0.35.11",
         "phpunit/phpunit": "^13.4"
     },
