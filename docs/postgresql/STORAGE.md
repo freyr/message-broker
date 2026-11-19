@@ -5,7 +5,9 @@ The PostgreSQL adapter implements the storage ports of the core on PostgreSQL
 `Freyr\MessageBroker\Adapter\PostgreSql\`. This document describes the tables,
 the schema setup, the classes and their wiring, and the test support. The
 partitions and the retention of the outbox are in
-[RETENTION.md](RETENTION.md). The pooler rules are in
+[RETENTION.md](RETENTION.md). The table `webhook_deliveries` of the webhook
+queue, with its store, schema installer and retention, is in
+[WEBHOOKS.md](WEBHOOKS.md). The pooler rules are in
 [CONNECTION_POOLING.md](CONNECTION_POOLING.md). The ports are listed in
 [../core/PORTS.md](../core/PORTS.md).
 
@@ -107,6 +109,9 @@ $application->add(new SetupSchemaCommand(new PostgreSqlSchemaInstaller($pdo)));
 | `PdoTransaction` | `Transaction` | `PDO $pdo` |
 | `PostgreSqlSchemaInstaller` | `SchemaInstaller` | `PDO $pdo` |
 | `PostgreSqlOutboxRetention` | `OutboxRetention` | `PDO $pdo` |
+| `PostgreSqlDeliveryStore` | `Webhook\DeliveryStore` | `PDO $pdo` |
+| `PostgreSqlDeliverySchemaInstaller` | `SchemaInstaller` | `PDO $pdo` |
+| `PostgreSqlDeliveryRetention` | `Webhook\DeliveryRetention` | `PDO $pdo` |
 
 Use the connections like this:
 
@@ -148,7 +153,8 @@ $retention = new PostgreSqlOutboxRetention($pdo);
 
 The trait `Freyr\MessageBroker\Adapter\PostgreSql\Testing\PostgreSqlTestSupport`
 is the PostgreSQL set-up of the functional tests. It opens one PDO connection,
-recreates the schema for each test class, and clears the rows before each test.
+recreates the schema for each test class (with `webhook_deliveries`), and
+clears the rows before each test.
 It reads `POSTGRES_DSN`, `POSTGRES_USER` and `POSTGRES_PASSWORD`. It refuses to
 run when the database name does not contain `_test`, because it drops the
 tables. Infection sets `TEST_TOKEN` for each parallel worker, and the trait then

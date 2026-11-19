@@ -25,10 +25,10 @@ ports and extends the contract test cases of the test kit (see
 | `ErrorHandler` | Receive each handled failure with its context. | Your own class |
 | `DeadLetter\DeadLetterSink` | Make a dead letter durable at the destination of a consumer (`store()`), the table or a queue of the transport. `DeadLetterStore` extends it. `DeliveryProcessor` takes a sink as `deadLetters`. | `PostgreSqlDeadLetterStore` (PostgreSQL adapter); `AmqpDeadLetterSink` (AMQP adapter); `InMemoryDeadLetterStore` (test kit) |
 | `Webhook\SubscriptionProvider` | Give the webhook subscriptions: by message name (`forMessage()`), by lane (`find()`), and all lanes (`lanes()`). See [WEBHOOKS.md](WEBHOOKS.md). | Your own class; `InMemorySubscriptionProvider` (test kit) |
-| `Webhook\DeliveryStore` | Insert delivery rows. Claim due rows of many lanes with a lease (`claim()`), write the results with the lease check and the dead letters (`complete()`), and claim the expired rows (`claimExpired()`). | `InMemoryDeliveryStore` (test kit) |
+| `Webhook\DeliveryStore` | Insert delivery rows. Claim due rows of many lanes with a lease (`claim()`), write the results with the lease check and the dead letters (`complete()`), and claim the expired rows (`claimExpired()`). | `PostgreSqlDeliveryStore` (PostgreSQL adapter); `InMemoryDeliveryStore` (test kit) |
 | `Webhook\DeliverySender` | Send a batch of deliveries, each with its subscription, and return one result for each (`send()`). State the longest time of one call (`maxSendMs()`). | `FakeDeliverySender` (test kit) |
 | `Webhook\DeliveryRetryPolicy` | Decide between a retry at a time and a dead letter after a failed or refused result. State the longest retry delay (`longestDelayMs()`). | `DefaultDeliveryRetryPolicy` (core); your own policy |
-| `Webhook\DeliveryRetention` | Create the upcoming partitions of `webhook_deliveries` and drop the expired ones that hold no unfinished row. | — |
+| `Webhook\DeliveryRetention` | Create the upcoming partitions of `webhook_deliveries` and drop the expired ones that hold no unfinished row. | `PostgreSqlDeliveryRetention` (PostgreSQL adapter) |
 
 `DeliveryControl` has no reject: the processor never rejects or nacks a
 delivery as a result of a handler failure. A dead letter goes through the sink,

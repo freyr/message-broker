@@ -79,6 +79,7 @@ PostgreSQL adapter (`docs/postgresql/`):
 - [Storage](docs/postgresql/STORAGE.md) — the tables, the schema setup, the classes and their wiring
 - [Retention](docs/postgresql/RETENTION.md) — outbox partitions, `outbox:maintain`, pg_partman
 - [Connection pooling](docs/postgresql/CONNECTION_POOLING.md) — pgbouncer
+- [Webhook delivery storage](docs/postgresql/WEBHOOKS.md) — `webhook_deliveries`, the delivery store, its retention, pg_partman, the alert query
 
 AMQP adapter (`docs/amqp/`):
 
