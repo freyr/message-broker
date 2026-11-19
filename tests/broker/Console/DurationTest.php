@@ -42,6 +42,7 @@ final class DurationTest extends TestCase
         yield 'trailing text' => ['7dx'];
         yield 'negative' => ['-7d'];
         yield 'two units' => ['1h30m'];
+        yield 'trailing newline' => ["24h\n"];
     }
 
     #[DataProvider('invalidDurations')]

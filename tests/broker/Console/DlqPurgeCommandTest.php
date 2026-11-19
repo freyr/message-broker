@@ -138,6 +138,9 @@ final class DlqPurgeCommandTest extends TestCase
         yield 'older-than that is not a duration' => [[
             '--older-than' => '30days',
         ], "Invalid time '30days' for --older-than: expected a duration (30s, 15m, 24h, 7d)"];
+        yield 'older-than with a trailing newline' => [[
+            '--older-than' => "30d\n",
+        ], "Invalid time '30d\n' for --older-than: expected a duration (30s, 15m, 24h, 7d)"];
         yield 'since that overflows' => [[
             '--since' => '106751991168d',
         ], "Invalid time '106751991168d' for --since: the duration is too large"];

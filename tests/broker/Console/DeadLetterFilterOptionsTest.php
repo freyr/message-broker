@@ -169,6 +169,9 @@ final class DeadLetterFilterOptionsTest extends TestCase
         yield 'duration with more digits than an integer' => [[
             '--since' => '99999999999999999999s',
         ], "Invalid time '99999999999999999999s' for --since: the duration is too large"];
+        yield 'duration with a trailing newline' => [[
+            '--since' => "24h\n",
+        ], "Invalid time '24h\n' for --since: expected a duration (30s, 15m, 24h, 7d) or an ISO 8601 date-time with an offset or Z"];
     }
 
     public function testTheEpochIsTheEarliestValidTime(): void
