@@ -88,8 +88,9 @@ interface DeliveryStore
      * later complete() of its worker changes nothing (the row is finished).
      * Concurrent writers skip the rows of each other: a row that a different
      * session locks at this time is skipped (for a database: FOR UPDATE SKIP
-     * LOCKED), so a call can return fewer than $limit rows while more are
-     * left. Call it again until it returns 0.
+     * LOCKED), so a call can return fewer than $limit rows, also 0, while
+     * more are left. A return of 0 does not prove that no row is left: use
+     * countUnfinished() to see the rows that are left.
      *
      * @param int $before epoch milliseconds: a row whose created_at is earlier is abandoned
      * @param list<string>|null $lanes the lanes to abandon rows of; null = all lanes

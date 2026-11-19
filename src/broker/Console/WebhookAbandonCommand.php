@@ -27,7 +27,10 @@ use Symfony\Component\Console\Output\OutputInterface;
  * the source `webhook:<lane>`, so dlq:replay can send it again. The command
  * counts the rows of each lane (DeliveryStore::countUnfinished()), then calls
  * DeliveryStore::abandon() for each lane in batches until a call finds no
- * row, and prints the count of each lane. A dry run prints the counts and
+ * row, and prints the count of each lane. A row that a different session
+ * locks is skipped, so a call can find no row while rows are left: the
+ * command counts the lane again and prints the rows that are left, with a
+ * note to run the command again. A dry run prints the counts and
  * changes nothing. A worker that holds the lease of an abandoned row can
  * still send its request; its result write changes no row.
  *
@@ -98,6 +101,14 @@ final class WebhookAbandonCommand extends Command
             }
             $total += $count;
             $output->writeln("<info>{$prefix}{$lane}: {$count} row(s) {$verb}.</info>");
+            if (!$dryRun) {
+                $left = $this->store->countUnfinished($before, [$lane])[$lane] ?? 0;
+                if ($left > 0) {
+                    $output->writeln(
+                        "<comment>{$lane}: {$left} row(s) left (locked by a different session); run the command again.</comment>",
+                    );
+                }
+            }
         }
         $output->writeln("<info>{$prefix}Total: {$total} row(s) {$verb}.</info>");
 

@@ -120,7 +120,8 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
         )
         UPDATE webhook_deliveries w
         SET completed_at = CAST(now() AT TIME ZONE 'UTC' AS TIMESTAMP(3)),
-            outcome = 2
+            outcome =
+        SQL.' '.self::OUTCOME_DEAD."\n".<<<'SQL'
         WHERE w.id = ANY(ARRAY(SELECT id FROM picked)) AND w.created_at = ANY(ARRAY(SELECT created_at FROM picked))
           AND w.completed_at IS NULL
         RETURNING

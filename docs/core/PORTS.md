@@ -144,7 +144,8 @@ abandoned_at IS NULL`).
   `DeliveryDeadLetter::abandoned()` (error class `abandoned`, source
   `webhook:<lane>`, open row rule) and the final state dead, in one
   transaction. A lease does not protect a row. Rows that a different session
-  locks are skipped, so call it again until it returns 0. It returns the
+  locks are skipped, so a call can return 0 while rows are left;
+  `countUnfinished()` shows them. It returns the
   number of rows.
 - `countUnfinished(int $before, ?array $lanes): array` counts, with no change,
   the rows that `abandon()` with the same arguments would take: lane => count,

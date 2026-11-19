@@ -31,7 +31,7 @@ final readonly class DeliveryRecord
         public string $messageName,
         public string $body,              // final bytes of the request body
         public array $headers,
-        public int $createdAt,            // epoch milliseconds; the partition key and the start of the maximum age
+        public int $createdAt,            // epoch milliseconds; the partition key, and the date that abandon() compares
         public int $attempts = 0,         // requests that got a result
         public ?int $availableAt = null,  // epoch ms; null = due now (insert path)
     ) {

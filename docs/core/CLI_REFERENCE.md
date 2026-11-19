@@ -325,7 +325,10 @@ lane.
 A leased row is abandoned too. The worker that holds the lease can still send
 its request, but its result write changes nothing, because of the lease check.
 A row that a different session locks at that moment (a claim or a result
-write) is skipped, and the next call takes it.
+write) is skipped. When the last call of a lane finds no row because only
+locked rows are left, the command counts the lane again and prints
+`<lane>: <n> row(s) left (locked by a different session); run the command
+again.` The exit code stays `0`. Run the command again to end these rows.
 
 ```
 $ bin/console message-broker:webhook:abandon --before=2026-01-01 --dry-run

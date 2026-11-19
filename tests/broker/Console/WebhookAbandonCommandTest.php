@@ -263,12 +263,14 @@ final class WebhookAbandonCommandTest extends TestCase
                 return $this->inner->abandon($before, $lanes, $limit);
             }
 
+            private int $counts = 0;
+
             public function countUnfinished(int $before, ?array $lanes): array
             {
-                // A worker delivered the row after the count.
-                return [
+                // A worker delivered the row after the first count.
+                return ++$this->counts === 1 ? [
                     'crm' => 1,
-                ];
+                ] : $this->inner->countUnfinished($before, $lanes);
             }
         };
         $tester = new CommandTester(new WebhookAbandonCommand($store, $this->events, $this->logger));
@@ -281,6 +283,61 @@ final class WebhookAbandonCommandTest extends TestCase
         self::assertStringContainsString("crm: 0 row(s) abandoned.\nTotal: 0 row(s) abandoned.\n", $tester->getDisplay());
         self::assertSame([], $this->events->records);
         self::assertSame([], $this->logger->records);
+    }
+
+    public function testRowsThatADifferentSessionLocksArePrintedAsLeftWithANoteToRunAgain(): void
+    {
+        $lockedRow = $this->insert('crm', -1);
+        $inner = $this->store;
+        // A worker locks the row of crm: each abandon() call skips it and returns 0.
+        $store = new class($inner) implements DeliveryStore {
+            public function __construct(
+                private readonly InMemoryDeliveryStore $inner,
+            ) {}
+
+            public function insert(array $records): void
+            {
+                $this->inner->insert($records);
+            }
+
+            public function claim(array $lanes, int $limitForEachLane, int $total, int $leaseMs): array
+            {
+                return $this->inner->claim($lanes, $limitForEachLane, $total, $leaseMs);
+            }
+
+            public function complete(array $outcomes): array
+            {
+                return $this->inner->complete($outcomes);
+            }
+
+            public function abandon(int $before, ?array $lanes, int $limit): int
+            {
+                return $lanes === ['crm'] ? 0 : $this->inner->abandon($before, $lanes, $limit);
+            }
+
+            public function countUnfinished(int $before, ?array $lanes): array
+            {
+                return $this->inner->countUnfinished($before, $lanes);
+            }
+        };
+        $erp = $this->insert('erp', -1);
+        $tester = new CommandTester(new WebhookAbandonCommand($store, $this->events, $this->logger));
+
+        $status = $tester->execute([
+            '--before' => '2026-01-10',
+        ]);
+
+        self::assertSame(Command::SUCCESS, $status);
+        self::assertSame(
+            "Unfinished deliveries created before 2026-01-10 00:00:00.000 UTC:\n"
+            ."crm: 0 row(s) abandoned.\n"
+            ."crm: 1 row(s) left (locked by a different session); run the command again.\n"
+            ."erp: 1 row(s) abandoned.\n"
+            ."Total: 1 row(s) abandoned.\n",
+            $tester->getDisplay(),
+        );
+        self::assertNull($this->store->outcome($lockedRow->id));
+        self::assertSame(DeliveryCompletionKind::Dead, $this->store->outcome($erp->id));
     }
 
     /** @return iterable<string, array{string, string}> */
