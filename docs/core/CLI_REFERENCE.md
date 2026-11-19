@@ -16,8 +16,9 @@ $application->add(new SetupSchemaCommand(new PostgreSqlSchemaInstaller($pdo)));
 Commands are then run through your application's own console entry point
 (commonly `bin/console`), e.g. `php bin/console message-broker:setup:schema`.
 
-Duration options (`--since`, `--older-than`) share one format:
-`<number><s|m|h|d>`, e.g. `30s`, `15m`, `24h`, `7d`.
+A duration has one format: `<number><s|m|h|d>`, e.g. `30s`, `15m`, `24h`, `7d`.
+`--older-than` takes a duration only. `--since` and `--until` take a duration
+or an ISO 8601 date-time with an offset or `Z`.
 
 ## `message-broker:setup:schema`
 
@@ -168,24 +169,44 @@ Runs a registered consumer. Blocks until stopped.
 | `name` (argument, required) | The registered consumer name. |
 | `--require-signals` | Fail immediately at startup if `ext-pcntl` is unavailable (see the relay option above for the effect of a missing extension). |
 
+## Dead letter filter options
+
+`dlq:list`, `dlq:stats`, `dlq:purge` and `dlq:replay --all` take these
+options (`Console\DeadLetterFilterOptions`). All set options combine with
+AND. An invalid value, or both flags of one pair, ends the command with exit
+code 2 (`INVALID`) before it reads the table.
+
+| Option | Description |
+| --- | --- |
+| `--name` | Only this message name. |
+| `--source` | Only this source (work queue). |
+| `--error` | Only this error class (the full class name; exact match). |
+| `--message-id` | Only this message ID. |
+| `--since` | Only failures at or after a time: a duration (`24h`: now minus the duration) or an ISO 8601 date-time with an offset or `Z`. |
+| `--until` | Only failures before a time (exclusive); the same forms as `--since`. |
+| `--min-attempts` | Only rows with at least this many attempts (an integer of 1 or more). |
+| `--replayed` / `--not-replayed` | Only replayed / only not replayed rows; not both. |
+| `--replayable` / `--not-replayable` | Only rows with `replayable` true / false; not both. |
+
 ## `message-broker:dlq:list`
 
-Lists dead letters, newest first.
+Lists dead letters, newest first. The default shows replayed and open rows.
+The columns are `id`, `message_name`, `source`, `attempts`, `failed_at`,
+`replayed`, `replayable` (`yes` / `no`) and `error`.
 
 **Constructor:** `new DlqListCommand(DeadLetterStore $store)`
 
 | Option | Description |
 | --- | --- |
-| `--name` | Filter by message name. |
-| `--source` | Filter by source queue/topic. |
-| `--since` | Only failures younger than a duration, e.g. `24h`. |
+| The filter options | See [Dead letter filter options](#dead-letter-filter-options). |
 | `--limit` | Maximum rows (default `100`). |
 | `--offset` | Skip this many rows (default `0`), for paging. |
 
 ## `message-broker:dlq:show <id>`
 
-Shows one dead letter in full detail: metadata, headers, body, error class,
-error message, and stack trace.
+Shows one dead letter in full detail: metadata, the replay time, the
+`replayable` mark (`yes` / `no`), headers, body, error class, error message,
+and stack trace.
 
 **Constructor:** `new DlqShowCommand(DeadLetterStore $store)`
 
@@ -208,10 +229,8 @@ stays flat regardless of how many dead letters match.
 | Argument/Option | Description |
 | --- | --- |
 | `id` (argument, optional) | A single dead letter id. Omit and pass `--all` for a batch replay. |
-| `--all` | Replay every non-replayed dead letter matching the filters below. |
-| `--name` | With `--all`: only this message name. |
-| `--source` | With `--all`: only this source queue/topic. |
-| `--since` | With `--all`: only failures younger than a duration, e.g. `24h`. |
+| `--all` | Replay every dead letter that matches the filter options and is not replayed. The command always adds `--not-replayed`; `--replayed` with `--all` ends with exit code 2. |
+| The filter options | With `--all`: see [Dead letter filter options](#dead-letter-filter-options). |
 | `--lane` | The outbox lane the replayed message is re-enqueued into (default `default`). |
 | `--dry-run` | Show what would be replayed (count, and the first 5 candidates for `--all`); change nothing. |
 | `--force` | Required to run `--all` non-interactively (no TTY); a single-id replay never prompts. |
@@ -222,13 +241,29 @@ Deletes dead letters.
 
 **Constructor:** `new DlqPurgeCommand(DeadLetterStore $store)`
 
+With no option it deletes every row. The dry run and the prompt count with
+the full filter.
+
 | Option | Description |
 | --- | --- |
-| `--name` | Only this message name. |
-| `--source` | Only this source queue/topic. |
-| `--older-than` | Only failures older than a duration, e.g. `30d`. |
-| `--dry-run` | Show how many would be deleted; change nothing. The preview counts by `--name`/`--source` only (it does not apply `--older-than`), so it is reported as "up to N" — an upper bound, not an exact count. |
-| `--force` | Required to purge non-interactively (no TTY). |
+| The filter options | See [Dead letter filter options](#dead-letter-filter-options). |
+| `--older-than` | Only failures older than a duration, e.g. `30d` (sets the upper bound of `failed_at`). Not with `--until` (exit code 2). |
+| `--dry-run` | Print `[dry-run] would delete N dead letters.` with the exact count; change nothing. |
+| `--force` | Required to purge non-interactively (no TTY). Without it, an interactive session gets the prompt `Delete N dead letters? [y/N]`. |
+
+## `message-broker:dlq:stats`
+
+Prints one table row for each group of message name, source and error class
+of the matching rows: `message_name`, `source`, `error_class`, `count`,
+`oldest_failed_at` and `newest_failed_at`, the largest group first. With no
+group it prints `No dead letters match.` The exit code is 0. It prints no
+body and no error message.
+
+**Constructor:** `new DlqStatsCommand(DeadLetterStore $store)`
+
+| Option | Description |
+| --- | --- |
+| The filter options | See [Dead letter filter options](#dead-letter-filter-options). With no option it groups all rows; `--not-replayed` gives the open rows. |
 
 ## `message-broker:dedup:cleanup`
 

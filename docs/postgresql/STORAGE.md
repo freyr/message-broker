@@ -55,9 +55,29 @@ serves the cleanup.
 Columns: `id` UUID (primary key), `source` VARCHAR(255), `message_id`
 VARCHAR(255), `message_name` VARCHAR(255), `body` BYTEA, `headers` JSONB,
 `error_class` VARCHAR(255), `error_message` TEXT, `error_trace` TEXT,
-`attempts` INTEGER, `failed_at` TIMESTAMP(3) and `replayed_at` TIMESTAMP(3)
-NULL. The table is the same for every transport. The operator commands are in
-[../core/DLQ_OPERATIONS.md](../core/DLQ_OPERATIONS.md).
+`attempts` INTEGER, `failed_at` TIMESTAMP(3), `replayed_at` TIMESTAMP(3)
+NULL and `replayable` BOOLEAN NOT NULL DEFAULT TRUE (`false` when the body is
+the raw wire bytes). The table is the same for every transport. The operator
+commands are in [../core/DLQ_OPERATIONS.md](../core/DLQ_OPERATIONS.md).
+
+The partial unique index `uq_dead_letters_open` on (`message_id`, `source`)
+`WHERE replayed_at IS NULL` permits one open row for each message and work
+queue. `PostgreSqlDeadLetterStore::store()` is one statement:
+`INSERT ... SELECT ... WHERE NOT EXISTS` (a row with the same `id`) `ON
+CONFLICT (message_id, source) WHERE replayed_at IS NULL DO UPDATE` of the
+columns `message_name`, `error_class`, `error_message`, `error_trace`,
+`attempts`, `failed_at`, `body`, `headers` and `replayable`. Thus a store of a
+known `id` changes nothing, and an open row keeps its `id`. A replayed row is
+outside the index, so a failure after a replay inserts a new row. Two workers
+that store the same pair at the same time give one row: PostgreSQL serializes
+the two statements on the index entry.
+
+The statement names the index. When the index is absent (an existing table
+that did not get the migration of [../../UPGRADE.md](../../UPGRADE.md)), each
+store fails with `there is no unique or exclusion constraint matching the ON
+CONFLICT specification`, and each failed delivery stays unacked. The filters
+of `list()`, `count()`, `ids()`, `stats()` and `purge()` use no index: they
+scan the table, which holds failures only.
 
 ## Schema setup
 

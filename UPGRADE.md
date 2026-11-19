@@ -1,5 +1,150 @@
 # Upgrade guide
 
+## From 0.9.x to 0.10.0
+
+This release keeps one open dead letter row for each message and work queue,
+adds the `replayable` mark, and gives the `DeadLetterStore` port one filter
+object for each read and delete. It changes the schema of `dead_letters`, the
+behavior of `store()` and the port signatures. Migrate the table first, then
+deploy the code.
+
+### Migration of `dead_letters`
+
+The new code needs the column `dead_letters.replayable` and the partial unique
+index `uq_dead_letters_open`. The `store()` of the new code names the index in
+its `ON CONFLICT` clause: with no index, each dead letter write of the new code
+fails with `there is no unique or exclusion constraint matching the ON CONFLICT
+specification`. Run steps 1 to 4 with the old code in service, in this order,
+and deploy the new code directly after step 4:
+
+1. Add the column. It has a default, and the old code does not read it:
+
+   ```sql
+   ALTER TABLE dead_letters ADD COLUMN replayable BOOLEAN NOT NULL DEFAULT TRUE;
+   ```
+
+2. Give each raw dead letter with the literal message ID `unknown` its own
+   message ID. With no step 2, step 3 deletes all of them except the newest:
+
+   ```sql
+   UPDATE dead_letters SET message_id = 'unknown-' || id WHERE message_id = 'unknown';
+   ```
+
+3. Count the duplicate open rows, then delete them; the newest row of each
+   pair stays:
+
+   ```sql
+   SELECT message_id, source, COUNT(*) FROM dead_letters
+   WHERE replayed_at IS NULL
+   GROUP BY message_id, source
+   HAVING COUNT(*) > 1;
+
+   DELETE FROM dead_letters d
+   USING dead_letters n
+   WHERE d.replayed_at IS NULL AND n.replayed_at IS NULL
+     AND d.message_id = n.message_id AND d.source = n.source
+     AND (n.failed_at, n.id) > (d.failed_at, d.id);
+   ```
+
+4. Build the index. It blocks no write. It cannot run inside a transaction
+   block, so run it alone:
+
+   ```sql
+   CREATE UNIQUE INDEX CONCURRENTLY uq_dead_letters_open ON dead_letters (message_id, source) WHERE replayed_at IS NULL;
+   ```
+
+   When it fails with a duplicate key, it leaves an invalid index. Drop it,
+   then repeat steps 2, 3 and 4:
+
+   ```sql
+   DROP INDEX CONCURRENTLY IF EXISTS uq_dead_letters_open;
+   ```
+
+   The repeat starts at step 2, because the old code still writes the literal
+   `unknown` after the first step 2. A repeat of only step 3 deletes those rows
+   as duplicates, and their deliveries are already acked.
+5. Deploy the new code.
+
+Steps 1 to 3 can run in one transaction. A new installation gets the column
+and the index from `message-broker:setup:schema`. The installer does not alter
+a table that exists, so `setup:schema` on a table of 0.9.x does not add the
+column: run the steps above.
+
+Why the order is fixed:
+
+- A failed dead letter write leaves the delivery unacked. The delivery
+  returns, and its delivery count goes up by 1. When the write fails at each
+  delivery, the delivery limit of the broker applies (20 by default on a
+  RabbitMQ quorum queue): a queue with a dead letter exchange moves the message
+  there, and a queue with none drops it. A failed write is thus not free of
+  loss.
+- The new code must not start before the index exists: each dead letter write
+  fails, also the write of the delivery limit of the consumer, and each failure
+  of each message ends at the broker limit.
+- Steps 1 to 3 do not change the behavior of the old code.
+- From step 4 to step 5 the old code writes a plain `INSERT`. Two cases fail
+  with a unique violation: a message that fails again while it has an open
+  row, and a second raw dead letter with no ID on one work queue (the old code
+  writes the literal `unknown`). Each such delivery returns with a higher
+  count. Keep this window short: deploy the new code directly after step 4,
+  and check that each work queue has a dead letter exchange during the window.
+- The other orders cost more. A deploy before step 4 makes every dead letter
+  write fail until the index exists. An index build before step 3 fails on the
+  duplicates.
+
+To roll back to 0.9.x, drop the index before the old code runs, because the
+plain `INSERT` of the old code fails on a second open row of one pair:
+
+```sql
+DROP INDEX CONCURRENTLY uq_dead_letters_open;
+```
+
+The column can stay: the old code does not write it, and its default is
+`TRUE`. The rows that the upsert merged and the duplicates that step 3 deleted
+do not come back.
+
+### New signatures of `DeadLetterStore`
+
+`list()`, `count()` and `purge()` take a `DeadLetter\DeadLetterFilter` in place
+of the separate filter parameters (see `docs/core/PORTS.md`):
+
+| Old call | New call |
+| --- | --- |
+| `list($name, $source, $sinceMs, $limit, $offset, $replayed)` | `list(new DeadLetterFilter(messageName: $name, source: $source, failedFromMs: $sinceMs, replayed: $replayed), $limit, $offset)` |
+| `count($name, $source, $sinceMs, $replayed)` | `count(new DeadLetterFilter(...))` |
+| `purge($name, $source, $olderThanMs)` | `purge(new DeadLetterFilter(messageName: $name, source: $source, failedUntilMs: $olderThanMs))` |
+| — | `ids(DeadLetterFilter $filter, int $limit)` and `stats(DeadLetterFilter $filter)`: an own implementation of `DeadLetterStore` must add them. |
+| `store()` inserts a new row for each call | `store()` changes nothing when a row with the same `id` exists; otherwise it updates the open row of the same message ID and source, or inserts a new row. An own implementation must do the same and pass the contract test case. |
+
+A call with no argument, `list()` or `count()`, becomes
+`list(new DeadLetterFilter())` or `count(new DeadLetterFilter())`. An empty
+filter matches every row, so `purge(new DeadLetterFilter())` deletes every row,
+as `purge()` did.
+
+`DeadLetter` has the new last constructor parameter `bool $replayable = true`,
+and `DeadLetter::fromFailure()` the same. A caller with positional arguments
+still runs and gets `true`.
+
+`InMemoryDeadLetterStore::callsOf()` records the filter object as `filter`, in
+place of the separate parameters. `add()` stores the object as it is, with no
+upsert.
+
+### Commands
+
+- `dlq:list`, `dlq:purge`, `dlq:replay --all` and the new `dlq:stats` take the
+  same filter options: `--name`, `--source`, `--error`, `--message-id`,
+  `--since`, `--until`, `--min-attempts`, `--replayed` / `--not-replayed` and
+  `--replayable` / `--not-replayable`. `--since` keeps its meaning for a
+  duration and also takes an ISO 8601 date-time with an offset.
+- `dlq:purge` counts with the full filter. Its texts change to
+  `[dry-run] would delete N dead letters.` and `Delete N dead letters? [y/N]`.
+  `--older-than` together with `--until` ends with exit code 2.
+- `dlq:replay --all` always adds the condition `--not-replayed`; `--replayed`
+  together with `--all` ends with exit code 2.
+- `dlq:list` has the new column `replayable`, and `dlq:show` the new line
+  `replayable:`.
+- Register the new command `new DlqStatsCommand(DeadLetterStore $store)`.
+
 ## From 0.8.x to 0.9.0
 
 This release adds the abandon mark of an outbox row: a new column, two new

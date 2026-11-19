@@ -11,7 +11,7 @@ final readonly class Duration
 {
     public static function toMilliseconds(string $duration): int
     {
-        if (preg_match('/^(\d+)(s|m|h|d)$/', $duration, $matches) !== 1) {
+        if (preg_match('/^(\d+)(s|m|h|d)\z/', $duration, $matches) !== 1) {
             throw new \InvalidArgumentException(
                 "Invalid duration '{$duration}' — expected <number><s|m|h|d>, e.g. '7d'",
             );

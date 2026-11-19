@@ -56,6 +56,7 @@ final readonly class DeadLetter
         public int $attempts,
         public int $failedAt,         // epoch milliseconds
         public ?int $replayedAt = null,
+        public bool $replayable = true, // false: the body is raw wire bytes, not the canonical document
     ) {
         $this->source = self::name($source);
         $this->messageId = self::name($messageId);
@@ -77,6 +78,7 @@ final readonly class DeadLetter
         array $headers,
         Throwable $error,
         int $attempts,
+        bool $replayable = true,
     ): self {
         return new self(
             id: Uuid::v7()->toString(),
@@ -90,6 +92,7 @@ final readonly class DeadLetter
             errorTrace: $error->getTraceAsString(),
             attempts: $attempts,
             failedAt: EpochMillis::now(),
+            replayable: $replayable,
         );
     }
 

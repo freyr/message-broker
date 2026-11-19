@@ -40,6 +40,7 @@ final class DlqShowCommandTest extends TestCase
                 attempts:      5
                 failed_at:     2025-06-15 15:06:40.123
                 replayed_at:   2025-06-15 15:06:41.000
+                replayable:    yes
                 error_class:   RuntimeException
                 error_message: boom
                 headers:       {"correlation_id":"c-1"}
@@ -65,6 +66,19 @@ final class DlqShowCommandTest extends TestCase
 
         self::assertStringContainsString("\nreplayed_at:   -\n", $tester->getDisplay());
         self::assertStringContainsString("\nheaders:       []\n", $tester->getDisplay());
+    }
+
+    public function testARawDeadLetterShowsThatItIsNotReplayable(): void
+    {
+        $store = new InMemoryDeadLetterStore();
+        $store->add(DeadLetterFactory::make('dl-1', replayable: false));
+        $tester = new CommandTester(new DlqShowCommand($store));
+
+        $tester->execute([
+            'id' => 'dl-1',
+        ]);
+
+        self::assertStringContainsString("\nreplayed_at:   -\nreplayable:    no\nerror_class:", $tester->getDisplay());
     }
 
     public function testUnknownIdFails(): void

@@ -49,6 +49,17 @@ Each factory must return a store that is empty at the start of the test. Some te
 - `failing()` returns only the open rows of the lane with `attempts >= $minAttempts`. It excludes a published row, an abandoned row, a row of a different lane and a row below the minimum. It orders by attempts, then by age, and it keeps to the limit. `bodyBytes` is `strlen()` of the body. A row leaves the list when it is abandoned.
 - `failing()` rejects a `$minAttempts` or a `$limit` below 1 with `InvalidArgumentException`.
 
+`DeadLetterStoreContractTestCase` has these cases for the open row rule, the replayable mark and the filter:
+
+- A second `store()` of an open pair (message ID, source) keeps one row and its first `id`, with the data of the second dead letter. A `store()` after a replay of the pair adds a new open row.
+- A `store()` of an `id` that is already a row (open or replayed) changes nothing.
+- The same message ID on two sources gives two rows; two message IDs on one source give two rows.
+- The `replayable` mark round-trips as `true` and as `false`, an upsert changes it in each direction, and `markReplayed()` keeps it.
+- Each filter field alone selects the same rows in `list()`, `count()`, `ids()` and `purge()`, with the bounds: `failedFromMs` is inclusive, `failedUntilMs` is exclusive, `minAttempts` is inclusive. One case combines all fields with AND.
+- `ids()` is oldest first and keeps to the limit; a limit below 1 throws. `stats()` gives one entry for each group, by count and then by name, source and error class.
+
+The helper of the test case gives each dead letter a new message ID by default, so two stored dead letters are two rows.
+
 `TransactionContractTestCase` calls each factory one time in each test, before the first `begin()`, in this order: `createTransaction()`, `createDeduplicationStore()`, `createOutboxStore()`, `createDeadLetterStore()`. Thus a store can join the transaction in its constructor.
 
 Put the tests that depend on the technology (SQL text, partitions, the headers of an AMQP message) in your own test classes. The contract test cases do not hold them.
@@ -61,7 +72,7 @@ The fakes are correct in-memory implementations of the ports. Each fake passes t
 |---|---|
 | `InMemoryOutboxStore` | `OutboxStore`: it claims, and it applies the `ClaimOutcome`. It keys the rows by (`id`, `createdAt`), as the primary key of the outbox table, so a replay adds a second row with the same id. An id in the outcome applies to each claimed row with that id. `row()`, `isPublished()` and `isAbandoned()` use the row of the id with the latest `createdAt`; `unpublishedIds()` gives each id one time. `abandon()` marks the open rows of an id; the claim, `failing()` and the outcome skip an abandoned row. An abandoned row is not published, so `unpublishedIds()` still lists it. A rollback restores the marks |
 | `InMemoryDeduplicationStore` | `DeduplicationStore` |
-| `InMemoryDeadLetterStore` | `DeadLetterStore` |
+| `InMemoryDeadLetterStore` | `DeadLetterStore`: `store()` keeps the rule of the port (idempotent by `id`, one open row for each message ID and source). `add()` is a seed hook that stores the object as it is, with no upsert, so a command test can seed two open rows of one pair. `callsOf()` gives the arguments of each call, with the filter object as `filter` |
 | `InMemoryTransaction` | `Transaction` |
 | `FakeOutboxPublisher` | `OutboxPublisher`: it records the calls, and it can refuse ids or throw |
 | `RecordingDeliveryControl` | `DeliveryControl`: it records `ack()` and `retry()` |

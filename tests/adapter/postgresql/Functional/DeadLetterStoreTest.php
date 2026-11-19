@@ -82,6 +82,42 @@ final class DeadLetterStoreTest extends FunctionalTestCase
         $this->store->find($deadLetter->id);
     }
 
+    /**
+     * Two sessions store the same pair, one after the other: the second store
+     * updates the open row of the first. Each session opens its own direct
+     * connection, so the test does not depend on a pooler. It checks the
+     * sequential case only; the concurrent case rests on ON CONFLICT.
+     */
+    public function testAStoreOnAConnectionAndAStoreOfTheSamePairOnAnotherConnectionGiveOneRow(): void
+    {
+        $first = $this->deadLetter(messageId: 'm-pair');
+        $second = $this->deadLetter(messageId: 'm-pair', messageName: 'order.second');
+
+        (new PostgreSqlDeadLetterStore(self::newConnection()))->store($first);
+        (new PostgreSqlDeadLetterStore(self::newConnection()))->store($second);
+
+        self::assertSame(1, self::fetchInt("SELECT COUNT(*) FROM dead_letters WHERE message_id = 'm-pair'"));
+        self::assertSame('order.second', $this->store->find($first->id)?->messageName);
+        self::assertNull($this->store->find($second->id));
+    }
+
+    public function testAStoreOfANewPairWithNoIndexFailsWithTheMessageThatTheDocumentsName(): void
+    {
+        self::$pdo->exec('DROP INDEX uq_dead_letters_open');
+
+        try {
+            $this->store->store($this->deadLetter(messageId: 'm-no-index'));
+            self::fail('the store names the index in ON CONFLICT');
+        } catch (\PDOException $error) {
+            self::assertStringContainsString(
+                'there is no unique or exclusion constraint matching the ON CONFLICT specification',
+                $error->getMessage(),
+            );
+        } finally {
+            self::schemaInstaller()->install(0);
+        }
+    }
+
     private function deadLetter(string $messageId, string $messageName = 'order.placed'): DeadLetter
     {
         return DeadLetter::fromFailure(

@@ -30,6 +30,27 @@ final class PostgreSqlSchemaInstallerTest extends FunctionalTestCase
         $installer->install(3);
 
         self::assertSame(4, self::fetchInt("SELECT COUNT(*) FROM pg_inherits WHERE inhparent = 'outbox_messages'::regclass"));
+        self::assertSame(1, self::fetchInt("SELECT COUNT(*) FROM pg_indexes WHERE indexname = 'uq_dead_letters_open'"));
+    }
+
+    public function testTheOpenPairIndexIsUniqueValidAndPartialOnTheRowsThatAreNotReplayed(): void
+    {
+        $this->dropEverything();
+
+        (new PostgreSqlSchemaInstaller(self::$pdo))->install(0);
+
+        $statement = self::$pdo->query(<<<'SQL'
+            SELECT i.indisunique, i.indisvalid, pg_get_indexdef(i.indexrelid) AS definition
+            FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+            WHERE c.relname = 'uq_dead_letters_open'
+            SQL);
+        self::assertNotFalse($statement);
+        $index = $statement->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame([
+            'indisunique' => true,
+            'indisvalid' => true,
+            'definition' => 'CREATE UNIQUE INDEX uq_dead_letters_open ON public.dead_letters USING btree (message_id, source) WHERE (replayed_at IS NULL)',
+        ], $index);
     }
 
     public function testInstallKeepsExistingRows(): void

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Console;
 
 use Freyr\MessageBroker\Console\DlqReplayCommand;
+use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Testing\InMemoryDeadLetterStore;
@@ -104,9 +105,14 @@ final class DlqReplayCommandTest extends TestCase
             $tester->getDisplay(),
         );
         self::assertSame([], $this->outbox->inserted);
-        self::assertSame(false, $this->store->callsOf('count')[0]['replayed']);
-        self::assertSame(5, $this->store->callsOf('list')[0]['limit']);
-        self::assertSame(false, $this->store->callsOf('list')[0]['replayed']);
+        self::assertEquals([[
+            'filter' => new DeadLetterFilter(replayed: false),
+        ]], $this->store->callsOf('count'));
+        self::assertEquals([[
+            'filter' => new DeadLetterFilter(replayed: false),
+            'limit' => 5,
+            'offset' => 0,
+        ]], $this->store->callsOf('list'));
     }
 
     public function testAllPassesTheFiltersToCountAndList(): void
@@ -122,18 +128,107 @@ final class DlqReplayCommandTest extends TestCase
             '--since' => '2h',
         ]);
 
-        $expected = [
-            'messageName' => 'order.placed',
-            'source' => 'orders_q',
-            'sinceMs' => EpochMillis::now() - 7_200_000,
-            'replayed' => false,
-        ];
-        self::assertSame([$expected], $this->store->callsOf('count'));
-        $listCall = $this->store->callsOf('list')[0];
-        self::assertSame('order.placed', $listCall['messageName']);
-        self::assertSame('orders_q', $listCall['source']);
-        self::assertSame($expected['sinceMs'], $listCall['sinceMs']);
+        $expected = new DeadLetterFilter(
+            messageName: 'order.placed',
+            source: 'orders_q',
+            failedFromMs: EpochMillis::now() - 7_200_000,
+            replayed: false,
+        );
+        self::assertEquals([[
+            'filter' => $expected,
+        ]], $this->store->callsOf('count'));
+        self::assertEquals($expected, $this->store->callsOf('list')[0]['filter']);
         self::assertCount(1, $this->outbox->inserted);
+    }
+
+    public function testEachFilterOptionOfAllReachesCountAndList(): void
+    {
+        $tester = $this->tester();
+
+        $tester->execute([
+            '--all' => true,
+            '--force' => true,
+            '--error' => 'LogicException',
+            '--message-id' => 'm-1',
+            '--until' => '1h',
+            '--min-attempts' => '2',
+            '--replayable' => true,
+        ]);
+
+        $expected = new DeadLetterFilter(
+            errorClass: 'LogicException',
+            messageId: 'm-1',
+            failedUntilMs: EpochMillis::now() - 3_600_000,
+            minAttempts: 2,
+            replayed: false,
+            replayable: true,
+        );
+        self::assertEquals($expected, $this->store->callsOf('count')[0]['filter']);
+        self::assertEquals($expected, $this->store->callsOf('list')[0]['filter']);
+    }
+
+    public function testAllWithNotReplayedKeepsTheReplayedConditionFalse(): void
+    {
+        $tester = $this->tester();
+
+        $tester->execute([
+            '--all' => true,
+            '--force' => true,
+            '--not-replayed' => true,
+        ]);
+
+        self::assertEquals(new DeadLetterFilter(replayed: false), $this->store->callsOf('count')[0]['filter']);
+        self::assertEquals(new DeadLetterFilter(replayed: false), $this->store->callsOf('list')[0]['filter']);
+    }
+
+    public function testAllWithReplayedIsInvalidAndReplaysNothing(): void
+    {
+        $this->store->add(DeadLetterFactory::make('dl-done', replayedAt: 1_750_000_000_200));
+        $tester = $this->tester();
+
+        $status = $tester->execute([
+            '--all' => true,
+            '--force' => true,
+            '--replayed' => true,
+        ]);
+
+        self::assertSame(Command::INVALID, $status);
+        self::assertSame("--replayed cannot be used with --all: a bulk replay selects the rows that are not replayed.\n", $tester->getDisplay());
+        self::assertSame([], $this->store->callsOf('count'));
+        self::assertSame([], $this->store->callsOf('list'));
+        self::assertSame([], $this->outbox->inserted);
+    }
+
+    public function testAllWithATimeThatOverflowsIsInvalid(): void
+    {
+        $tester = $this->tester();
+
+        $status = $tester->execute([
+            '--all' => true,
+            '--force' => true,
+            '--since' => '106751991168d',
+        ]);
+
+        self::assertSame(Command::INVALID, $status);
+        self::assertSame("Invalid time '106751991168d' for --since: the duration is too large\n", $tester->getDisplay());
+        self::assertSame([], $this->store->callsOf('count'));
+        self::assertSame([], $this->outbox->inserted);
+    }
+
+    public function testAllWithAnInvalidFilterOptionIsInvalid(): void
+    {
+        $tester = $this->tester();
+
+        $status = $tester->execute([
+            '--all' => true,
+            '--force' => true,
+            '--replayable' => true,
+            '--not-replayable' => true,
+        ]);
+
+        self::assertSame(Command::INVALID, $status);
+        self::assertSame("Use --replayable or --not-replayable, not both.\n", $tester->getDisplay());
+        self::assertSame([], $this->store->callsOf('count'));
     }
 
     public function testAllDrainsInBatchesOfFiveHundredByDefault(): void

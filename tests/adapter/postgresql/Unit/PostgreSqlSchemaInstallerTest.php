@@ -32,6 +32,16 @@ final class PostgreSqlSchemaInstallerTest extends TestCase
         self::assertStringContainsString('CREATE TABLE IF NOT EXISTS dead_letters', $ddl);
     }
 
+    public function testDeadLettersHaveTheReplayableColumnAfterReplayedAt(): void
+    {
+        $deadLetters = $this->installer()->sql(0)[4];
+
+        self::assertStringContainsString(
+            "replayed_at TIMESTAMP(3) NULL,\n    replayable BOOLEAN NOT NULL DEFAULT TRUE\n)",
+            $deadLetters,
+        );
+    }
+
     public function testOutboxHasNoKeyOrMetadataColumn(): void
     {
         $ddl = implode("\n", $this->installer()->sql(0));
@@ -50,25 +60,26 @@ final class PostgreSqlSchemaInstallerTest extends TestCase
     {
         $statements = $this->installer()->sql(2);
 
-        self::assertCount(5 + 3 * 2, $statements, 'five table and index statements, then CREATE and ATTACH for each of 3 days');
+        self::assertCount(6 + 3 * 2, $statements, 'six table and index statements, then CREATE and ATTACH for each of 3 days');
         self::assertStringStartsWith('CREATE TABLE IF NOT EXISTS outbox_messages', $statements[0]);
         self::assertStringStartsWith('CREATE INDEX IF NOT EXISTS idx_outbox_pending', $statements[1]);
         self::assertStringStartsWith('CREATE TABLE IF NOT EXISTS message_deduplication', $statements[2]);
         self::assertStringStartsWith('CREATE INDEX IF NOT EXISTS idx_dedup_created_at', $statements[3]);
         self::assertStringStartsWith('CREATE TABLE IF NOT EXISTS dead_letters', $statements[4]);
+        self::assertStringStartsWith('CREATE UNIQUE INDEX IF NOT EXISTS uq_dead_letters_open', $statements[5]);
 
         $today = new DateTimeImmutable('today', new DateTimeZone('UTC'));
         foreach ([0, 1, 2] as $offset) {
             $day = $today->modify("+{$offset} day");
             $name = 'outbox_messages_p'.$day->format('Ymd');
-            self::assertStringStartsWith(sprintf('CREATE TABLE IF NOT EXISTS "%s"', $name), $statements[5 + 2 * $offset]);
-            self::assertStringStartsWith(sprintf('ALTER TABLE outbox_messages ATTACH PARTITION "%s"', $name), $statements[6 + 2 * $offset]);
+            self::assertStringStartsWith(sprintf('CREATE TABLE IF NOT EXISTS "%s"', $name), $statements[6 + 2 * $offset]);
+            self::assertStringStartsWith(sprintf('ALTER TABLE outbox_messages ATTACH PARTITION "%s"', $name), $statements[7 + 2 * $offset]);
         }
     }
 
     public function testSqlWithNoDaysAheadHoldsTheTablesAndTodaysPartitionOnly(): void
     {
-        self::assertCount(5 + 2, $this->installer()->sql(0));
+        self::assertCount(6 + 2, $this->installer()->sql(0));
     }
 
     public function testSqlRejectsNegativeDaysAhead(): void
@@ -76,6 +87,14 @@ final class PostgreSqlSchemaInstallerTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
 
         $this->installer()->sql(-1);
+    }
+
+    public function testDeadLettersHaveAPartialUniqueIndexOnTheOpenPair(): void
+    {
+        self::assertSame(
+            'CREATE UNIQUE INDEX IF NOT EXISTS uq_dead_letters_open ON dead_letters (message_id, source) WHERE replayed_at IS NULL',
+            preg_replace('/\s+/', ' ', trim($this->installer()->sql(0)[5])),
+        );
     }
 
     private function installer(): PostgreSqlSchemaInstaller

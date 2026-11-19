@@ -12,6 +12,7 @@ use Freyr\MessageBroker\Console\DlqListCommand;
 use Freyr\MessageBroker\Console\DlqPurgeCommand;
 use Freyr\MessageBroker\Console\DlqReplayCommand;
 use Freyr\MessageBroker\Console\DlqShowCommand;
+use Freyr\MessageBroker\Console\DlqStatsCommand;
 use Freyr\MessageBroker\Console\SetupSchemaCommand;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
@@ -326,6 +327,57 @@ final class ConsoleCommandsTest extends FunctionalTestCase
             'an already-replayed dead letter must not be replayed again',
         );
         self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM dead_letters WHERE replayed_at IS NULL'));
+    }
+
+    public function testDlqStatsGroupsTheRowsOfTheTable(): void
+    {
+        $this->seedDeadLetter('01900000-0000-7000-8000-0000000000a1', 'order.placed');
+        $this->seedDeadLetter('01900000-0000-7000-8000-0000000000a2', 'order.placed');
+        $replayed = $this->seedDeadLetter('01900000-0000-7000-8000-0000000000a3', 'order.cancelled');
+        $this->deadLetters->markReplayed($replayed->id);
+
+        $all = new CommandTester(new DlqStatsCommand($this->deadLetters));
+        $all->execute([]);
+        $all->assertCommandIsSuccessful();
+        $lines = explode("\n", $all->getDisplay());
+        self::assertMatchesRegularExpression('/^\| order\.placed\s+\| orders_q \| RuntimeException \| 2\s+\| /', $lines[3]);
+        self::assertMatchesRegularExpression('/^\| order\.cancelled \| orders_q \| RuntimeException \| 1\s+\| /', $lines[4]);
+
+        $open = new CommandTester(new DlqStatsCommand($this->deadLetters));
+        $open->execute([
+            '--not-replayed' => true,
+        ]);
+        $open->assertCommandIsSuccessful();
+        self::assertStringContainsString('order.placed', $open->getDisplay());
+        self::assertStringNotContainsString('order.cancelled', $open->getDisplay());
+
+        $none = new CommandTester(new DlqStatsCommand($this->deadLetters));
+        $none->execute([
+            '--source' => 'unknown_q',
+        ]);
+        self::assertSame("No dead letters match.\n", $none->getDisplay());
+    }
+
+    public function testDlqPurgeDryRunWithOlderThanGivesTheExactCount(): void
+    {
+        $old = $this->seedDeadLetter('01900000-0000-7000-8000-0000000000b1', 'order.placed');
+        $this->seedDeadLetter('01900000-0000-7000-8000-0000000000b2', 'order.placed');
+        self::$pdo->prepare('UPDATE dead_letters SET failed_at = :failed_at WHERE id = :id')->execute([
+            'failed_at' => EpochMillis::toDateTime(EpochMillis::now() - 31 * 86_400_000)->format('Y-m-d H:i:s.v'),
+            'id' => $old->id,
+        ]);
+
+        $dry = new CommandTester(new DlqPurgeCommand($this->deadLetters));
+        $dry->execute([
+            '--dry-run' => true,
+            '--older-than' => '30d',
+        ], [
+            'interactive' => false,
+        ]);
+
+        $dry->assertCommandIsSuccessful();
+        self::assertSame("[dry-run] would delete 1 dead letters.\n", $dry->getDisplay());
+        self::assertSame(2, self::fetchInt('SELECT COUNT(*) FROM dead_letters'));
     }
 
     private function seedDeadLetter(string $id, string $name): DeadLetter

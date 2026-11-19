@@ -15,7 +15,7 @@ ports and extends the contract test cases of the test kit (see
 | `Storage\SchemaInstaller` | Create the tables, or return their DDL. | `PostgreSqlSchemaInstaller` (PostgreSQL adapter) |
 | `Storage\Transaction` | Begin, commit and roll back the consumer transaction. | `PdoTransaction` (PostgreSQL adapter); `InMemoryTransaction` (test kit) |
 | `Consumer\DeduplicationStore` | Record that a consumer processed a message. Prune old entries. | `PostgreSqlDeduplicationStore` (PostgreSQL adapter); `InMemoryDeduplicationStore` (test kit) |
-| `DeadLetter\DeadLetterStore` | Store, find, list, mark as replayed and purge dead letters. | `PostgreSqlDeadLetterStore` (PostgreSQL adapter); `InMemoryDeadLetterStore` (test kit) |
+| `DeadLetter\DeadLetterStore` | Store a dead letter (idempotent by `id`; one open row for each message ID and source). Find one. List, count, purge, get the IDs (`ids()`) and group (`stats()`) the rows that match a `DeadLetterFilter`. Mark a row as replayed. | `PostgreSqlDeadLetterStore` (PostgreSQL adapter); `InMemoryDeadLetterStore` (test kit) |
 | `Consumer\DeliveryControl` | Ack one delivery, or schedule its retry. | `AmqpDeliveryControl` (AMQP adapter); `RecordingDeliveryControl` (test kit) |
 | `Consumer\MessageDispatcher` | Run the handler of an incoming message. | `CallableDispatcher` (core); your own adapter to a command bus |
 | `Retry\RetryPolicy` | Decide to retry, dead-letter or discard a failed delivery. | `ExponentialRetryPolicy` and `RetryPolicyMap` (core); your own policy |
@@ -23,6 +23,35 @@ ports and extends the contract test cases of the test kit (see
 | `Serializer\Deserializer` | Decode a delivery to an `IncomingMessage`. | `JsonDeserializer` (core) |
 | `Observability\BrokerEvents` | Receive the lifecycle events (see [PRODUCTION.md](PRODUCTION.md), *Observability*). | Your own class |
 | `ErrorHandler` | Receive each handled failure with its context. | Your own class |
+
+### The methods of `DeadLetterStore`
+
+- `store(DeadLetter $deadLetter): void` changes nothing when a row with the
+  same `id` exists (open or replayed). Otherwise, when an open row (not
+  replayed) of the same message ID and source exists, that row keeps its `id`
+  and gets the message name, error class, error message, error trace,
+  attempts, `failedAt`, body, headers and `replayable` of the new dead letter.
+  With no open row, it adds a row with the `id` of the dead letter.
+- `list(DeadLetterFilter $filter, int $limit = 100, int $offset = 0)`: the
+  matching rows, newest first (`failedAt` descending, then `id` descending).
+- `count(DeadLetterFilter $filter)`: the count of the rows that `list()` gives
+  with no limit.
+- `ids(DeadLetterFilter $filter, int $limit)`: the IDs of the matching rows,
+  oldest first (`failedAt` ascending, then `id` ascending), at most `$limit`.
+  A `$limit` below 1 throws `InvalidArgumentException`.
+- `stats(DeadLetterFilter $filter)`: one `DeadLetterStat` for each group of
+  message name, source and error class (count, oldest and newest
+  `failedAt`), count descending, then by name, source and error class.
+- `purge(DeadLetterFilter $filter)`: deletes each matching row and returns the
+  count. An empty filter deletes every row.
+
+`DeadLetter\DeadLetterFilter` has nine optional criteria (`null` means no
+condition), which combine with AND: `messageName`, `source`, `errorClass`,
+`messageId` (equal), `failedFromMs` (inclusive), `failedUntilMs` (exclusive),
+`minAttempts` (at least), `replayed` and `replayable`. The constructor throws
+`InvalidArgumentException` when `minAttempts` is below 0, or when
+`failedFromMs` is not lower than `failedUntilMs`. `isEmpty()` is true when no
+criterion is set; `withReplayed()` returns a copy with a different `replayed`.
 
 ### The abandon methods of `OutboxStore`
 

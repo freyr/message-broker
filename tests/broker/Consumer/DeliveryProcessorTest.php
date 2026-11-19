@@ -6,10 +6,12 @@ namespace Freyr\MessageBroker\Tests\Consumer;
 
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\Delivery;
+use Freyr\MessageBroker\Consumer\DeliveryControl;
 use Freyr\MessageBroker\Consumer\DeliveryLimitExceeded;
 use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Retry\Backoff;
@@ -126,7 +128,7 @@ final class DeliveryProcessorTest extends TestCase
     /** @return list<DeadLetter> */
     private function deadLetters(): array
     {
-        return $this->deadLetterStore->list();
+        return $this->deadLetterStore->list(new DeadLetterFilter());
     }
 
     /** The id of a raw dead letter with no message id: 'unknown-' and a UUID v7. */
@@ -349,6 +351,7 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame(RuntimeException::class, $letter->errorClass);
         self::assertSame('final failure', $letter->errorMessage);
         self::assertSame('h', $letter->headers['x-custom']);
+        self::assertTrue($letter->replayable, 'the canonical document is replayable');
         self::assertSame([
             'metadata' => [
                 'message_name' => 'order.placed',
@@ -412,6 +415,57 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame(['ack'], $this->control->calls);
     }
 
+    public function testTheSameFailedDeliveryProcessedTwoTimesGivesOneOpenRowWithTheDataOfTheSecondFailure(): void
+    {
+        $failures = 0;
+        $this->failingDispatch = static function () use (&$failures): void {
+            ++$failures;
+
+            throw new RuntimeException("failure {$failures}");
+        };
+        $control = new class() implements DeliveryControl {
+            /** @var list<string> */
+            public array $calls = [];
+
+            private bool $stopped = false;
+
+            public function ack(): void
+            {
+                if (!$this->stopped) {
+                    $this->stopped = true;
+
+                    throw new RuntimeException('the process stops before the ack');
+                }
+                $this->calls[] = 'ack';
+            }
+
+            public function retry(int $delayMs, int $nextAttempt): void
+            {
+                $this->calls[] = 'retry';
+            }
+        };
+        $processor = $this->processor(maxAttempts: 3);
+        $delivery = $this->delivery('m-9', attempt: 3);
+
+        try {
+            $processor->process($delivery, $control);
+            self::fail('the first ack must throw');
+        } catch (RuntimeException $stop) {
+            self::assertSame('the process stops before the ack', $stop->getMessage());
+        }
+        $firstId = $this->deadLetters()[0]->id;
+        $processor->process($delivery, $control);
+
+        self::assertSame(['ack'], $control->calls);
+        self::assertCount(1, $this->deadLetters(), 'one open row for the message and the work queue');
+        $letter = $this->deadLetters()[0];
+        self::assertSame($firstId, $letter->id, 'the row keeps its id');
+        self::assertSame('m-9', $letter->messageId);
+        self::assertSame(self::SOURCE, $letter->source);
+        self::assertSame('failure 2', $letter->errorMessage, 'the data of the second failure');
+        self::assertNull($letter->replayedAt);
+    }
+
     public function testADiscardDecisionAcksWithoutRetryOrDeadLetter(): void
     {
         $this->failingDispatch = self::failure();
@@ -455,6 +509,7 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame('order.placed', $letter->messageName);
         self::assertSame('{{{not json', $letter->body);
         self::assertSame(1, $letter->attempts);
+        self::assertFalse($letter->replayable, 'raw wire bytes are not replayable');
         self::assertSame([[
             'event' => BrokerEvents::DEAD_LETTERED,
             'context' => [
@@ -653,6 +708,7 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame('Delivery limit reached: 3 deliveries ended with no ack (limit 3)', $letter->errorMessage);
         self::assertSame(2, $letter->attempts, 'attempts is the attempt of the delivery, never the count');
         self::assertSame('h', $letter->headers['x-custom']);
+        self::assertTrue($letter->replayable, 'the canonical document is replayable');
         self::assertSame([
             'metadata' => [
                 'message_name' => 'order.placed',
@@ -759,6 +815,7 @@ final class DeliveryProcessorTest extends TestCase
         self::assertSame(DeliveryLimitExceeded::class, $letter->errorClass);
         self::assertSame('Delivery limit reached: 2 deliveries ended with no ack (limit 2)', $letter->errorMessage);
         self::assertSame(3, $letter->attempts);
+        self::assertFalse($letter->replayable, 'raw wire bytes are not replayable');
     }
 
     /** @return iterable<string, array{Throwable}> */
@@ -780,6 +837,7 @@ final class DeliveryProcessorTest extends TestCase
         self::assertCount(1, $this->deadLetters());
         $letter = $this->deadLetters()[0];
         self::assertSame('raw-bytes', $letter->body);
+        self::assertFalse($letter->replayable);
         self::assertSame([], $letter->headers);
         self::assertSame('prop-id', $letter->messageId);
         self::assertSame('unknown', $letter->messageName);
@@ -921,29 +979,29 @@ final class DeliveryProcessorTest extends TestCase
                 return null;
             }
 
-            public function list(
-                ?string $messageName = null,
-                ?string $source = null,
-                ?int $sinceMs = null,
-                int $limit = 100,
-                int $offset = 0,
-                ?bool $replayed = null,
-            ): array {
+            public function list(DeadLetterFilter $filter, int $limit = 100, int $offset = 0): array
+            {
                 return [];
             }
 
-            public function count(
-                ?string $messageName = null,
-                ?string $source = null,
-                ?int $sinceMs = null,
-                ?bool $replayed = null,
-            ): int {
+            public function count(DeadLetterFilter $filter): int
+            {
                 return 0;
+            }
+
+            public function ids(DeadLetterFilter $filter, int $limit): array
+            {
+                return [];
+            }
+
+            public function stats(DeadLetterFilter $filter): array
+            {
+                return [];
             }
 
             public function markReplayed(string $id): void {}
 
-            public function purge(?string $messageName = null, ?string $source = null, ?int $olderThanMs = null): int
+            public function purge(DeadLetterFilter $filter): int
             {
                 return 0;
             }

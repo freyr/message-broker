@@ -291,6 +291,7 @@ final class DeliveryProcessor
             headers: $delivery->headers,
             error: $error,
             attempt: $delivery->attempt,
+            replayable: false,
         )->messageId;
     }
 
@@ -320,6 +321,7 @@ final class DeliveryProcessor
             headers: $incoming->headers,
             error: $error,
             attempt: $delivery->attempt,
+            replayable: true,
         )->messageId;
     }
 
@@ -336,6 +338,7 @@ final class DeliveryProcessor
         array $headers,
         Throwable $error,
         int $attempt,
+        bool $replayable,
     ): DeadLetter {
         $deadLetter = DeadLetter::fromFailure(
             source: $source,
@@ -345,6 +348,7 @@ final class DeliveryProcessor
             headers: $headers,
             error: $error,
             attempts: $attempt,
+            replayable: $replayable,
         );
         $this->deadLetters->store($deadLetter);
 

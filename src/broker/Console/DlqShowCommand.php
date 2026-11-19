@@ -45,6 +45,7 @@ final class DlqShowCommand extends Command
         $output->writeln('replayed_at:   '.($deadLetter->replayedAt !== null
             ? EpochMillis::toDateTime($deadLetter->replayedAt)->format('Y-m-d H:i:s.v')
             : '-'));
+        $output->writeln('replayable:    '.($deadLetter->replayable ? 'yes' : 'no'));
         $output->writeln("error_class:   {$deadLetter->errorClass}");
         $output->writeln("error_message: {$deadLetter->errorMessage}");
         $output->writeln('headers:       '.json_encode($deadLetter->headers));

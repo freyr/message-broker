@@ -55,6 +55,12 @@ final readonly class PostgreSqlSchemaInstaller implements SchemaInstaller
         // partition, so retention can DETACH ... CONCURRENTLY; an insert for
         // a day with no partition fails, so partitions are created ahead.
         //
+        // dead_letters holds at most one open row (replayed_at IS NULL) for
+        // one message_id and source: uq_dead_letters_open is the conflict
+        // target of the upsert in PostgreSqlDeadLetterStore::store(). A
+        // replayed row is outside the index, so a failure after a replay
+        // gets a new row. replayable is false for a raw body.
+        //
         // abandoned_at marks a row that an operator abandoned: the claim skips
         // it. idx_outbox_pending keeps its predicate: the claim still implies
         // it, and an abandoned row leaves the index with its partition.
@@ -103,8 +109,13 @@ final readonly class PostgreSqlSchemaInstaller implements SchemaInstaller
                     error_trace TEXT NOT NULL,
                     attempts INTEGER NOT NULL DEFAULT 0,
                     failed_at TIMESTAMP(3) NOT NULL,
-                    replayed_at TIMESTAMP(3) NULL
+                    replayed_at TIMESTAMP(3) NULL,
+                    replayable BOOLEAN NOT NULL DEFAULT TRUE
                 )
+                SQL,
+            <<<'SQL'
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_dead_letters_open ON dead_letters (message_id, source)
+                    WHERE replayed_at IS NULL
                 SQL,
         ];
     }
