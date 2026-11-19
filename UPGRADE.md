@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## From 0.12.0 to the next release
+## From 0.12.2 to 0.12.3
 
 This release adds the webhook delivery queue (see `docs/core/WEBHOOKS.md`). It
 is additive: an application that does not use webhooks needs no change and
@@ -24,6 +24,9 @@ runs no new DDL.
 - `dlq:replay --all` with no `--source` also replays the webhook dead letters
   that match, each to the delivery table of its lane. Use
   `--source=<queue>` to replay the rows of one consumer queue only.
+- `ReplayService::replay()` and `check()` return a `ReplayDestination` (the
+  lane that the replay uses, and whether it is a webhook lane) instead of
+  `void`. A caller that ignores the return value needs no change.
 
 ## From 0.11.x to 0.12.0
 
