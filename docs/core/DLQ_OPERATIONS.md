@@ -342,6 +342,12 @@ The import maps each message to one of three cases:
   (`x-death`, `x-first-death-*`, `x-last-death-*`, `x-delivery-count`). A
   replay of the row removes them from the new outbox row (see *Replay to one
   consumer*), so a stale `x-delivery-count` does not trip the delivery limit.
+- The text rules of a dead letter (see [CONSUMER.md](CONSUMER.md)) change only
+  header keys and string header values. A header value of a date-time type
+  stays unchanged and is stored as its JSON form, an object, in each row
+  (the table sink and the import alike). The JSONB column keeps no key order of
+  an object. For AMQP, see
+  [../amqp/DEAD_LETTERS.md](../amqp/DEAD_LETTERS.md#the-read-of-x-death).
 - A replay of an imported row follows the rules of *Replaying*: one
   transaction, the refusals, and the target `x-replay-target` = the `source` of
   the row.
