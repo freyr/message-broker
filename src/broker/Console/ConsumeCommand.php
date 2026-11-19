@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Console;
 
-use Closure;
 use Freyr\MessageBroker\Worker\WorkerLimits;
 use InvalidArgumentException;
-use ReflectionFunction;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -76,10 +74,10 @@ final class ConsumeCommand extends Command
 
         try {
             $limits = new WorkerLimits(
-                maxMessages: self::intOption(self::stringOption($input, 'limit'), 'limit'),
-                maxSeconds: self::intOption(self::stringOption($input, 'time-limit'), 'time-limit'),
-                maxMemoryBytes: self::memoryOption(self::stringOption($input, 'memory-limit')),
-                maxFailures: self::intOption(self::stringOption($input, 'failure-limit'), 'failure-limit'),
+                maxMessages: WorkerLimitOptions::intOption(WorkerLimitOptions::stringOption($input, 'limit'), 'limit'),
+                maxSeconds: WorkerLimitOptions::intOption(WorkerLimitOptions::stringOption($input, 'time-limit'), 'time-limit'),
+                maxMemoryBytes: WorkerLimitOptions::memoryOption(WorkerLimitOptions::stringOption($input, 'memory-limit')),
+                maxFailures: WorkerLimitOptions::intOption(WorkerLimitOptions::stringOption($input, 'failure-limit'), 'failure-limit'),
             );
         } catch (InvalidArgumentException $e) {
             $output->writeln("<error>{$e->getMessage()}</error>");
@@ -99,7 +97,7 @@ final class ConsumeCommand extends Command
         }
 
         $consumer = $this->consumers[$name];
-        if ($limits != new WorkerLimits() && self::takesNoParameter($consumer)) {
+        if ($limits != new WorkerLimits() && WorkerLimitOptions::takesNoParameter($consumer)) {
             $output->writeln(
                 "<comment>The callable of consumer '{$name}' takes no WorkerLimits parameter, so the limit options have no effect.</comment>",
             );
@@ -107,43 +105,5 @@ final class ConsumeCommand extends Command
         $consumer($limits);
 
         return Command::SUCCESS;
-    }
-
-    private static function takesNoParameter(callable $callable): bool
-    {
-        return (new ReflectionFunction(Closure::fromCallable($callable)))->getNumberOfParameters() === 0;
-    }
-
-    /** An option with a value is a string, or null when it is absent. */
-    private static function stringOption(InputInterface $input, string $name): ?string
-    {
-        $value = $input->getOption($name);
-
-        return is_string($value) ? $value : null;
-    }
-
-    private static function intOption(?string $value, string $name): ?int
-    {
-        if ($value === null) {
-            return null;
-        }
-        if (preg_match('/\A[1-9]\d*\z/', $value) !== 1) {
-            throw new InvalidArgumentException("Invalid value for --{$name}: '{$value}' — expected an integer, 1 or more");
-        }
-
-        return (int) $value;
-    }
-
-    private static function memoryOption(?string $value): ?int
-    {
-        if ($value === null) {
-            return null;
-        }
-
-        try {
-            return ByteSize::toBytes($value);
-        } catch (InvalidArgumentException $e) {
-            throw new InvalidArgumentException("Invalid value for --memory-limit: {$e->getMessage()}", previous: $e);
-        }
     }
 }
