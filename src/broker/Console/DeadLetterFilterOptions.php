@@ -11,6 +11,7 @@ use InvalidArgumentException;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
+use TypeError;
 
 /**
  * The shared filter options of dlq:list, dlq:stats, dlq:purge and
@@ -57,6 +58,22 @@ final readonly class DeadLetterFilterOptions
         );
     }
 
+    /**
+     * Now minus a duration, in epoch milliseconds, for a duration option of a command (for
+     * example --older-than of dlq:purge).
+     *
+     * @throws InvalidArgumentException when the value is not a duration, is too large, or ends before 1970
+     */
+    public static function ago(string $value, string $option): int
+    {
+        $milliseconds = self::duration($value, $option);
+        if ($milliseconds === null) {
+            throw new InvalidArgumentException("Invalid time '{$value}' for --{$option}: expected a duration (30s, 15m, 24h, 7d)");
+        }
+
+        return self::notBeforeTheEpoch(EpochMillis::now() - $milliseconds, $value, $option);
+    }
+
     private static function string(InputInterface $input, string $option): ?string
     {
         $value = $input->getOption($option);
@@ -70,9 +87,9 @@ final readonly class DeadLetterFilterOptions
         if ($value === null) {
             return null;
         }
-        try {
-            return EpochMillis::now() - Duration::toMilliseconds($value);
-        } catch (InvalidArgumentException) {
+        $milliseconds = self::duration($value, $option);
+        if ($milliseconds !== null) {
+            return self::notBeforeTheEpoch(EpochMillis::now() - $milliseconds, $value, $option);
         }
         $dateTime = self::dateTime($value);
         if ($dateTime === null) {
@@ -81,7 +98,34 @@ final readonly class DeadLetterFilterOptions
             );
         }
 
-        return EpochMillis::fromDateTime($dateTime);
+        return self::notBeforeTheEpoch(EpochMillis::fromDateTime($dateTime), $value, $option);
+    }
+
+    /**
+     * @return int|null the milliseconds of a duration; null when the value is not a duration
+     *
+     * @throws InvalidArgumentException when the duration does not fit an integer
+     */
+    private static function duration(string $value, string $option): ?int
+    {
+        try {
+            return Duration::toMilliseconds($value);
+        } catch (InvalidArgumentException) {
+            return null;
+        } catch (TypeError) {
+            // The milliseconds overflow an integer: the float result breaks the int return type of Duration.
+            throw new InvalidArgumentException("Invalid time '{$value}' for --{$option}: the duration is too large");
+        }
+    }
+
+    /** A time before 1970 has a negative epoch value, which the stores do not accept. */
+    private static function notBeforeTheEpoch(int $epochMilliseconds, string $value, string $option): int
+    {
+        if ($epochMilliseconds < 0) {
+            throw new InvalidArgumentException("Invalid time '{$value}' for --{$option}: the time is before 1970-01-01T00:00:00Z");
+        }
+
+        return $epochMilliseconds;
     }
 
     /** An ISO 8601 date-time with an offset or Z; null for any other value, also an impossible date. */

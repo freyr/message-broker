@@ -6,7 +6,6 @@ namespace Freyr\MessageBroker\Console;
 
 use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
-use Freyr\MessageBroker\Time\EpochMillis;
 use InvalidArgumentException;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -98,7 +97,7 @@ final class DlqPurgeCommand extends Command
             errorClass: $filter->errorClass,
             messageId: $filter->messageId,
             failedFromMs: $filter->failedFromMs,
-            failedUntilMs: EpochMillis::now() - Duration::toMilliseconds($olderThan),
+            failedUntilMs: DeadLetterFilterOptions::ago($olderThan, 'older-than'),
             minAttempts: $filter->minAttempts,
             replayed: $filter->replayed,
             replayable: $filter->replayable,

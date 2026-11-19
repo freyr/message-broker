@@ -9,6 +9,7 @@ use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\Testing\InMemoryDeadLetterStore;
 use Freyr\MessageBroker\Tests\Fixtures\DeadLetterFactory;
 use Freyr\MessageBroker\Time\EpochMillis;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\Clock;
 use Symfony\Component\Clock\MockClock;
@@ -123,6 +124,40 @@ final class DlqPurgeCommandTest extends TestCase
         self::assertSame(2, $status);
         self::assertSame("Invalid --min-attempts '0': expected an integer of 1 or more\n", $this->tester->getDisplay());
         self::assertSame([], $this->store->callsOf('purge'));
+    }
+
+    /** @return iterable<string, array{array<string, string>, string}> */
+    public static function badTimes(): iterable
+    {
+        yield 'older-than that overflows' => [[
+            '--older-than' => '106751991168d',
+        ], "Invalid time '106751991168d' for --older-than: the duration is too large"];
+        yield 'older-than before 1970' => [[
+            '--older-than' => '99999d',
+        ], "Invalid time '99999d' for --older-than: the time is before 1970-01-01T00:00:00Z"];
+        yield 'older-than that is not a duration' => [[
+            '--older-than' => '30days',
+        ], "Invalid time '30days' for --older-than: expected a duration (30s, 15m, 24h, 7d)"];
+        yield 'since that overflows' => [[
+            '--since' => '106751991168d',
+        ], "Invalid time '106751991168d' for --since: the duration is too large"];
+    }
+
+    /** @param array<string, string> $options */
+    #[DataProvider('badTimes')]
+    public function testABadTimeIsInvalidAndPurgesNothing(array $options, string $message): void
+    {
+        $status = $this->tester->execute([
+            '--force' => true,
+        ] + $options, [
+            'interactive' => false,
+        ]);
+
+        self::assertSame(2, $status);
+        self::assertSame("{$message}\n", $this->tester->getDisplay());
+        self::assertSame([], $this->store->callsOf('count'));
+        self::assertSame([], $this->store->callsOf('purge'));
+        self::assertSame(3, $this->store->count(new DeadLetterFilter()), 'every row stays');
     }
 
     public function testOlderThanNotAfterSinceIsInvalid(): void

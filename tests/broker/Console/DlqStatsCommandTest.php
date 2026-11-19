@@ -82,6 +82,20 @@ final class DlqStatsCommandTest extends TestCase
         ]], $this->store->callsOf('stats'));
     }
 
+    public function testATimeBefore1970IsInvalidAndDoesNotCallTheStore(): void
+    {
+        $status = $this->tester->execute([
+            '--since' => '1969-12-31T23:59:59.5Z',
+        ]);
+
+        self::assertSame(Command::INVALID, $status);
+        self::assertSame(
+            "Invalid time '1969-12-31T23:59:59.5Z' for --since: the time is before 1970-01-01T00:00:00Z\n",
+            $this->tester->getDisplay(),
+        );
+        self::assertSame([], $this->store->callsOf('stats'));
+    }
+
     public function testAnInvalidOptionIsInvalidAndDoesNotCallTheStore(): void
     {
         $status = $this->tester->execute([

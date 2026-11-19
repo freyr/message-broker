@@ -199,6 +199,22 @@ final class DlqReplayCommandTest extends TestCase
         self::assertSame([], $this->outbox->inserted);
     }
 
+    public function testAllWithATimeThatOverflowsIsInvalid(): void
+    {
+        $tester = $this->tester();
+
+        $status = $tester->execute([
+            '--all' => true,
+            '--force' => true,
+            '--since' => '106751991168d',
+        ]);
+
+        self::assertSame(Command::INVALID, $status);
+        self::assertSame("Invalid time '106751991168d' for --since: the duration is too large\n", $tester->getDisplay());
+        self::assertSame([], $this->store->callsOf('count'));
+        self::assertSame([], $this->outbox->inserted);
+    }
+
     public function testAllWithAnInvalidFilterOptionIsInvalid(): void
     {
         $tester = $this->tester();

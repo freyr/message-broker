@@ -151,6 +151,34 @@ final class DeadLetterFilterOptionsTest extends TestCase
             '--since' => '1h',
             '--until' => '2h',
         ], 'failedFromMs (1781521200000) must be lower than failedUntilMs (1781517600000)'];
+        yield 'date-time before 1970' => [[
+            '--since' => '1969-12-31T23:59:59.5Z',
+        ], "Invalid time '1969-12-31T23:59:59.5Z' for --since: the time is before 1970-01-01T00:00:00Z"];
+        yield 'year typo before 1970' => [[
+            '--until' => '1026-06-10T08:30:00Z',
+        ], "Invalid time '1026-06-10T08:30:00Z' for --until: the time is before 1970-01-01T00:00:00Z"];
+        yield 'duration longer than the time since 1970' => [[
+            '--since' => '20700d',
+        ], "Invalid time '20700d' for --since: the time is before 1970-01-01T00:00:00Z"];
+        yield 'largest duration that does not overflow' => [[
+            '--until' => '106751991167d',
+        ], "Invalid time '106751991167d' for --until: the time is before 1970-01-01T00:00:00Z"];
+        yield 'smallest duration that overflows' => [[
+            '--since' => '106751991168d',
+        ], "Invalid time '106751991168d' for --since: the duration is too large"];
+        yield 'duration with more digits than an integer' => [[
+            '--since' => '99999999999999999999s',
+        ], "Invalid time '99999999999999999999s' for --since: the duration is too large"];
+    }
+
+    public function testTheEpochIsTheEarliestValidTime(): void
+    {
+        self::assertSame(0, $this->filter([
+            '--since' => '1970-01-01T00:00:00Z',
+        ])->failedFromMs);
+        self::assertSame(0, $this->filter([
+            '--until' => intdiv(EpochMillis::now(), 1000).'s',
+        ])->failedUntilMs, 'a duration back to the epoch');
     }
 
     /** @param array<string, mixed> $input */
