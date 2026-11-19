@@ -49,11 +49,94 @@ final class DlqPurgeCommandTest extends TestCase
         ]);
 
         self::assertSame(0, $status);
-        self::assertSame("[dry-run] would delete up to 2 dead letters.\n", $this->tester->getDisplay());
+        self::assertSame("[dry-run] would delete 2 dead letters.\n", $this->tester->getDisplay());
         self::assertSame([], $this->store->callsOf('purge'));
         self::assertEquals([[
             'filter' => new DeadLetterFilter(source: 'orders_q'),
         ]], $this->store->callsOf('count'));
+    }
+
+    public function testTheDryRunCountAppliesOlderThan(): void
+    {
+        $this->store->add(DeadLetterFactory::make('dl-old', failedAt: EpochMillis::now() - 31 * 86_400_000));
+        $this->store->add(DeadLetterFactory::make('dl-recent', failedAt: EpochMillis::now() - 29 * 86_400_000));
+
+        $status = $this->tester->execute([
+            '--dry-run' => true,
+            '--older-than' => '30d',
+        ], [
+            'interactive' => false,
+        ]);
+
+        self::assertSame(0, $status);
+        self::assertSame("[dry-run] would delete 4 dead letters.\n", $this->tester->getDisplay(), 'dl-old and the three rows of 2025');
+        self::assertEquals([[
+            'filter' => new DeadLetterFilter(failedUntilMs: EpochMillis::now() - 30 * 86_400_000),
+        ]], $this->store->callsOf('count'));
+    }
+
+    public function testTheFilterOptionsReachTheCountAndThePurge(): void
+    {
+        $this->tester->execute([
+            '--force' => true,
+            '--error' => 'RuntimeException',
+            '--replayed' => true,
+            '--since' => '400d',
+        ], [
+            'interactive' => false,
+        ]);
+
+        $expected = new DeadLetterFilter(
+            errorClass: 'RuntimeException',
+            failedFromMs: EpochMillis::now() - 400 * 86_400_000,
+            replayed: true,
+        );
+        self::assertEquals($expected, $this->store->callsOf('count')[0]['filter']);
+        self::assertEquals($expected, $this->store->callsOf('purge')[0]['filter']);
+    }
+
+    public function testOlderThanWithUntilIsInvalid(): void
+    {
+        $status = $this->tester->execute([
+            '--force' => true,
+            '--older-than' => '30d',
+            '--until' => '7d',
+        ], [
+            'interactive' => false,
+        ]);
+
+        self::assertSame(2, $status);
+        self::assertSame("Use --older-than or --until, not both.\n", $this->tester->getDisplay());
+        self::assertSame([], $this->store->callsOf('count'));
+        self::assertSame([], $this->store->callsOf('purge'));
+    }
+
+    public function testAnInvalidFilterOptionIsInvalid(): void
+    {
+        $status = $this->tester->execute([
+            '--force' => true,
+            '--min-attempts' => '0',
+        ], [
+            'interactive' => false,
+        ]);
+
+        self::assertSame(2, $status);
+        self::assertSame("Invalid --min-attempts '0': expected an integer of 1 or more\n", $this->tester->getDisplay());
+        self::assertSame([], $this->store->callsOf('purge'));
+    }
+
+    public function testOlderThanNotAfterSinceIsInvalid(): void
+    {
+        $status = $this->tester->execute([
+            '--force' => true,
+            '--since' => '7d',
+            '--older-than' => '30d',
+        ], [
+            'interactive' => false,
+        ]);
+
+        self::assertSame(2, $status);
+        self::assertSame([], $this->store->callsOf('purge'));
     }
 
     public function testRefusesWithoutForceOnANonInteractiveTerminal(): void
@@ -113,7 +196,7 @@ final class DlqPurgeCommandTest extends TestCase
         $status = $this->tester->execute([]);
 
         self::assertSame(0, $status);
-        self::assertStringContainsString('Delete up to 3 dead letters? [y/N]', $this->tester->getDisplay());
+        self::assertStringContainsString('Delete 3 dead letters? [y/N]', $this->tester->getDisplay());
         self::assertCount(1, $this->store->callsOf('purge'));
     }
 

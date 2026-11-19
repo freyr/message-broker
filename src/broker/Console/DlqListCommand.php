@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Console;
 
-use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\Time\EpochMillis;
+use InvalidArgumentException;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Helper\Table;
@@ -25,28 +25,26 @@ final class DlqListCommand extends Command
 
     protected function configure(): void
     {
+        DeadLetterFilterOptions::configure($this);
         $this
-            ->addOption('name', null, InputOption::VALUE_REQUIRED, 'Filter by message name')
-            ->addOption('source', null, InputOption::VALUE_REQUIRED, 'Filter by source queue/topic')
-            ->addOption('since', null, InputOption::VALUE_REQUIRED, "Only failures younger than, e.g. '24h'")
             ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Maximum rows', '100')
             ->addOption('offset', null, InputOption::VALUE_REQUIRED, 'Skip this many rows', '0');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $name = $input->getOption('name');
-        $source = $input->getOption('source');
-        $since = $input->getOption('since');
+        try {
+            $filter = DeadLetterFilterOptions::filter($input);
+        } catch (InvalidArgumentException $error) {
+            $output->writeln("<error>{$error->getMessage()}</error>");
+
+            return Command::INVALID;
+        }
         $limit = $input->getOption('limit');
         $offset = $input->getOption('offset');
 
         $deadLetters = $this->store->list(
-            new DeadLetterFilter(
-                messageName: is_string($name) ? $name : null,
-                source: is_string($source) ? $source : null,
-                failedFromMs: is_string($since) ? EpochMillis::now() - Duration::toMilliseconds($since) : null,
-            ),
+            $filter,
             limit: is_numeric($limit) ? (int) $limit : 100,
             offset: is_numeric($offset) ? (int) $offset : 0,
         );
@@ -58,7 +56,7 @@ final class DlqListCommand extends Command
         }
 
         $table = new Table($output);
-        $table->setHeaders(['id', 'message_name', 'source', 'attempts', 'failed_at', 'replayed', 'error']);
+        $table->setHeaders(['id', 'message_name', 'source', 'attempts', 'failed_at', 'replayed', 'replayable', 'error']);
         foreach ($deadLetters as $deadLetter) {
             $table->addRow([
                 $deadLetter->id,
@@ -67,6 +65,7 @@ final class DlqListCommand extends Command
                 $deadLetter->attempts,
                 EpochMillis::toDateTime($deadLetter->failedAt)->format('Y-m-d H:i:s.v'),
                 $deadLetter->replayedAt !== null ? 'yes' : 'no',
+                $deadLetter->replayable ? 'yes' : 'no',
                 self::truncate($deadLetter->errorMessage),
             ]);
         }

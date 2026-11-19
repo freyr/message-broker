@@ -19,6 +19,7 @@ final class DeadLetterFactory
         ?string $body = null,
         array $headers = [],
         string $messageId = '',
+        bool $replayable = true,
     ): DeadLetter {
         $messageId = $messageId === '' ? "m-{$id}" : $messageId;
 
@@ -35,6 +36,7 @@ final class DeadLetterFactory
             attempts: 5,
             failedAt: $failedAt,
             replayedAt: $replayedAt,
+            replayable: $replayable,
         );
     }
 

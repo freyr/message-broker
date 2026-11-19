@@ -7,6 +7,7 @@ namespace Freyr\MessageBroker\Console;
 use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\Time\EpochMillis;
+use InvalidArgumentException;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Helper\QuestionHelper;
@@ -26,9 +27,8 @@ final class DlqPurgeCommand extends Command
 
     protected function configure(): void
     {
+        DeadLetterFilterOptions::configure($this);
         $this
-            ->addOption('name', null, InputOption::VALUE_REQUIRED, 'Only this message name')
-            ->addOption('source', null, InputOption::VALUE_REQUIRED, 'Only this source queue/topic')
             ->addOption('older-than', null, InputOption::VALUE_REQUIRED, "Only failures older than, e.g. '30d'")
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Show how many would be deleted; change nothing')
             ->addOption('force', null, InputOption::VALUE_NONE, 'Required to delete non-interactively');
@@ -36,19 +36,19 @@ final class DlqPurgeCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $name = $input->getOption('name');
-        $source = $input->getOption('source');
-        $olderThan = $input->getOption('older-than');
+        try {
+            $filter = self::filter($input);
+        } catch (InvalidArgumentException $error) {
+            $output->writeln("<error>{$error->getMessage()}</error>");
 
-        $messageName = is_string($name) ? $name : null;
-        $sourceFilter = is_string($source) ? $source : null;
-        $olderThanMs = is_string($olderThan) ? EpochMillis::now() - Duration::toMilliseconds($olderThan) : null;
+            return Command::INVALID;
+        }
 
-        // count ignores older-than; the actual delete applies it. Good enough for a preview headline.
-        $matching = $this->store->count(new DeadLetterFilter(messageName: $messageName, source: $sourceFilter));
+        // The count and the delete are two statements: a row that arrives between them can change the count.
+        $matching = $this->store->count($filter);
 
         if ($input->getOption('dry-run') === true) {
-            $output->writeln("<info>[dry-run] would delete up to {$matching} dead letters.</info>");
+            $output->writeln("<info>[dry-run] would delete {$matching} dead letters.</info>");
 
             return Command::SUCCESS;
         }
@@ -64,19 +64,44 @@ final class DlqPurgeCommand extends Command
             if (!$helper->ask(
                 $input,
                 $output,
-                new ConfirmationQuestion("Delete up to {$matching} dead letters? [y/N] ", false)
+                new ConfirmationQuestion("Delete {$matching} dead letters? [y/N] ", false)
             )) {
                 return Command::FAILURE;
             }
         }
 
-        $purged = $this->store->purge(new DeadLetterFilter(
-            messageName: $messageName,
-            source: $sourceFilter,
-            failedUntilMs: $olderThanMs,
-        ));
+        $purged = $this->store->purge($filter);
         $output->writeln("<info>Purged {$purged} dead letters.</info>");
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * The filter of the shared options; --older-than sets the upper bound of failed_at.
+     *
+     * @throws InvalidArgumentException when an option is invalid, or --older-than comes with --until
+     */
+    private static function filter(InputInterface $input): DeadLetterFilter
+    {
+        $filter = DeadLetterFilterOptions::filter($input);
+        $olderThan = $input->getOption('older-than');
+        if (!is_string($olderThan)) {
+            return $filter;
+        }
+        if ($filter->failedUntilMs !== null) {
+            throw new InvalidArgumentException('Use --older-than or --until, not both.');
+        }
+
+        return new DeadLetterFilter(
+            messageName: $filter->messageName,
+            source: $filter->source,
+            errorClass: $filter->errorClass,
+            messageId: $filter->messageId,
+            failedFromMs: $filter->failedFromMs,
+            failedUntilMs: EpochMillis::now() - Duration::toMilliseconds($olderThan),
+            minAttempts: $filter->minAttempts,
+            replayed: $filter->replayed,
+            replayable: $filter->replayable,
+        );
     }
 }

@@ -72,6 +72,41 @@ final class DlqListCommandTest extends TestCase
         ]], $this->store->callsOf('list'));
     }
 
+    public function testEachFilterOptionReachesTheStore(): void
+    {
+        $this->tester->execute([
+            '--error' => 'LogicException',
+            '--message-id' => 'm-1',
+            '--until' => '1h',
+            '--min-attempts' => '2',
+            '--not-replayed' => true,
+            '--not-replayable' => true,
+        ]);
+
+        self::assertEquals(new DeadLetterFilter(
+            errorClass: 'LogicException',
+            messageId: 'm-1',
+            failedUntilMs: EpochMillis::now() - 3_600_000,
+            minAttempts: 2,
+            replayed: false,
+            replayable: false,
+        ), $this->store->callsOf('list')[0]['filter']);
+    }
+
+    public function testAnInvalidFilterOptionIsInvalidAndDoesNotCallTheStore(): void
+    {
+        $status = $this->tester->execute([
+            '--since' => 'yesterday',
+        ]);
+
+        self::assertSame(2, $status);
+        self::assertSame(
+            "Invalid time 'yesterday' for --since: expected a duration (30s, 15m, 24h, 7d) or an ISO 8601 date-time with an offset or Z\n",
+            $this->tester->getDisplay(),
+        );
+        self::assertSame([], $this->store->callsOf('list'));
+    }
+
     public function testNonNumericLimitAndOffsetFallBackToTheDefaults(): void
     {
         $this->tester->execute([
@@ -93,21 +128,22 @@ final class DlqListCommandTest extends TestCase
             source: 'cancel_q',
             failedAt: 1_750_000_000_123,
             replayedAt: 1_750_000_001_000,
+            replayable: false,
         ));
 
         $this->tester->execute([]);
 
         $lines = explode("\n", $this->tester->getDisplay());
         self::assertMatchesRegularExpression(
-            '/^\| id\s+\| message_name\s+\| source\s+\| attempts \| failed_at\s+\| replayed \| error\s+\|$/',
+            '/^\| id\s+\| message_name\s+\| source\s+\| attempts \| failed_at\s+\| replayed \| replayable \| error\s+\|$/',
             $lines[1],
         );
         self::assertMatchesRegularExpression(
-            '/^\| dl-new \| order\.placed\s+\| orders_q \| 5\s+\| 2025-06-15 15:06:42\.005 \| no\s+\| newer failure\s+\|$/',
+            '/^\| dl-new \| order\.placed\s+\| orders_q \| 5\s+\| 2025-06-15 15:06:42\.005 \| no\s+\| yes\s+\| newer failure\s+\|$/',
             $lines[3],
         );
         self::assertMatchesRegularExpression(
-            '/^\| dl-old \| order\.cancelled \| cancel_q \| 5\s+\| 2025-06-15 15:06:40\.123 \| yes\s+\| boom\s+\|$/',
+            '/^\| dl-old \| order\.cancelled \| cancel_q \| 5\s+\| 2025-06-15 15:06:40\.123 \| yes\s+\| no\s+\| boom\s+\|$/',
             $lines[4],
         );
     }

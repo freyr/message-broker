@@ -141,6 +141,80 @@ final class DlqReplayCommandTest extends TestCase
         self::assertCount(1, $this->outbox->inserted);
     }
 
+    public function testEachFilterOptionOfAllReachesCountAndList(): void
+    {
+        $tester = $this->tester();
+
+        $tester->execute([
+            '--all' => true,
+            '--force' => true,
+            '--error' => 'LogicException',
+            '--message-id' => 'm-1',
+            '--until' => '1h',
+            '--min-attempts' => '2',
+            '--replayable' => true,
+        ]);
+
+        $expected = new DeadLetterFilter(
+            errorClass: 'LogicException',
+            messageId: 'm-1',
+            failedUntilMs: EpochMillis::now() - 3_600_000,
+            minAttempts: 2,
+            replayed: false,
+            replayable: true,
+        );
+        self::assertEquals($expected, $this->store->callsOf('count')[0]['filter']);
+        self::assertEquals($expected, $this->store->callsOf('list')[0]['filter']);
+    }
+
+    public function testAllWithNotReplayedKeepsTheReplayedConditionFalse(): void
+    {
+        $tester = $this->tester();
+
+        $tester->execute([
+            '--all' => true,
+            '--force' => true,
+            '--not-replayed' => true,
+        ]);
+
+        self::assertEquals(new DeadLetterFilter(replayed: false), $this->store->callsOf('count')[0]['filter']);
+        self::assertEquals(new DeadLetterFilter(replayed: false), $this->store->callsOf('list')[0]['filter']);
+    }
+
+    public function testAllWithReplayedIsInvalidAndReplaysNothing(): void
+    {
+        $this->store->add(DeadLetterFactory::make('dl-done', replayedAt: 1_750_000_000_200));
+        $tester = $this->tester();
+
+        $status = $tester->execute([
+            '--all' => true,
+            '--force' => true,
+            '--replayed' => true,
+        ]);
+
+        self::assertSame(Command::INVALID, $status);
+        self::assertSame("--replayed cannot be used with --all: a bulk replay selects the rows that are not replayed.\n", $tester->getDisplay());
+        self::assertSame([], $this->store->callsOf('count'));
+        self::assertSame([], $this->store->callsOf('list'));
+        self::assertSame([], $this->outbox->inserted);
+    }
+
+    public function testAllWithAnInvalidFilterOptionIsInvalid(): void
+    {
+        $tester = $this->tester();
+
+        $status = $tester->execute([
+            '--all' => true,
+            '--force' => true,
+            '--replayable' => true,
+            '--not-replayable' => true,
+        ]);
+
+        self::assertSame(Command::INVALID, $status);
+        self::assertSame("Use --replayable or --not-replayable, not both.\n", $tester->getDisplay());
+        self::assertSame([], $this->store->callsOf('count'));
+    }
+
     public function testAllDrainsInBatchesOfFiveHundredByDefault(): void
     {
         $this->store->add(DeadLetterFactory::make('dl-1'));

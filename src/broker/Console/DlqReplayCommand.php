@@ -4,10 +4,9 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Console;
 
-use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
-use Freyr\MessageBroker\Time\EpochMillis;
+use InvalidArgumentException;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Helper\QuestionHelper;
@@ -35,18 +34,11 @@ final class DlqReplayCommand extends Command
     {
         $this
             ->addArgument('id', InputArgument::OPTIONAL, 'Dead letter id (omit with --all)')
-            ->addOption('all', null, InputOption::VALUE_NONE, 'Replay every non-replayed dead letter')
-            ->addOption('name', null, InputOption::VALUE_REQUIRED, 'With --all: only this message name')
-            ->addOption('source', null, InputOption::VALUE_REQUIRED, 'With --all: only this source queue/topic')
-            ->addOption(
-                'since',
-                null,
-                InputOption::VALUE_REQUIRED,
-                "With --all: only failures younger than, e.g. '24h'"
-            )
+            ->addOption('all', null, InputOption::VALUE_NONE, 'Replay every matching dead letter that is not replayed')
             ->addOption('lane', null, InputOption::VALUE_REQUIRED, 'Target outbox lane', 'default')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Show what would be replayed; change nothing')
             ->addOption('force', null, InputOption::VALUE_NONE, 'Required to run --all non-interactively');
+        DeadLetterFilterOptions::configure($this);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -73,19 +65,22 @@ final class DlqReplayCommand extends Command
             return Command::INVALID;
         }
 
-        $name = $input->getOption('name');
-        $source = $input->getOption('source');
-        $since = $input->getOption('since');
-        $messageName = is_string($name) ? $name : null;
-        $sourceFilter = is_string($source) ? $source : null;
-        $sinceMs = is_string($since) ? EpochMillis::now() - Duration::toMilliseconds($since) : null;
+        try {
+            $filter = DeadLetterFilterOptions::filter($input);
+        } catch (InvalidArgumentException $error) {
+            $output->writeln("<error>{$error->getMessage()}</error>");
 
-        $filter = new DeadLetterFilter(
-            messageName: $messageName,
-            source: $sourceFilter,
-            failedFromMs: $sinceMs,
-            replayed: false,
-        );
+            return Command::INVALID;
+        }
+        // The loop below reads a new page at offset 0 until it is empty, and the
+        // replay of a replayed row keeps it replayed: a replayed row in the
+        // filter would make the loop endless.
+        if ($filter->replayed === true) {
+            $output->writeln('<error>--replayed cannot be used with --all: a bulk replay selects the rows that are not replayed.</error>');
+
+            return Command::INVALID;
+        }
+        $filter = $filter->withReplayed(false);
         $eligible = $this->store->count($filter);
 
         if ($input->getOption('dry-run') === true) {
