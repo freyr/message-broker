@@ -9,7 +9,6 @@ use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Exception\AMQPTimeoutException;
 use PhpAmqpLib\Message\AMQPMessage;
-use PhpAmqpLib\Wire\AMQPTable;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Throwable;
@@ -39,6 +38,8 @@ final class AmqpConsumer
 
     private readonly WaitQueuePublisher $waitQueues;
 
+    private readonly AmqpDeliveryMapper $mapper;
+
     /** @param LoggerInterface $logger receives a failure inside the return of the unacked deliveries */
     public function __construct(
         private readonly AMQPChannel $channel,
@@ -48,6 +49,7 @@ final class AmqpConsumer
         private readonly LoggerInterface $logger = new NullLogger(),
     ) {
         $this->waitQueues = new WaitQueuePublisher($channel, $queue->queue, $confirmTimeoutSec);
+        $this->mapper = new AmqpDeliveryMapper($queue->queue);
     }
 
     /**
@@ -147,35 +149,15 @@ final class AmqpConsumer
     }
 
     /**
-     * The mapping AMQPMessage → Delivery. Public so that a test can assert the
+     * The mapping AMQPMessage → Delivery (AmqpDeliveryMapper, with the queue of
+     * the consumer as the source). Public so that a test can assert the
      * mapping directly; the loop is its only caller.
-     *
-     * The attempt is the x-attempt header when it is an int (at least 1), else 1.
-     * The delivery count is the x-delivery-count header (quorum queues) when it
-     * is an int, else null.
      *
      * @internal
      */
     public function deliveryFrom(AMQPMessage $message): Delivery
     {
-        /** @var array<string, mixed> $properties */
-        $properties = $message->get_properties();
-        $headers = $properties['application_headers'] ?? null;
-        /** @var array<string, mixed> $applicationHeaders */
-        $applicationHeaders = $headers instanceof AMQPTable ? $headers->getNativeData() : [];
-
-        $attempt = $applicationHeaders[WaitQueuePublisher::ATTEMPT_HEADER] ?? null;
-        $deliveryCount = $applicationHeaders[WaitQueuePublisher::DELIVERY_COUNT_HEADER] ?? null;
-        $messageId = $properties['message_id'] ?? null;
-
-        return new Delivery(
-            body: $message->getBody(),
-            headers: $applicationHeaders,
-            attempt: is_int($attempt) ? max(1, $attempt) : 1,
-            source: $this->queue->queue,
-            fallbackMessageId: is_string($messageId) ? $messageId : null,
-            deliveryCount: is_int($deliveryCount) ? $deliveryCount : null,
-        );
+        return $this->mapper->map($message);
     }
 
     private function registerSignalHandlers(): void

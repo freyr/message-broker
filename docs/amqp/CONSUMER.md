@@ -145,6 +145,21 @@ queue. Keep `maxDeliveries` not higher than `x-delivery-limit`; a lower value
 is recommended. When you set `x-delivery-limit` below 5, lower `maxDeliveries`
 too.
 
+The processor never rejects or nacks a delivery as a result of a handler
+failure, and the consumer returns its unacked deliveries only at a stop (see
+*The return rule*). Thus the broker limit is reached in two ways only:
+
+- after stops that the consumer does not control (a killed process, a memory
+  fatal error, a lost connection);
+- after a dead letter write that fails at each delivery (for example, a
+  database that stays down): each stop by a `Throwable` adds 1 for the delivery
+  in work.
+
+With a dead-letter exchange, the broker moves such a message to the dead letter
+queue. `message-broker:dlq:import` then moves it into the `dead_letters` table
+(see [DEAD_LETTERS.md](DEAD_LETTERS.md)). With no dead-letter exchange, or when
+its route has no queue, the broker drops the message.
+
 ## Sequential consumers over one connection
 
 **Running `AmqpConsumer` sequentially over one connection.** `run()` accepts

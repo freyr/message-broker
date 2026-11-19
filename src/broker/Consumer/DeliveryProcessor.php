@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Consumer;
 
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterBuilder;
 use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
 use Freyr\MessageBroker\ErrorHandler;
 use Freyr\MessageBroker\Observability\BrokerEvents;
@@ -12,12 +13,10 @@ use Freyr\MessageBroker\Retry\RetryAction;
 use Freyr\MessageBroker\Retry\RetryPolicy;
 use Freyr\MessageBroker\Serializer\Deserializer;
 use Freyr\MessageBroker\Serializer\MalformedMessage;
-use Freyr\MessageBroker\Serializer\MetadataHeader;
 use Freyr\MessageBroker\Storage\Transaction;
 use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
-use Symfony\Component\Uid\Uuid;
 use Throwable;
 
 /**
@@ -46,6 +45,8 @@ use Throwable;
  */
 final class DeliveryProcessor
 {
+    private readonly DeadLetterBuilder $builder;
+
     /**
      * @param int|null $maxDeliveries the delivery limit: a delivery whose count of earlier deliveries that
      *                                ended with no ack (Delivery::$deliveryCount) is at or above it becomes a
@@ -69,6 +70,7 @@ final class DeliveryProcessor
         if ($maxDeliveries !== null && $maxDeliveries < 1) {
             throw new InvalidArgumentException("maxDeliveries must be at least 1 or null, got {$maxDeliveries}");
         }
+        $this->builder = new DeadLetterBuilder();
     }
 
     public function process(Delivery $delivery, DeliveryControl $control): void
@@ -270,86 +272,18 @@ final class DeliveryProcessor
     /** @return string the message id of the stored row */
     private function deadLetterRaw(Delivery $delivery, Throwable $error): string
     {
-        // Best-effort triage: prefer the x-message-* envelope headers; fall back
-        // to the transport message id, and then to a generated 'unknown-<UUID v7>'
-        // so that two messages with no id never share one row. Stage-1 raw dead
-        // letters are never replayed, so this only improves dlq:show output.
-        $messageName = 'unknown';
-        try {
-            $meta = MetadataHeader::parse($delivery->headers);
-            $messageId = $meta['message_id'];
-            $messageName = $meta['message_name'];
-        } catch (MalformedMessage) {
-            $messageId = $delivery->fallbackMessageId ?? 'unknown-'.Uuid::v7()->toString();
-        }
-
-        return $this->storeDeadLetter(
-            source: $delivery->source,
-            messageId: $messageId,
-            messageName: $messageName,
-            body: $delivery->body,
-            headers: $delivery->headers,
-            error: $error,
-            attempt: $delivery->attempt,
-            replayable: false,
-        )->messageId;
+        return $this->storeDeadLetter($this->builder->raw($delivery, $error))->messageId;
     }
 
     /** @return string the message id of the stored row */
     private function deadLetterIncoming(Delivery $delivery, IncomingMessage $incoming, Throwable $error): string
     {
-        // Store the reconstructed canonical document, not the wire bytes:
-        // readable in dlq:show and replayable through the outbox regardless
-        // of the queue's wire format. Raw bytes are kept only
-        // for stage-1 failures (deadLetterRaw), which never replay anyway.
-        $document = json_encode([
-            'metadata' => [
-                'message_name' => $incoming->messageName,
-                'message_id' => $incoming->messageId,
-                'created_at' => $incoming->createdAt,
-            ],
-            'payload' => $incoming->payload,
-            // INVALID_UTF8_SUBSTITUTE: substitution preferred over a failed
-            // dead-letter write.
-        ], JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
-
-        return $this->storeDeadLetter(
-            source: $delivery->source,
-            messageId: $incoming->messageId,
-            messageName: $incoming->messageName,
-            body: $document,
-            headers: $incoming->headers,
-            error: $error,
-            attempt: $delivery->attempt,
-            replayable: true,
-        )->messageId;
+        return $this->storeDeadLetter($this->builder->canonical($delivery, $incoming, $error))->messageId;
     }
 
-    /**
-     * @param array<string, mixed> $headers
-     *
-     * @return DeadLetter the stored dead letter: its texts are the valid, cut form of the arguments
-     */
-    private function storeDeadLetter(
-        string $source,
-        string $messageId,
-        string $messageName,
-        string $body,
-        array $headers,
-        Throwable $error,
-        int $attempt,
-        bool $replayable,
-    ): DeadLetter {
-        $deadLetter = DeadLetter::fromFailure(
-            source: $source,
-            messageId: $messageId,
-            messageName: $messageName,
-            body: $body,
-            headers: $headers,
-            error: $error,
-            attempts: $attempt,
-            replayable: $replayable,
-        );
+    /** @return DeadLetter the stored dead letter: its texts are the valid, cut form of the input */
+    private function storeDeadLetter(DeadLetter $deadLetter): DeadLetter
+    {
         $this->deadLetters->store($deadLetter);
 
         $this->events?->record(BrokerEvents::DEAD_LETTERED, [

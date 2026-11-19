@@ -84,6 +84,7 @@ AMQP adapter (`docs/amqp/`):
 
 - [Transport](docs/amqp/TRANSPORT.md) — routing, config classes, the dedicated channel, the publisher, the topology
 - [Consumer](docs/amqp/CONSUMER.md) — the consumer, the TTL wait queues, the dead-letter exchange
+- [Dead letters](docs/amqp/DEAD_LETTERS.md) — the import of a dead letter queue, the read of `x-death`, the permissions
 
 ## License
 

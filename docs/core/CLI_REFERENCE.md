@@ -265,6 +265,40 @@ body and no error message.
 | --- | --- |
 | The filter options | See [Dead letter filter options](#dead-letter-filter-options). With no option it groups all rows; `--not-replayed` gives the open rows. |
 
+## `message-broker:dlq:import <name> [--limit <n>]`
+
+Imports the messages of a dead letter queue of the transport into the
+`dead_letters` table, and prints `Imported <n> dead letters from '<name>'.`
+with the exit code 0. It is a batch command: it ends when the queue is empty
+or the limit is reached. Run it from a scheduler, for example cron. The import
+cases are in [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md#importing-a-dead-letter-queue-of-the-transport).
+
+**Constructor:** `new DlqImportCommand(array $importers)` —
+`array<string, callable(?int $limit): int>` keyed by import name. Each callable
+returns the number of imported messages. For AMQP:
+
+```php
+use Freyr\MessageBroker\Adapter\Amqp\AmqpDeadLetterImport;
+use Freyr\MessageBroker\Console\DlqImportCommand;
+use Freyr\MessageBroker\DeadLetter\DeadLetterBuilder;
+use Freyr\MessageBroker\DeadLetter\DeadLetterImporter;
+
+$importer = new DeadLetterImporter($deadLetterStore, $deserializer, new DeadLetterBuilder());
+$ordersImport = new AmqpDeadLetterImport($channel, 'orders_q.dlq', $importer);
+
+$application->add(new DlqImportCommand([
+    'orders_q.dlq' => fn (?int $limit): int => $ordersImport->run($limit),
+]));
+```
+
+| Argument/Option | Description |
+| --- | --- |
+| `name` (argument, required) | The registered import name. An unknown name prints the registered names and returns exit code 2 (`INVALID`). |
+| `--limit` | The maximum number of messages in this run, a positive integer. Another value returns exit code 2. No option: no limit, the run ends when the queue is empty. |
+
+An error of the callable (for example, a failed store) propagates, and the
+command exits with a non-zero code.
+
 ## `message-broker:dedup:cleanup`
 
 Prunes `message_deduplication` entries older than a given age. Keep the
