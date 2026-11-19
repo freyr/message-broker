@@ -13,7 +13,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 
 /**
  * Imports the messages of a dead letter queue of the transport into the
- * dead_letters table. A batch command (for example from cron): it ends when
+ * dead_letters table. A batch command (for example from a Kubernetes CronJob): it ends when
  * the queue is empty or the limit is reached. Imports are constructed
  * programmatically and registered as callables:
  *
