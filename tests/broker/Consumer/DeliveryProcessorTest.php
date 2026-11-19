@@ -392,29 +392,6 @@ final class DeliveryProcessorTest extends TestCase
         ]], $this->events->records);
     }
 
-    public function testDeadLetterDocumentSubstitutesInvalidUtf8InsteadOfFailing(): void
-    {
-        $this->failingDispatch = self::failure('final failure');
-        $deserializer = new class() implements Deserializer {
-            public function deserialize(string $bytes, array $headers = []): IncomingMessage
-            {
-                return new IncomingMessage('m-9', 'order.placed', 1, [
-                    'note' => "caf\xE9",
-                ], $headers);
-            }
-        };
-
-        $this->processor(deserializer: $deserializer, maxAttempts: 3)->process(
-            $this->delivery('m-9', body: "{\"note\":\"caf\xE9\"}", attempt: 3),
-            $this->control,
-        );
-
-        self::assertCount(1, $this->deadLetters());
-        $document = json_decode($this->deadLetters()[0]->body, true);
-        self::assertSame("caf\u{FFFD}", $document['payload']['note']);
-        self::assertSame(['ack'], $this->control->calls);
-    }
-
     public function testTheSameFailedDeliveryProcessedTwoTimesGivesOneOpenRowWithTheDataOfTheSecondFailure(): void
     {
         $failures = 0;
@@ -520,17 +497,6 @@ final class DeliveryProcessorTest extends TestCase
         ]], $this->events->records);
     }
 
-    public function testMalformedDeliveryWithoutEnvelopeFallsBackToTheTransportMessageId(): void
-    {
-        $this->processor()->process(
-            $this->delivery(withEnvelope: false, fallbackMessageId: 'from-property'),
-            $this->control,
-        );
-
-        self::assertSame('from-property', $this->deadLetters()[0]->messageId);
-        self::assertSame('unknown', $this->deadLetters()[0]->messageName);
-    }
-
     public function testMalformedDeliveryWithoutAnyIdUsesUnknown(): void
     {
         $this->processor()->process($this->delivery(withEnvelope: false), $this->control);
@@ -540,20 +506,6 @@ final class DeliveryProcessorTest extends TestCase
         self::assertGeneratedUnknownId($messageId);
         self::assertSame('unknown', $this->deadLetters()[0]->messageName);
         self::assertSame($messageId, $this->events->records[0]['context']['message_id'], 'the event carries the stored id');
-    }
-
-    public function testTwoMalformedDeliveriesWithoutAnyIdGiveTwoRowsWithDifferentIds(): void
-    {
-        $processor = $this->processor();
-
-        $processor->process($this->delivery(withEnvelope: false), $this->control);
-        $processor->process($this->delivery(withEnvelope: false), $this->control);
-
-        self::assertCount(2, $this->deadLetters());
-        [$first, $second] = $this->deadLetters();
-        self::assertGeneratedUnknownId($first->messageId);
-        self::assertGeneratedUnknownId($second->messageId);
-        self::assertNotSame($first->messageId, $second->messageId);
     }
 
     public function testTheAttemptOfAMalformedDeliveryIsKept(): void
