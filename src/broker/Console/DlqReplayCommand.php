@@ -128,7 +128,8 @@ final class DlqReplayCommand extends Command
         try {
             if ($dryRun) {
                 $destination = $this->replay->check($id, $lane);
-                $output->writeln('<info>[dry-run] would replay '.self::into($id, $destination).'</info>');
+                $into = self::into($id, $destination);
+                $output->writeln("<info>[dry-run] would replay {$into}</info>");
 
                 return Command::SUCCESS;
             }
@@ -138,7 +139,8 @@ final class DlqReplayCommand extends Command
 
             return Command::FAILURE;
         }
-        $output->writeln('<info>Replayed '.self::into($id, $destination).'</info>');
+        $into = self::into($id, $destination);
+        $output->writeln("<info>Replayed {$into}</info>");
 
         return Command::SUCCESS;
     }
@@ -161,7 +163,7 @@ final class DlqReplayCommand extends Command
     {
         $replayed = 0;
         $webhookReplayed = 0;
-        /** @var array<string, true> $webhookLanes in the order of the first replay */
+        /** @var list<string> $webhookLanes the lane of each webhook replay */
         $webhookLanes = [];
         $notReplayable = 0;
         $alreadyReplayed = 0;
@@ -192,7 +194,7 @@ final class DlqReplayCommand extends Command
                     $destination = $this->replay->replay($id, $lane);
                     if ($destination->webhook) {
                         ++$webhookReplayed;
-                        $webhookLanes[$destination->lane] = true;
+                        $webhookLanes[] = $destination->lane;
                     } else {
                         ++$replayed;
                     }
@@ -224,7 +226,7 @@ final class DlqReplayCommand extends Command
             $output->writeln(sprintf(
                 '<info>Replayed %d webhook dead letter(s) into the webhook lanes of their sources (--lane has no effect on them): %s.</info>',
                 $webhookReplayed,
-                implode(', ', array_keys($webhookLanes)),
+                implode(', ', array_unique($webhookLanes)),
             ));
         }
 
