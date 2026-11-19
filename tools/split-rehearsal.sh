@@ -20,7 +20,7 @@ set -eu
 # The rehearsal version: the current 0.x line. It is the version that each path package gets, and
 # it must satisfy the ^0.x constraints between the packages/*/composer.json files.
 # Change it together with those constraints at each minor release.
-REHEARSAL_VERSION="${REHEARSAL_VERSION:-0.12.0}"
+REHEARSAL_VERSION="${REHEARSAL_VERSION:-0.13.0}"
 export COMPOSER_ROOT_VERSION="${REHEARSAL_VERSION}"
 
 usage() {

@@ -18,7 +18,7 @@
         "php": ">=8.4",
         "ext-pdo": "*",
         "ext-pdo_pgsql": "*",
-        "freyr/message-broker": "^0.12",
+        "freyr/message-broker": "^0.13",
         "symfony/clock": "^8.1",
         "symfony/uid": "^7.4|^8.1"
     },
