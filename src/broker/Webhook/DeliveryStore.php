@@ -43,7 +43,16 @@ interface DeliveryStore
      * the rows of each other (for a database: FOR UPDATE SKIP LOCKED); they
      * never wait. An empty lane list returns an empty list.
      *
-     * @param list<string> $lanes
+     * The order of $lanes is the priority when $total cuts the claim: a lane
+     * that is earlier in the list gets its rows (up to $limitForEachLane)
+     * before a later lane gets one. The delivery loop gives the lanes in a
+     * new random order for each claim, so no lane is always last.
+     *
+     * A row is due when its available_at is at or before the present time of
+     * the store, and the comparison has millisecond precision: a row whose
+     * lease is 0 ms is due again for the next claim.
+     *
+     * @param list<string> $lanes the lanes to claim from, in priority order
      *
      * @return list<ClaimedDelivery> each with the record (attempts as stored) and its lease value
      */

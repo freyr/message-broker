@@ -30,6 +30,9 @@ use Symfony\Component\Uid\Uuid;
  *    of the last minutes (an adapter that partitions by day prepares the
  *    partitions of today), and they show the lease rules with leases of 0 ms
  *    (due again at once) and 60 s (not due during the test), with no sleep.
+ *    "Due" compares with millisecond precision: a store that keeps
+ *    milliseconds must cut its present time to milliseconds before it
+ *    compares, or a lease of 0 ms is not due for some microseconds.
  *  - A lease value can differ from the time of the test by up to
  *    CLOCK_TOLERANCE_MS, for a store whose clock is not the clock of PHP.
  */
@@ -153,6 +156,29 @@ abstract class DeliveryStoreContractTestCase extends TestCase
             [...self::ids($ours), ...self::ids($other)],
             self::claimedIds([...$first, ...$second, ...$third]),
         );
+    }
+
+    public function testTheTotalCutsTheClaimInTheOrderOfTheLaneList(): void
+    {
+        $ours = [$this->record(), $this->record()];
+        $other = [$this->record(lane: self::OTHER_LANE), $this->record(lane: self::OTHER_LANE)];
+        $this->store()->insert([...$ours, ...$other]);
+
+        // A lease of 0 ms: each claim sees all four rows again.
+        $oursFirst = $this->store()->claim([self::LANE, self::OTHER_LANE], 2, 2, 0);
+        $otherFirst = $this->store()->claim([self::OTHER_LANE, self::LANE], 2, 2, 0);
+        $split = $this->store()->claim([self::OTHER_LANE, self::LANE], 2, 3, 0);
+
+        self::assertSame([
+            self::LANE => 2,
+        ], self::countByLane($oursFirst), 'the first lane of the list fills the total');
+        self::assertSame([
+            self::OTHER_LANE => 2,
+        ], self::countByLane($otherFirst), 'the other order gives the other lane');
+        self::assertSame([
+            self::LANE => 1,
+            self::OTHER_LANE => 2,
+        ], self::countByLane($split), 'the later lane gets only the rest of the total');
     }
 
     public function testAnEmptyLaneListClaimsNothing(): void

@@ -19,7 +19,7 @@ A contract test case is an abstract PHPUnit test case. It checks that an impleme
 | `TransactionContractTestCase` | `Storage\Transaction` (with a deduplication store, an outbox store and a dead letter store on the same connection) |
 | `OutboxPublisherContractTestCase` | `Outbox\OutboxPublisher` |
 | `DeadLetterSinkContractTestCase` | `DeadLetter\DeadLetterSink` (each field of a stored dead letter, the raw bytes and the mark, two dead letters; no rule on two failures of one message) |
-| `DeliveryStoreContractTestCase` | `Webhook\DeliveryStore` (insert, claim with the row limit of each lane and the total, the lease, the lease check of `complete()`, the dead letters, the claim of expired rows) |
+| `DeliveryStoreContractTestCase` | `Webhook\DeliveryStore` (insert, claim with the row limit of each lane and the total, the total cut in the order of the lane list, the lease, the lease check of `complete()`, the dead letters, the claim of expired rows) |
 
 To test an adapter, extend the test case and return the implementation from the abstract factory method:
 
