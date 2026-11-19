@@ -57,6 +57,9 @@ Each factory must return a store that is empty at the start of the test. Some te
 - The `replayable` mark round-trips as `true` and as `false`, an upsert changes it in each direction, and `markReplayed()` keeps it.
 - Each filter field alone selects the same rows in `list()`, `count()`, `ids()` and `purge()`, with the bounds: `failedFromMs` is inclusive, `failedUntilMs` is exclusive, `minAttempts` is inclusive. One case combines all fields with AND.
 - `ids()` is oldest first and keeps to the limit; a limit below 1 throws. `stats()` gives one entry for each group, by count and then by name, source and error class.
+- `markReplayed()` of an open row returns `true`, sets `replayedAt` to now (the tests set a `MockClock` with `Clock::set()`, so the store must read the time from `EpochMillis::now()` or `Clock::get()`) and keeps the other fields. A second call returns `false` and keeps the first `replayedAt`. An unknown ID and a value that is not a UUID return `false` with no error.
+
+`TransactionContractTestCase` also checks that a new `markReplayed()` returns `true` after a mark rolled back.
 
 The helper of the test case gives each dead letter a new message ID by default, so two stored dead letters are two rows.
 

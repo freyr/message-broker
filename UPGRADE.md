@@ -1,5 +1,55 @@
 # Upgrade guide
 
+## From 0.10.x to 0.11.0
+
+This release makes the replay of a dead letter atomic, refuses replayed and
+not replayable rows, adds `--limit` and `--rate` to the bulk replay, and sends
+each replay to one consumer. It changes no schema.
+
+**Upgrade order.** Deploy the new release to all consumers first, and replay
+with the new release only after that. A consumer of an older release does not
+read the header `x-replay-target`, so it processes each replay.
+
+- **BREAKING:** `ReplayService::__construct()` takes `Transaction $transaction`
+  as the third argument: `(DeadLetterStore $deadLetters, OutboxStore $outbox,
+  Transaction $transaction, WireFormat $wireFormat, ?BrokerEvents $events =
+  null)`. Pass a transaction on the connection of the two stores, for example
+  `new PdoTransaction($pdo)` with the `$pdo` of `PostgreSqlDeadLetterStore` and
+  `PostgreSqlOutboxStore`. When two connections cannot be avoided, the
+  transaction must wrap the connection of the dead letter store (see
+  `docs/core/DLQ_OPERATIONS.md`).
+- **BREAKING:** `DeadLetterStore::markReplayed(string $id): bool`. A custom
+  implementation sets the mark only when `replayed_at` is null, returns `true`
+  only when it set the mark, and returns `false` with no error for an unknown
+  ID, an ID that is not valid and a replayed row. Run
+  `DeadLetterStoreContractTestCase`.
+- **BREAKING (behavior):** `dlq:replay <id>` of a replayed row fails with exit
+  code 1 and inserts nothing. A message that failed again after its replay has
+  a new open row; replay that row.
+- **BREAKING (behavior):** `dlq:replay --all` reads only rows with the mark
+  `replayable = true` unless the operator gives `--not-replayable`, and only
+  rows that failed before the start of the run. It skips a row that it cannot
+  replay and continues; it exits with code 1 when a row failed with an
+  unexpected error. The last line of its output gives four counts.
+  `--name`, `--source` and `--since` keep their names in the shared filter
+  options.
+- **BREAKING (behavior):** a consumer acks with no dispatch a delivery whose
+  `x-replay-target` names a different queue. Upgrade all consumers before the
+  first replay.
+- `ReplayService` throws `DeadLetterNotFound`, `AlreadyReplayed` and
+  `NotReplayable`; each extends `RuntimeException`, so a catch of
+  `RuntimeException` still works. `ReplayService::check()` is new.
+- The event `message.replayed` has the new field `target`; the event
+  `message.replay_skipped` (`BrokerEvents::REPLAY_SKIPPED`) is new.
+
+Before a rollback to 0.10.x, wait until no unpublished replay is left in the
+outbox, or accept that each consumer processes those rows:
+
+```sql
+SELECT COUNT(*) FROM outbox_messages
+WHERE published_at IS NULL AND headers ? 'x-replay-target';
+```
+
 ## From 0.9.x to 0.10.0
 
 This release keeps one open dead letter row for each message and work queue,

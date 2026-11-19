@@ -91,15 +91,82 @@ command inserts a new outbox row with the original message id and a new
 drops its partition. The dead letter row is kept for audit and marked
 `replayed_at` rather than deleted.
 
+### One transaction for each replay
+
+`ReplayService` replays one dead letter in one transaction: it sets the
+replay mark first (`markReplayed()`, only when `replayed_at` is null), then
+inserts the outbox row, then commits. A stop before the commit rolls back
+the mark and the row together, so the dead letter stays open and the next
+replay works. A stop after the commit keeps both.
+
+When the commit fails, the outcome is not known: the connection can stop
+after the server committed. The replay then reports a failure. Before any
+manual change, check `replayed_at` with `dlq:show`. A second replay of a row
+that did commit fails with "already replayed" and inserts nothing.
+
+**One connection.** Give the dead letter store, the outbox store and the
+transaction one connection. With PostgreSQL:
+
+```php
+$replay = new ReplayService(
+    new PostgreSqlDeadLetterStore($pdo),
+    new PostgreSqlOutboxStore($pdo),
+    new PdoTransaction($pdo),
+    new JsonWireFormat(),
+);
+```
+
+When two connections cannot be avoided, the transaction must wrap the
+connection of the dead letter store. Then a stop between the outbox insert
+and the commit leaves an outbox row and an open dead letter, and the next
+replay sends the message a second time. Consumer deduplication absorbs the
+second copy only when the handler already committed for that message id. No
+replay is lost in this direction. Do not wrap the connection of the outbox
+store: a stop then keeps the mark and loses the outbox row, and the refusal
+of a replayed row blocks a new replay. Do not call `replay()` inside a
+transaction that is open on the same connection.
+
+### Refusals
+
+The replay refuses three cases and changes nothing:
+
+| Case | Exception (each extends `RuntimeException`) | Single id |
+| --- | --- | --- |
+| No row with the id (unknown, or purged) | `DeadLetterNotFound` | exit code 1 |
+| The row is replayed (`replayed_at` is set) | `AlreadyReplayed` | exit code 1 |
+| The row has `replayable` false, or its body is not the canonical document | `NotReplayable` | exit code 1 |
+
+No option replays a replayed row again. A message that failed again after
+its replay has a new open row: replay that row. A repeat of a message that
+was processed is deduplicated, so a second replay has no use. When two
+operators replay the same row at the same time, the second one waits for the
+row lock and then fails with "already replayed".
+
+A row with `replayable` false holds the raw wire bytes; no replay can decode
+it. A row from before 0.10.0 can have `replayable` true and a raw body: the
+replay refuses it too, with the reason from the decode.
+
 **Single id** replays immediately, with no confirmation prompt:
 
 ```bash
 php bin/console message-broker:dlq:replay 0190f7e2-1234-7000-8000-abc123456789 --lane=orders
 ```
 
+`--dry-run` with one id runs the same checks and changes nothing: it prints
+"would replay" with exit code 0, or the refusal with exit code 1.
+
+### Bulk replay
+
 **`--all`** replays every dead letter that matches the filter options and
 is not replayed: the command always adds the condition `--not-replayed`.
 `--replayed` together with `--all` ends with exit code 2 and replays nothing.
+By default it reads only rows with `replayable` true; `--not-replayable`
+replaces this condition (each such row is then a skip, which shows the rows in
+the report). It reads only rows that failed before the start of the run, or
+before `--until` when `--until` is earlier: a replayed message that fails
+again during the run gets a new open row, and the run does not replay it
+again.
+
 This is a batch operation, so it always goes through the dry-run-then-force
 workflow:
 
@@ -107,8 +174,8 @@ workflow:
 # 1. See what would happen — count plus a preview of the first 5 candidates.
 php bin/console message-broker:dlq:replay --all --source=orders_q --since=24h --dry-run
 
-# 2. Run it for real.
-php bin/console message-broker:dlq:replay --all --source=orders_q --since=24h --force
+# 2. Run it for real, at most 1000 rows and 50 replays a second.
+php bin/console message-broker:dlq:replay --all --source=orders_q --since=24h --limit=1000 --rate=50 --force
 ```
 
 Without `--force`, a `--all` replay asks for interactive confirmation
@@ -116,10 +183,81 @@ Without `--force`, a `--all` replay asks for interactive confirmation
 non-interactive shell), the command **refuses to run** rather than silently
 proceeding — pass `--force` explicitly for any non-interactive batch replay.
 
+Each row is its own transaction, oldest first. A row that the run cannot
+replay is a skip, and an unexpected error is a failure; neither stops the
+run. The run asks for each skipped or failed row only once. The last line
+gives four counts:
+
+```
+Replayed 120, skipped 3 (not replayable), skipped 1 (already replayed), failed 0 into lane 'orders'.
+```
+
+- `skipped (not replayable)`: one line for each row, with the id and the reason.
+- `skipped (already replayed)`: another run replayed the row, or a purge
+  removed it, after this run read its id.
+- `failed`: one line for each row, with the id, the class and the message of
+  the error. The exit code is 1 when this count is above 0. A later run
+  replays the row.
+
+`--limit <n>` caps the rows that the run handles (replayed, skipped or
+failed). `--rate <n>` caps the replays that start in one second. The rate
+protects the consumers from a burst after a large bulk replay; the relay
+still publishes at its own speed, so the outbox backlog can grow.
+
 `--lane` (default `default`) chooses which outbox lane the replayed
 message(s) are re-enqueued into; pick a lane deliberately if you want
 replayed traffic isolated from — or merged with — a lane's normal
 production.
+
+### Replay to one consumer
+
+A replay goes to the consumer that failed, not to each queue that binds the
+routing key. The outbox row of a replay gets the header `x-replay-target`
+with the `source` of the dead letter (the work queue). A consumer whose
+queue is a different queue acks the delivery with no dispatch, no
+deduplication row and no dead letter, and records the event
+`message.replay_skipped` (`BrokerEvents::REPLAY_SKIPPED`). The header
+survives a retry through the wait queue. `x-replay-target` is reserved: only
+the library writes it.
+
+The replay also removes stale headers from the new row: `x-attempt` (the
+replay gets the full retry budget), the envelope headers, an old
+`x-replay-target`, `x-delivery-count`, `x-death`, `x-first-death-*`,
+`x-last-death-*` and `x-dead-letter`. The dead letter row keeps its headers
+for triage.
+
+Deploy the release to all consumers before the first replay: a consumer of
+an older release ignores the header and processes each replay.
+
+In normal operation each replay gives one `message.replay_skipped` for each
+other queue that binds the routing key. A replay with skips and no
+processing on any queue shows a target that no consumer serves.
+
+### A replay that no consumer received
+
+After a rename of a queue, each consumer skips a replay whose target is the
+old name, and the row is marked replayed. When no queue binds the routing
+key, the broker drops the replay. The body stays in `dead_letters` until a
+purge, and no command reopens the row. To replay it again:
+
+1. Check `replayed_at` with `dlq:show <id>`.
+2. Check that no open row exists for the same message id and source:
+   `dlq:list --message-id=<message id> --source=<source> --not-replayed`.
+3. Clear the mark with SQL, and replay the row:
+
+```sql
+UPDATE dead_letters SET replayed_at = NULL
+WHERE id = '<id>'
+  AND NOT EXISTS (
+      SELECT 1 FROM dead_letters open_row
+      WHERE open_row.message_id = dead_letters.message_id
+        AND open_row.source = dead_letters.source
+        AND open_row.replayed_at IS NULL
+  );
+```
+
+A replay to a queue with a new name is not possible: the target is always the
+`source` of the dead letter.
 
 ## Purging
 

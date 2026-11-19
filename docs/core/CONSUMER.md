@@ -8,8 +8,17 @@ processor uses are in [../postgresql/STORAGE.md](../postgresql/STORAGE.md).
 
 ## The algorithm
 
-For each delivery, the processor first checks the delivery limit, then runs the
-normal flow. The delivery limit (see *Delivery limit* below): when the delivery
+For each delivery, the processor first checks the replay target, then the
+delivery limit, then runs the normal flow.
+
+The replay target (see *Replay to one consumer* below): when the header
+`x-replay-target` is present and its value is not `Delivery::$source` (strict
+comparison), the processor records the event `message.replay_skipped` and acks.
+It reads the header only: it does not deserialize, does not begin a
+transaction, does not touch the deduplication store, does not call the handler
+and writes no dead letter, whatever the delivery count is.
+
+The delivery limit (see *Delivery limit* below): when the delivery
 count of the transport is at or above `maxDeliveries`, the processor writes a
 dead letter with the error `Consumer\DeliveryLimitExceeded` and acks. It does
 not begin a transaction, does not touch the deduplication store and does not
@@ -80,6 +89,33 @@ The body stays the exact bytes. A value that obeys the rules does not change.
 Thus a header with invalid UTF-8, a NUL character or a name above 255
 characters no longer makes the dead letter write fail at each delivery. The
 cost: the invalid bytes of a binary header value are not kept exactly.
+
+## Replay to one consumer
+
+A replay of a dead letter (see [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md)) has the
+header `x-replay-target` with the `source` of the dead letter: the work queue
+of the consumer that failed. Each queue that binds the routing key receives
+the replay, and only the consumer of that queue processes it.
+
+- "Present" means that the key `x-replay-target` exists in
+  `Delivery::$headers`. A value that is not a string never equals the source,
+  so the delivery is skipped. A delivery with no header takes the normal path.
+- The skip acks the delivery. It writes no deduplication row, so a later replay
+  to this consumer still works, and no dead letter.
+- The processor records `BrokerEvents::REPLAY_SKIPPED`
+  (`message.replay_skipped`) with the context keys `consumer` (the dedup scope
+  `name`), `source` (`Delivery::$source`), `target` (the header value),
+  `message_id` (`x-message-id` when it is a string, else
+  `Delivery::$fallbackMessageId`, else `null`) and `message_name`
+  (`x-message-name` when it is a string, else `null`).
+- The header survives a retry: the wait queue copies all headers, so the retry
+  of a replay returns to the same queue with the same target.
+- Competing consumers on one queue share the `source`; one of them processes
+  the replay, as for each message.
+
+`x-replay-target` is reserved: only the library writes it. A consumer of an
+older release ignores it and processes each replay, so upgrade all consumers
+before the first replay.
 
 ## Delivery limit
 
