@@ -9,6 +9,7 @@ use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
 use Freyr\MessageBroker\DeadLetter\ReplayService;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Testing\InMemoryDeadLetterStore;
+use Freyr\MessageBroker\Testing\InMemoryTransaction;
 use Freyr\MessageBroker\Tests\Fixtures\DeadLetterFactory;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingOutboxStore;
 use Freyr\MessageBroker\Time\EpochMillis;
@@ -263,7 +264,7 @@ final class DlqReplayCommandTest extends TestCase
 
     private function tester(?int $batchSize = null): CommandTester
     {
-        $replay = new ReplayService($this->store, $this->outbox, new JsonWireFormat());
+        $replay = new ReplayService($this->store, $this->outbox, new InMemoryTransaction(), new JsonWireFormat());
 
         return new CommandTester($batchSize === null
             ? new DlqReplayCommand($replay, $this->store)

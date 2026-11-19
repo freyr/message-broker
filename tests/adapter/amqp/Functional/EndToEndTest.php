@@ -190,7 +190,7 @@ final class EndToEndTest extends AmqpFunctionalTestCase
 
         // Downstream recovered: replay rides the outbox + relay again.
         $this->handlerFails = false;
-        $replay = new ReplayService($this->deadLetters, $this->outbox, new JsonWireFormat());
+        $replay = new ReplayService($this->deadLetters, $this->outbox, new PdoTransaction(self::$pdo), new JsonWireFormat());
         $replay->replay($deadLetters[0]->id, lane: self::LANE);
 
         self::assertSame(1, $this->relay->drainOnce());

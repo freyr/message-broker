@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Adapter\PostgreSql\Tests\Functional;
 
+use Freyr\MessageBroker\Adapter\PostgreSql\PdoTransaction;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeduplicationStore;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
@@ -124,7 +125,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $replay = new CommandTester(new DlqReplayCommand(
             new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
                 self::$pdo,
-            ), new JsonWireFormat()),
+            ), new PdoTransaction(self::$pdo), new JsonWireFormat()),
             $this->deadLetters,
         ));
         $replay->execute([
@@ -168,7 +169,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $replay = new CommandTester(new DlqReplayCommand(
             new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
                 self::$pdo,
-            ), new JsonWireFormat()),
+            ), new PdoTransaction(self::$pdo), new JsonWireFormat()),
             $this->deadLetters,
         ));
         $status = $replay->execute([
@@ -189,7 +190,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $replay = new CommandTester(new DlqReplayCommand(
             new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
                 self::$pdo,
-            ), new JsonWireFormat()),
+            ), new PdoTransaction(self::$pdo), new JsonWireFormat()),
             $this->deadLetters,
         ));
         $replay->execute([
@@ -211,7 +212,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $replay = new CommandTester(new DlqReplayCommand(
             new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
                 self::$pdo,
-            ), new JsonWireFormat()),
+            ), new PdoTransaction(self::$pdo), new JsonWireFormat()),
             $this->deadLetters,
         ));
         $replay->execute([
@@ -306,7 +307,7 @@ final class ConsoleCommandsTest extends FunctionalTestCase
         $replay = new CommandTester(new DlqReplayCommand(
             new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
                 self::$pdo,
-            ), new JsonWireFormat()),
+            ), new PdoTransaction(self::$pdo), new JsonWireFormat()),
             $this->deadLetters,
             batchSize: 1,
         ));

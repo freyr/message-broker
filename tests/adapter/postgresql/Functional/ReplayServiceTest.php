@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Adapter\PostgreSql\Tests\Functional;
 
+use Freyr\MessageBroker\Adapter\PostgreSql\PdoTransaction;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\DeadLetter\DeadLetter;
@@ -28,7 +29,7 @@ final class ReplayServiceTest extends FunctionalTestCase
         $this->deadLetters = new PostgreSqlDeadLetterStore(self::$pdo);
         $this->replay = new ReplayService($this->deadLetters, new PostgreSqlOutboxStore(
             self::$pdo,
-        ), new JsonWireFormat());
+        ), new PdoTransaction(self::$pdo), new JsonWireFormat());
     }
 
     public function testReplayReenqueuesIntoOutboxUnderGivenLane(): void
@@ -125,6 +126,7 @@ final class ReplayServiceTest extends FunctionalTestCase
         $replay = new ReplayService(
             $this->deadLetters,
             new PostgreSqlOutboxStore(self::$pdo),
+            new PdoTransaction(self::$pdo),
             new JsonWireFormat(),
             $events,
         );
