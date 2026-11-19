@@ -99,6 +99,14 @@ jobs:
 
       - run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
 
+      # The test HTTP server of the suite http (tools/webhook-test-server/server.mjs: Node.js, built-in modules only;
+      # the runner has Node.js). A service container cannot run it: services start before the checkout.
+      - name: Start the webhook test server
+        run: |
+          nohup node tools/webhook-test-server/server.mjs > "${RUNNER_TEMP}/webhook-server.log" 2>&1 &
+          for _ in $(seq 1 30); do curl -sf http://localhost:8080/_health > /dev/null && exit 0; sleep 1; done
+          cat "${RUNNER_TEMP}/webhook-server.log"; exit 1
+
       - name: Run tests
         env:
           POSTGRES_DSN: "pgsql:host=127.0.0.1;port=5432;dbname=message_broker_test"
@@ -109,6 +117,7 @@ jobs:
           AMQP_USER: guest
           AMQP_PASSWORD: guest
           AMQP_VHOST: "/"
+          WEBHOOK_SERVER_URL: "http://localhost:8080"
         run: vendor/bin/phpunit
 
   # Infection runs on the newest supported PHP only. The test suite is the same on each version,
@@ -154,6 +163,7 @@ jobs:
       AMQP_USER: guest
       AMQP_PASSWORD: guest
       AMQP_VHOST: "/"
+      WEBHOOK_SERVER_URL: "http://localhost:8080"
 
     steps:
       - uses: actions/checkout@v7
@@ -169,6 +179,14 @@ jobs:
           tools: composer:v2
 
       - run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
+
+      # The test HTTP server of the suite http (tools/webhook-test-server/server.mjs: Node.js, built-in modules only;
+      # the runner has Node.js). A service container cannot run it: services start before the checkout.
+      - name: Start the webhook test server
+        run: |
+          nohup node tools/webhook-test-server/server.mjs > "${RUNNER_TEMP}/webhook-server.log" 2>&1 &
+          for _ in $(seq 1 30); do curl -sf http://localhost:8080/_health > /dev/null && exit 0; sleep 1; done
+          cat "${RUNNER_TEMP}/webhook-server.log"; exit 1
 
       # Pull request: mutate only the changed lines of src/broker/ and src/adapter/. Thresholds come from infection.json5.
       - name: Mutation tests (changed lines)
@@ -232,6 +250,14 @@ jobs:
 
       - run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
 
+      # The test HTTP server of the suite http (tools/webhook-test-server/server.mjs: Node.js, built-in modules only;
+      # the runner has Node.js). A service container cannot run it: services start before the checkout.
+      - name: Start the webhook test server
+        run: |
+          nohup node tools/webhook-test-server/server.mjs > "${RUNNER_TEMP}/webhook-server.log" 2>&1 &
+          for _ in $(seq 1 30); do curl -sf http://localhost:8080/_health > /dev/null && exit 0; sleep 1; done
+          cat "${RUNNER_TEMP}/webhook-server.log"; exit 1
+
       - name: Run tests (unit and functional)
         env:
           POSTGRES_DSN: "pgsql:host=127.0.0.1;port=5432;dbname=message_broker_test"
@@ -242,11 +268,12 @@ jobs:
           AMQP_USER: guest
           AMQP_PASSWORD: guest
           AMQP_VHOST: "/"
+          WEBHOOK_SERVER_URL: "http://localhost:8080"
         run: vendor/bin/phpunit
 
   # Each future package (see packages/ and "Package manifests and split rehearsal" in CLAUDE.md) is assembled in a
   # temporary folder, installed ALONE through Composer path repositories, and its tests run alone.
-  # The core entry does not use the services; all entries have them for a simple matrix.
+  # The core entry does not use the services or the webhook test server; all entries have them for a simple matrix.
   split-rehearsal:
     name: Split rehearsal (${{ matrix.package }})
     runs-on: ubuntu-latest
@@ -292,6 +319,7 @@ jobs:
       AMQP_USER: guest
       AMQP_PASSWORD: guest
       AMQP_VHOST: "/"
+      WEBHOOK_SERVER_URL: "http://localhost:8080"
 
     steps:
       - uses: actions/checkout@v7
@@ -303,6 +331,14 @@ jobs:
           extensions: pdo_pgsql, sockets, mbstring, pcntl
           coverage: ${{ github.event_name == 'push' && 'pcov' || 'none' }}
           tools: composer:v2
+
+      # The test HTTP server of the suite http (tools/webhook-test-server/server.mjs: Node.js, built-in modules only;
+      # the runner has Node.js). A service container cannot run it: services start before the checkout.
+      - name: Start the webhook test server
+        run: |
+          nohup node tools/webhook-test-server/server.mjs > "${RUNNER_TEMP}/webhook-server.log" 2>&1 &
+          for _ in $(seq 1 30); do curl -sf http://localhost:8080/_health > /dev/null && exit 0; sleep 1; done
+          cat "${RUNNER_TEMP}/webhook-server.log"; exit 1
 
       - name: Split rehearsal
         if: github.event_name == 'pull_request'
