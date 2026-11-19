@@ -6,14 +6,20 @@ namespace Freyr\MessageBroker\Adapter\PostgreSql;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use Freyr\MessageBroker\Outbox\RetentionReport;
+use Freyr\MessageBroker\Webhook\DeliveryRetention;
+use LogicException;
 use PDO;
 use RuntimeException;
 use Symfony\Component\Clock\Clock;
 
 /**
- * Partitions of the webhook_deliveries table, with the rules of
- * PostgreSqlOutboxRetention (that class serves outbox_messages only, so this
- * class repeats its partition code for the second table).
+ * PostgreSQL implementation of DeliveryRetention: partitions and retention
+ * of the webhook_deliveries table, with the rules of
+ * PostgreSqlOutboxRetention. That class serves outbox_messages only (its
+ * table, its "unpublished" condition and its options are fixed), so this
+ * class repeats its code for the second table. Finished rows stay in the
+ * table; they leave it here, one daily partition at a time.
  *
  *  - ensureCapacity() creates one range partition per UTC day
  *    (webhook_deliveries_pYYYYMMDD, [day, day + 1)) from today to today + N
@@ -21,11 +27,30 @@ use Symfony\Component\Clock\Clock;
  *    UPDATE EXCLUSIVE lock on webhook_deliveries, so producers and delivery
  *    workers never wait. The name matches the pg_partman default for daily
  *    partitions, so pg_partman can create the partitions instead.
+ *  - purge() drops each daily partition that lies wholly before the
+ *    retention cutoff: DETACH PARTITION ... CONCURRENTLY (no ACCESS EXCLUSIVE
+ *    lock on webhook_deliveries), then DROP TABLE on the detached table. An
+ *    expired partition that holds an unfinished row (completed_at IS NULL) is
+ *    kept and reported; there is no option to drop it. The delivery loop
+ *    makes each row final before its partition expires (maximum age plus the
+ *    longest retry delay is shorter than the retention period), so a kept
+ *    partition shows a fault.
  *
- * There is no DEFAULT partition: an insert for a day with no partition fails.
- * Create partitions ahead of time.
+ * Safety. The check and the detach are not one atomic step, so purge() counts
+ * the unfinished rows twice: before the detach, and again on the detached
+ * table, right before DROP TABLE. A detached table that holds unfinished rows
+ * is attached again at once, because the delivery loop claims rows through
+ * webhook_deliveries; it is reported as kept. The same rule covers an expired
+ * table that an earlier run detached but did not drop, and a partition with
+ * a pending detach (it is finalized first). ATTACH takes only SHARE UPDATE
+ * EXCLUSIVE on webhook_deliveries. If the attach fails, the exception
+ * propagates: the table stays detached and nothing is dropped.
+ *
+ * There is no DEFAULT partition (DETACH ... CONCURRENTLY does not allow one):
+ * an insert for a day with no partition fails. Create partitions ahead of
+ * time.
  */
-final readonly class PostgreSqlDeliveryRetention
+final readonly class PostgreSqlDeliveryRetention implements DeliveryRetention
 {
     public const string TABLE = 'webhook_deliveries';
     private const string DAILY_PREFIX = 'webhook_deliveries_p';
@@ -85,6 +110,88 @@ final readonly class PostgreSqlDeliveryRetention
         }
 
         return $names;
+    }
+
+    /**
+     * Drop every daily partition that lies wholly before the cutoff (today
+     * 00:00 UTC minus $retentionDays) and holds no unfinished row. A
+     * partition with unfinished rows is kept and reported in
+     * RetentionReport::$kept; there is no option to drop it. Also finishes a
+     * detach that an earlier run did not complete, and drops an expired daily
+     * table that an earlier run detached but did not drop (the same rule
+     * applies to both).
+     *
+     * Must run outside a transaction: DETACH ... CONCURRENTLY cannot run in
+     * a transaction block. $today (default: the current UTC day) is a test
+     * parameter of this class, not part of the DeliveryRetention port.
+     */
+    public function purge(int $retentionDays, bool $dryRun = false, ?DateTimeImmutable $today = null): RetentionReport
+    {
+        if ($retentionDays < 1) {
+            throw new \InvalidArgumentException("retentionDays must be 1 or more, got {$retentionDays}");
+        }
+        if ($this->pdo->inTransaction()) {
+            throw new LogicException('Webhook delivery purge cannot run inside a transaction (DETACH PARTITION CONCURRENTLY).');
+        }
+        $cutoff = self::utcMidnight($today)->modify("-{$retentionDays} day");
+
+        $dropped = [];
+        $kept = [];
+        foreach ($this->dailyTables() as $name => $table) {
+            if ($table['day']->modify('+1 day') > $cutoff) {
+                continue; // not wholly expired yet
+            }
+
+            $unfinished = $this->countUnfinished($name);
+            if ($unfinished > 0) {
+                if (!$dryRun && (!$table['attached'] || $table['detachPending'])) {
+                    if ($table['detachPending']) {
+                        $this->finalizeDetach($name);
+                    }
+                    $this->attach($name, $table['day']);
+                }
+                $kept[$name] = $unfinished;
+                continue;
+            }
+
+            if (!$dryRun) {
+                if ($table['detachPending']) {
+                    $this->finalizeDetach($name);
+                } elseif ($table['attached']) {
+                    $this->pdo->exec(sprintf('ALTER TABLE %s DETACH PARTITION "%s" CONCURRENTLY', self::TABLE, $name));
+                }
+                // The table is detached now, so nothing can add a row. Count again:
+                // a row may have arrived between the first count and the detach.
+                $late = $this->countUnfinished($name);
+                if ($late > 0) {
+                    $this->attach($name, $table['day']);
+                    $kept[$name] = $late;
+                    continue;
+                }
+                $this->pdo->exec("DROP TABLE \"{$name}\"");
+            }
+            $dropped[] = $name;
+        }
+
+        return new RetentionReport($cutoff, $dropped, [], $kept);
+    }
+
+    private function finalizeDetach(string $name): void
+    {
+        $this->pdo->exec(sprintf('ALTER TABLE %s DETACH PARTITION "%s" FINALIZE', self::TABLE, $name));
+    }
+
+    private function attach(string $name, DateTimeImmutable $from): void
+    {
+        $this->pdo->exec(self::attachDdl($name, $from));
+    }
+
+    private function countUnfinished(string $table): int
+    {
+        $statement = $this->pdo->query("SELECT COUNT(*) FROM \"{$table}\" WHERE completed_at IS NULL");
+        $value = $statement === false ? false : $statement->fetchColumn();
+
+        return is_numeric($value) ? (int) $value : 0;
     }
 
     private static function attachDdl(string $name, DateTimeImmutable $from): string
