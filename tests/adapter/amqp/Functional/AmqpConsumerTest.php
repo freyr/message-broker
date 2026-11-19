@@ -267,7 +267,7 @@ final class AmqpConsumerTest extends AmqpFunctionalTestCase
             $this->publish($body, $meta, $messageId);
         }
 
-        $this->consumer()->run(new WorkerLimits(maxMessages: 2));
+        $this->consumer()->run(new WorkerLimits(maxMessages: 2), idleTimeoutSec: 10);
 
         self::assertSame(['m-1', 'm-2'], array_map(
             static fn (IncomingMessage $incoming): string => $incoming->messageId,

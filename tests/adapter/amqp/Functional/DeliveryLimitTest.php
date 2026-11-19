@@ -270,7 +270,7 @@ final class DeliveryLimitTest extends AmqpFunctionalTestCase
     {
         $this->publish('m-1', 'm-2', 'm-3', 'm-4', 'm-5');
 
-        $this->consumer()->run(new WorkerLimits(maxMessages: 1));
+        $this->consumer()->run(new WorkerLimits(maxMessages: 1), idleTimeoutSec: 10);
 
         self::assertSame(['m-1'], $this->handled);
         self::assertSame([
