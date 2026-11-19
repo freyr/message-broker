@@ -1,0 +1,513 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Freyr\MessageBroker\Testing;
+
+use Freyr\MessageBroker\DeadLetter\DeadLetter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterFilter;
+use Freyr\MessageBroker\DeadLetter\DeadLetterStore;
+use Freyr\MessageBroker\Time\EpochMillis;
+use Freyr\MessageBroker\Webhook\ClaimedDelivery;
+use Freyr\MessageBroker\Webhook\DeliveryCompletion;
+use Freyr\MessageBroker\Webhook\DeliveryRecord;
+use Freyr\MessageBroker\Webhook\DeliveryStore;
+use PHPUnit\Framework\TestCase;
+use Symfony\Component\Uid\Uuid;
+
+/**
+ * Contract tests of the {@see DeliveryStore} port. An adapter extends this
+ * class, returns its store from createStore() and the dead letter store that
+ * reads the dead letters of that store from deadLetterStore(), and inherits
+ * the tests. The tests use the ports only: no SQL.
+ *
+ * Rules for the adapter:
+ *  - createStore() returns a store that is EMPTY at the start of each test,
+ *    and deadLetterStore() a dead letter store with no row. The test calls
+ *    createStore() first.
+ *  - The store reads the present time from its own source (for a database:
+ *    the database time). The tests use the real time, with created_at values
+ *    of the last minutes (an adapter that partitions by day prepares the
+ *    partitions of today), and they show the lease rules with leases of 0 ms
+ *    (due again at once) and 60 s (not due during the test), with no sleep.
+ *  - A lease value can differ from the time of the test by up to
+ *    CLOCK_TOLERANCE_MS, for a store whose clock is not the clock of PHP.
+ */
+abstract class DeliveryStoreContractTestCase extends TestCase
+{
+    protected const int CLOCK_TOLERANCE_MS = 1_000;
+
+    private const string LANE = 'contract';
+    private const string OTHER_LANE = 'contract_other';
+    private const int LEASE_MS = 60_000;
+
+    private ?DeliveryStore $store = null;
+
+    /** A store that is empty at the start of the test. */
+    abstract protected function createStore(): DeliveryStore;
+
+    /** The dead letter store that reads the dead letters that the store of createStore() writes. */
+    abstract protected function deadLetterStore(): DeadLetterStore;
+
+    public function testAClaimedDeliveryCarriesEveryFieldOfTheInsertedRecord(): void
+    {
+        // Whole second, plus 123 ms: a store must keep the milliseconds.
+        $createdAt = intdiv(EpochMillis::now(), 1000) * 1000 - 5_000 + 123;
+        $inserted = new DeliveryRecord(
+            id: self::newId(),
+            messageId: self::newId(),
+            lane: self::LANE,
+            messageName: 'order.placed',
+            body: "\x00\x01binary\xff{\"zażółć\":1}",
+            headers: [
+                'correlation_id' => 'c-1',
+                'attempt' => 3,
+                'flag' => true,
+                'unicode' => 'zażółć',
+                'nested' => [
+                    'list' => ['a', 'b'],
+                    'map' => [
+                        'k' => 'v',
+                    ],
+                ],
+            ],
+            createdAt: $createdAt,
+        );
+        $this->store()->insert([$inserted]);
+
+        $claimed = $this->store()->claim([self::LANE], 10, 10, self::LEASE_MS);
+
+        self::assertCount(1, $claimed);
+        $record = $claimed[0]->delivery;
+        self::assertSame($inserted->id, $record->id);
+        self::assertSame($inserted->messageId, $record->messageId);
+        self::assertSame(self::LANE, $record->lane);
+        self::assertSame('order.placed', $record->messageName);
+        self::assertSame($inserted->body, $record->body, 'the body is bytes: no re-encoding');
+        self::assertSame(self::sortKeys($inserted->headers), self::sortKeys($record->headers));
+        self::assertSame($createdAt, $record->createdAt, 'the created_at keeps its milliseconds');
+        self::assertSame(0, $record->attempts, 'a new row has no attempt');
+        self::assertSame($claimed[0]->lease, $record->availableAt, 'the record has the new available_at');
+    }
+
+    public function testARecordWithoutHeadersComesBackWithAnEmptyHeaderList(): void
+    {
+        $this->store()->insert([$this->record()]);
+
+        self::assertSame([], $this->claim()[0]->delivery->headers);
+    }
+
+    public function testAnInsertOfAnEmptyListWritesNothing(): void
+    {
+        $this->store()->insert([]);
+
+        self::assertSame([], $this->claim());
+    }
+
+    public function testAnInsertOfSeveralRecordsWritesEachOfThem(): void
+    {
+        $records = [$this->record(), $this->record(), $this->record(lane: self::OTHER_LANE)];
+        $this->store()->insert($records);
+
+        self::assertEqualsCanonicalizing(self::ids($records), self::claimedIds($this->claim([self::LANE, self::OTHER_LANE])));
+    }
+
+    public function testAClaimTakesOnlyTheDueUnfinishedRowsOfTheAskedLanes(): void
+    {
+        $ours = $this->record();
+        $other = $this->record(lane: self::OTHER_LANE);
+        $notAsked = $this->record(lane: 'contract_not_asked');
+        $notDue = $this->record(availableAt: EpochMillis::now() + 60_000);
+        $this->store()->insert([$ours, $other, $notAsked, $notDue]);
+
+        $claimed = $this->claim([self::LANE, self::OTHER_LANE]);
+
+        self::assertEqualsCanonicalizing([$ours->id, $other->id], self::claimedIds($claimed));
+    }
+
+    public function testARowWithAnAvailableAtInThePastIsDue(): void
+    {
+        $row = $this->record(availableAt: EpochMillis::now() - 1_000);
+        $this->store()->insert([$row]);
+
+        self::assertSame([$row->id], self::claimedIds($this->claim()));
+    }
+
+    public function testAClaimKeepsTheLimitForEachLaneAndTheTotal(): void
+    {
+        $ours = [$this->record(), $this->record(), $this->record()];
+        $other = [$this->record(lane: self::OTHER_LANE), $this->record(lane: self::OTHER_LANE), $this->record(lane: self::OTHER_LANE)];
+        $this->store()->insert([...$ours, ...$other]);
+
+        $first = $this->store()->claim([self::LANE, self::OTHER_LANE], 2, 10, self::LEASE_MS);
+        $second = $this->store()->claim([self::LANE, self::OTHER_LANE], 5, 1, self::LEASE_MS);
+        $third = $this->store()->claim([self::LANE, self::OTHER_LANE], 5, 10, self::LEASE_MS);
+
+        self::assertSame([
+            self::LANE => 2,
+            self::OTHER_LANE => 2,
+        ], self::countByLane($first), 'at most the limit of each lane');
+        self::assertCount(1, $second, 'at most the total');
+        self::assertCount(1, $third, 'the rest');
+        self::assertEqualsCanonicalizing(
+            [...self::ids($ours), ...self::ids($other)],
+            self::claimedIds([...$first, ...$second, ...$third]),
+        );
+    }
+
+    public function testAnEmptyLaneListClaimsNothing(): void
+    {
+        $this->store()->insert([$this->record()]);
+
+        self::assertSame([], $this->store()->claim([], 10, 10, self::LEASE_MS));
+        self::assertCount(1, $this->claim(), 'the row is still due');
+    }
+
+    public function testAClaimSetsTheLeaseAndALeasedRowIsNotClaimedAgain(): void
+    {
+        $this->store()->insert([$this->record()]);
+
+        $before = EpochMillis::now();
+        $claimed = $this->claim();
+        $after = EpochMillis::now();
+
+        self::assertCount(1, $claimed);
+        self::assertGreaterThanOrEqual($before + self::LEASE_MS - self::CLOCK_TOLERANCE_MS, $claimed[0]->lease);
+        self::assertLessThanOrEqual($after + self::LEASE_MS + self::CLOCK_TOLERANCE_MS, $claimed[0]->lease);
+        self::assertSame([], $this->claim(), 'the lease holds the row');
+        self::assertSame([], $this->store()->claimExpired(EpochMillis::now() + 60_000, 10, self::LEASE_MS), 'also for the claim of expired rows');
+    }
+
+    public function testARowWhoseLeaseEndedIsDueAgainWithANewLeaseAndNoAttempt(): void
+    {
+        $row = $this->record();
+        $this->store()->insert([$row]);
+
+        $first = $this->store()->claim([self::LANE], 10, 10, 0);
+        $second = $this->claim();
+
+        self::assertSame([$row->id], self::claimedIds($second), 'a lease of 0 ms ends at once');
+        self::assertGreaterThan($first[0]->lease, $second[0]->lease);
+        self::assertSame(0, $second[0]->delivery->attempts, 'a claim uses no attempt');
+    }
+
+    public function testADeliveredOutcomeFinishesTheRow(): void
+    {
+        $row = $this->record();
+        $this->store()->insert([$row]);
+        $claimed = $this->store()->claim([self::LANE], 10, 10, 0);
+
+        $changed = $this->store()->complete([DeliveryCompletion::delivered($claimed[0])]);
+
+        self::assertSame([$row->id], $changed);
+        self::assertSame([], $this->claim(), 'a finished row is never claimed again');
+        self::assertSame([], $this->store()->claimExpired(EpochMillis::now() + 60_000, 10, 0));
+    }
+
+    public function testARetryOutcomeAddsTheAttemptAndSetsTheRetryTime(): void
+    {
+        $soon = $this->record();
+        $later = $this->record();
+        $this->store()->insert([$soon, $later]);
+        [$a, $b] = self::byId($this->claim(), [$soon->id, $later->id]);
+        $retryAt = EpochMillis::now() - 1_000;
+
+        $changed = $this->store()->complete([
+            DeliveryCompletion::retry($a, $retryAt),
+            DeliveryCompletion::retry($b, EpochMillis::now() + 60_000),
+        ]);
+
+        self::assertEqualsCanonicalizing([$soon->id, $later->id], $changed);
+        $again = $this->store()->claim([self::LANE], 10, 10, 0);
+        self::assertSame([$soon->id], self::claimedIds($again), 'only the row whose retry time passed is due');
+        self::assertSame(1, $again[0]->delivery->attempts);
+        self::assertSame($soon->body, $again[0]->delivery->body);
+    }
+
+    public function testADeadOutcomeWritesTheDeadLetterAndFinishesTheRow(): void
+    {
+        $row = $this->record(headers: [
+            'correlation_id' => 'c-9',
+        ]);
+        $this->store()->insert([$row]);
+        $claimed = $this->claim()[0];
+        $deadLetter = $this->deadLetter($claimed, attempts: 8);
+
+        $changed = $this->store()->complete([DeliveryCompletion::dead($claimed, $deadLetter)]);
+
+        self::assertSame([$row->id], $changed);
+        self::assertSame([], $this->store()->claim([self::LANE], 10, 10, 0), 'a dead row is never claimed again');
+        $stored = $this->deadLetterStore()->find($deadLetter->id);
+        self::assertNotNull($stored);
+        self::assertSame('webhook:'.self::LANE, $stored->source);
+        self::assertSame($row->messageId, $stored->messageId);
+        self::assertSame($row->messageName, $stored->messageName);
+        self::assertSame($row->body, $stored->body);
+        self::assertSame($row->headers, $stored->headers);
+        self::assertSame('failed', $stored->errorClass);
+        self::assertSame('500 boom', $stored->errorMessage);
+        self::assertSame(8, $stored->attempts);
+        self::assertSame($deadLetter->failedAt, $stored->failedAt);
+        self::assertTrue($stored->replayable);
+        self::assertNull($stored->replayedAt);
+    }
+
+    public function testACompleteWithAnOldLeaseChangesNoRowAndWritesNoDeadLetter(): void
+    {
+        $row = $this->record();
+        $this->store()->insert([$row]);
+        $old = $this->store()->claim([self::LANE], 10, 10, 0)[0];
+        $current = $this->claim()[0];
+
+        $late = $this->store()->complete([
+            DeliveryCompletion::dead($old, $this->deadLetter($old)),
+            DeliveryCompletion::delivered($old),
+            DeliveryCompletion::retry($old, EpochMillis::now() - 1_000),
+        ]);
+
+        self::assertSame([], $late, 'the lease of the old claim ended');
+        self::assertSame(0, $this->deadLetterStore()->count(new DeadLetterFilter()));
+        self::assertSame([], $this->claim(), 'the row keeps the lease of the current claim');
+        self::assertSame([$row->id], $this->store()->complete([DeliveryCompletion::delivered($current)]));
+    }
+
+    public function testAFinishedRowIsNotChangedAgain(): void
+    {
+        $row = $this->record();
+        $this->store()->insert([$row]);
+        $claimed = $this->claim()[0];
+        $this->store()->complete([DeliveryCompletion::delivered($claimed)]);
+
+        $again = $this->store()->complete([
+            DeliveryCompletion::retry($claimed, EpochMillis::now() - 1_000),
+            DeliveryCompletion::dead($claimed, $this->deadLetter($claimed)),
+        ]);
+
+        self::assertSame([], $again);
+        self::assertSame([], $this->store()->claim([self::LANE], 10, 10, 0));
+        self::assertSame(0, $this->deadLetterStore()->count(new DeadLetterFilter()));
+    }
+
+    public function testACompleteOfAnEmptyListChangesNothing(): void
+    {
+        self::assertSame([], $this->store()->complete([]));
+    }
+
+    public function testOneMessageThatDiesInTwoLanesHasTwoOpenDeadLetters(): void
+    {
+        $messageId = self::newId();
+        $this->store()->insert([
+            $this->record(messageId: $messageId),
+            $this->record(lane: self::OTHER_LANE, messageId: $messageId),
+        ]);
+        $claimed = $this->claim([self::LANE, self::OTHER_LANE]);
+
+        $this->store()->complete(array_map(
+            fn (ClaimedDelivery $c): DeliveryCompletion => DeliveryCompletion::dead($c, $this->deadLetter($c)),
+            $claimed,
+        ));
+
+        $rows = $this->deadLetterStore()->list(new DeadLetterFilter(messageId: $messageId));
+        self::assertEqualsCanonicalizing(
+            ['webhook:'.self::LANE, 'webhook:'.self::OTHER_LANE],
+            array_map(static fn (DeadLetter $d): string => $d->source, $rows),
+        );
+    }
+
+    public function testTwoRowsOfOneMessageThatDieInOneLaneHaveOneOpenDeadLetter(): void
+    {
+        $messageId = self::newId();
+        $this->store()->insert([$this->record(messageId: $messageId), $this->record(messageId: $messageId)]);
+        $claimed = $this->claim();
+        $first = $this->deadLetter($claimed[0], attempts: 3);
+        $second = $this->deadLetter($claimed[1], attempts: 5);
+
+        $this->store()->complete([DeliveryCompletion::dead($claimed[0], $first)]);
+        $this->store()->complete([DeliveryCompletion::dead($claimed[1], $second)]);
+
+        $rows = $this->deadLetterStore()->list(new DeadLetterFilter(messageId: $messageId));
+        self::assertCount(1, $rows, 'the open row rule: one open row for each message ID and source');
+        self::assertSame($first->id, $rows[0]->id, 'the open row keeps its first id');
+        self::assertSame(5, $rows[0]->attempts, 'and gets the data of the second dead letter');
+    }
+
+    public function testAClaimOfExpiredRowsTakesTheDueUnfinishedRowsOfAnyLaneThatAreOlderThanTheCut(): void
+    {
+        $now = EpochMillis::now();
+        $cut = $now - 10_000;
+        $old = $this->record(createdAt: $now - 60_000);
+        $oldOtherLane = $this->record(lane: self::OTHER_LANE, createdAt: $now - 50_000);
+        $atTheCut = $this->record(createdAt: $cut);
+        $young = $this->record(createdAt: $now - 5_000);
+        $oldNotDue = $this->record(createdAt: $now - 60_000, availableAt: $now + 60_000);
+        $oldFinished = $this->record(createdAt: $now - 60_000);
+        $this->store()->insert([$old, $oldOtherLane, $atTheCut, $young, $oldNotDue, $oldFinished]);
+        // A lease of 0 ms: the other rows of the claim are due again at once.
+        $finished = self::byId($this->store()->claim([self::LANE], 10, 10, 0), [$oldFinished->id]);
+        $this->store()->complete([DeliveryCompletion::delivered($finished[0])]);
+
+        $expired = $this->store()->claimExpired($cut, 10, self::LEASE_MS);
+
+        self::assertSame([$old->id, $oldOtherLane->id], self::claimedIds($expired), 'the oldest first; created_at at the cut is not older');
+        self::assertSame([], $this->store()->claimExpired($cut, 10, self::LEASE_MS), 'the claim leases the rows');
+    }
+
+    public function testAClaimOfExpiredRowsKeepsTheLimitAndTakesTheOldestFirst(): void
+    {
+        $now = EpochMillis::now();
+        $middle = $this->record(createdAt: $now - 40_000);
+        $oldest = $this->record(lane: self::OTHER_LANE, createdAt: $now - 60_000);
+        $youngest = $this->record(createdAt: $now - 20_000);
+        $this->store()->insert([$middle, $oldest, $youngest]);
+
+        $expired = $this->store()->claimExpired($now, 2, self::LEASE_MS);
+
+        self::assertSame([$oldest->id, $middle->id], self::claimedIds($expired));
+    }
+
+    public function testAnExpiredClaimHasALeaseThatCompleteChecks(): void
+    {
+        $now = EpochMillis::now();
+        $row = $this->record(createdAt: $now - 60_000);
+        $this->store()->insert([$row]);
+
+        $old = $this->store()->claimExpired($now, 10, 0)[0];
+        $current = $this->store()->claimExpired($now, 10, self::LEASE_MS)[0];
+
+        self::assertSame([], $this->store()->complete([DeliveryCompletion::dead($old, $this->deadLetter($old))]));
+        self::assertSame([$row->id], $this->store()->complete([DeliveryCompletion::dead($current, $this->deadLetter($current))]));
+        self::assertSame(1, $this->deadLetterStore()->count(new DeadLetterFilter()));
+    }
+
+    protected function store(): DeliveryStore
+    {
+        return $this->store ??= $this->createStore();
+    }
+
+    /**
+     * @param list<string>|null $lanes
+     *
+     * @return list<ClaimedDelivery>
+     */
+    private function claim(?array $lanes = null): array
+    {
+        return $this->store()->claim($lanes ?? [self::LANE], 10, 10, self::LEASE_MS);
+    }
+
+    /** @param array<string, mixed> $headers */
+    private function record(
+        string $lane = self::LANE,
+        ?string $messageId = null,
+        ?int $createdAt = null,
+        ?int $availableAt = null,
+        array $headers = [],
+    ): DeliveryRecord {
+        return new DeliveryRecord(
+            id: self::newId(),
+            messageId: $messageId ?? self::newId(),
+            lane: $lane,
+            messageName: 'order.placed',
+            body: '{"order_id":"o-1"}',
+            headers: $headers,
+            createdAt: $createdAt ?? EpochMillis::now() - 5_000,
+            availableAt: $availableAt,
+        );
+    }
+
+    private function deadLetter(ClaimedDelivery $claimed, int $attempts = 1): DeadLetter
+    {
+        $record = $claimed->delivery;
+
+        return new DeadLetter(
+            id: self::newId(),
+            source: 'webhook:'.$record->lane,
+            messageId: $record->messageId,
+            messageName: $record->messageName,
+            body: $record->body,
+            headers: $record->headers,
+            errorClass: 'failed',
+            errorMessage: '500 boom',
+            errorTrace: '',
+            attempts: $attempts,
+            failedAt: intdiv(EpochMillis::now(), 1000) * 1000 + 321,
+        );
+    }
+
+    private static function newId(): string
+    {
+        return Uuid::v7()->toString();
+    }
+
+    /**
+     * @param list<DeliveryRecord> $records
+     *
+     * @return list<string>
+     */
+    private static function ids(array $records): array
+    {
+        return array_map(static fn (DeliveryRecord $r): string => $r->id, $records);
+    }
+
+    /**
+     * @param list<ClaimedDelivery> $claimed
+     *
+     * @return list<string>
+     */
+    private static function claimedIds(array $claimed): array
+    {
+        return array_map(static fn (ClaimedDelivery $c): string => $c->delivery->id, $claimed);
+    }
+
+    /**
+     * @param list<ClaimedDelivery> $claimed
+     *
+     * @return array<string, int>
+     */
+    private static function countByLane(array $claimed): array
+    {
+        $counts = [];
+        foreach ($claimed as $c) {
+            $counts[$c->delivery->lane] = ($counts[$c->delivery->lane] ?? 0) + 1;
+        }
+        ksort($counts);
+
+        return $counts;
+    }
+
+    /**
+     * @param list<ClaimedDelivery> $claimed
+     * @param list<string> $ids
+     *
+     * @return list<ClaimedDelivery> the claimed deliveries of the ids, in the order of the ids
+     */
+    private static function byId(array $claimed, array $ids): array
+    {
+        $byId = [];
+        foreach ($claimed as $c) {
+            $byId[$c->delivery->id] = $c;
+        }
+
+        return array_map(static function (string $id) use ($byId): ClaimedDelivery {
+            self::assertArrayHasKey($id, $byId, "the claim holds {$id}");
+
+            return $byId[$id];
+        }, $ids);
+    }
+
+    /**
+     * @param array<array-key, mixed> $value
+     *
+     * @return array<array-key, mixed>
+     */
+    private static function sortKeys(array $value): array
+    {
+        ksort($value);
+        foreach ($value as $key => $item) {
+            if (is_array($item)) {
+                $value[$key] = self::sortKeys($item);
+            }
+        }
+
+        return $value;
+    }
+}
