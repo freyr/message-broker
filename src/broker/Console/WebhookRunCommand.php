@@ -24,7 +24,7 @@ use Symfony\Component\Console\Output\OutputInterface;
  *
  *     new WebhookRunCommand(
  *         static fn (DeliveryLoopConfig $config) => new DeliveryLoop($store, $sender, $subscriptions, config: $config),
- *         new DeliveryLoopConfig(retentionDays: 7),
+ *         new DeliveryLoopConfig(leaseMs: 60_000),
  *     );
  *
  * The options --lane (repeatable), --batch-size and --lane-limit replace their

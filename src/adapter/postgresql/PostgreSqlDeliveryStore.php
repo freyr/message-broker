@@ -8,9 +8,11 @@ use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Webhook\ClaimedDelivery;
 use Freyr\MessageBroker\Webhook\DeliveryCompletion;
 use Freyr\MessageBroker\Webhook\DeliveryCompletionKind;
+use Freyr\MessageBroker\Webhook\DeliveryDeadLetter;
 use Freyr\MessageBroker\Webhook\DeliveryRecord;
 use Freyr\MessageBroker\Webhook\DeliveryStore;
 use PDO;
+use PDOStatement;
 use Throwable;
 
 /**
@@ -25,10 +27,11 @@ use Throwable;
  * in TIMESTAMP(3); a comparison of a rounded stored lease with a raw
  * microsecond now() could find a lease of 0 ms not yet due.
  *
- * claim() and claimExpired() are one statement each: in autocommit mode the
+ * claim() is one statement: in autocommit mode the
  * statement is the transaction, and its commit makes the lease visible before
  * the method returns. The row locks of FOR UPDATE SKIP LOCKED last only for
- * that statement. No session state: the store works behind a transaction-mode
+ * that statement. complete() and abandon() each write in one transaction of
+ * the store. No session state: the store works behind a transaction-mode
  * pooler.
  *
  * @phpstan-type Row array{id: string, message_id: string, lane: string, message_name: string, body: resource|string, headers: string, attempts: int, created_at_ms: int, available_at_ms: int}
@@ -80,25 +83,6 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
         RETURNING
         SQL.' '.self::COLUMNS;
 
-    private const string CLAIM_EXPIRED_SQL = <<<'SQL'
-        WITH clock AS (
-            SELECT CAST(now() AT TIME ZONE 'UTC' AS TIMESTAMP(3)) AS now_ms
-        ),
-        picked AS (
-            SELECT c.id, c.created_at
-            FROM webhook_deliveries c
-            WHERE c.completed_at IS NULL AND c.created_at < CAST(:before AS TIMESTAMP(3))
-              AND c.available_at <= (SELECT now_ms FROM clock)
-            ORDER BY c.created_at
-            LIMIT :limit
-            FOR UPDATE SKIP LOCKED
-        )
-        UPDATE webhook_deliveries w
-        SET available_at = (SELECT now_ms FROM clock) + CAST(:lease_ms AS INTEGER) * INTERVAL '1 millisecond'
-        WHERE w.id = ANY(ARRAY(SELECT id FROM picked)) AND w.created_at = ANY(ARRAY(SELECT created_at FROM picked))
-        RETURNING
-        SQL.' '.self::COLUMNS;
-
     /**
      * One statement for all outcomes. The lease check is the condition
      * completed_at IS NULL AND available_at = lease; created_at lets
@@ -114,6 +98,46 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
             AS o(id UUID, created_at TIMESTAMP(3), lease TIMESTAMP(3), attempts INTEGER, available_at TIMESTAMP(3), outcome SMALLINT)
         WHERE w.id = o.id AND w.created_at = o.created_at AND w.completed_at IS NULL AND w.available_at = o.lease
         RETURNING w.id
+        SQL;
+
+    /**
+     * The final state dead for at most :limit unfinished rows created before
+     * :before, of the lanes of the JSON array :lanes (NULL: all lanes). A row
+     * that a different session locks is skipped. A lease does not protect a
+     * row, so available_at is not in the condition; the UPDATE keeps it, and
+     * the lease check of complete() then skips the row because it is
+     * finished. created_at < :before lets PostgreSQL skip the partitions of
+     * later days.
+     */
+    private const string ABANDON_SQL = <<<'SQL'
+        WITH picked AS (
+            SELECT c.id, c.created_at
+            FROM webhook_deliveries c
+            WHERE c.completed_at IS NULL AND c.created_at < CAST(:before AS TIMESTAMP(3))
+              AND (CAST(:lanes AS JSONB) IS NULL OR c.lane IN (SELECT jsonb_array_elements_text(CAST(:lanes AS JSONB))))
+            LIMIT :limit
+            FOR UPDATE SKIP LOCKED
+        )
+        UPDATE webhook_deliveries w
+        SET completed_at = CAST(now() AT TIME ZONE 'UTC' AS TIMESTAMP(3)),
+            outcome =
+        SQL.' '.self::OUTCOME_DEAD."\n".<<<'SQL'
+        WHERE w.id = ANY(ARRAY(SELECT id FROM picked)) AND w.created_at = ANY(ARRAY(SELECT created_at FROM picked))
+          AND w.completed_at IS NULL
+        RETURNING
+        SQL.' '.self::COLUMNS;
+
+    /**
+     * The rows that ABANDON_SQL would take, counted for each lane; COLLATE "C"
+     * gives the byte order of the lane names.
+     */
+    private const string COUNT_UNFINISHED_SQL = <<<'SQL'
+        SELECT c.lane, COUNT(*) AS row_count
+        FROM webhook_deliveries c
+        WHERE c.completed_at IS NULL AND c.created_at < CAST(:before AS TIMESTAMP(3))
+          AND (CAST(:lanes AS JSONB) IS NULL OR c.lane IN (SELECT jsonb_array_elements_text(CAST(:lanes AS JSONB))))
+        GROUP BY c.lane
+        ORDER BY c.lane COLLATE "C"
         SQL;
 
     public function __construct(
@@ -188,14 +212,7 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
 
             $this->pdo->commit();
         } catch (Throwable $error) {
-            if ($this->pdo->inTransaction()) {
-                try {
-                    $this->pdo->rollBack();
-                } catch (Throwable) {
-                    // Dead connection: the transaction died with it. Propagate
-                    // the original failure, not the rollback's.
-                }
-            }
+            $this->rollBack();
 
             throw $error;
         }
@@ -203,20 +220,55 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
         return array_values(array_filter(array_keys($first), static fn (string $id): bool => isset($changed[$id])));
     }
 
-    public function claimExpired(int $before, int $limit, int $leaseMs): array
+    public function abandon(int $before, ?array $lanes, int $limit): int
     {
-        $statement = $this->pdo->prepare(self::CLAIM_EXPIRED_SQL);
-        $statement->bindValue('before', self::timestamp($before));
-        $statement->bindValue('limit', $limit, PDO::PARAM_INT);
-        $statement->bindValue('lease_ms', $leaseMs, PDO::PARAM_INT);
+        $this->pdo->beginTransaction();
+
+        try {
+            $statement = $this->pdo->prepare(self::ABANDON_SQL);
+            self::bindBeforeAndLanes($statement, $before, $lanes);
+            $statement->bindValue('limit', $limit, PDO::PARAM_INT);
+            $statement->execute();
+            /** @var list<Row> $rows */
+            $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+
+            $deadLetters = new PostgreSqlDeadLetterStore($this->pdo);
+            $failedAt = EpochMillis::now();
+            foreach ($rows as $row) {
+                // The open row rule: one open dead letter for each message ID and source.
+                $deadLetters->store(DeliveryDeadLetter::abandoned(self::claimed($row)->delivery, $before, $failedAt));
+            }
+
+            $this->pdo->commit();
+        } catch (Throwable $error) {
+            $this->rollBack();
+
+            throw $error;
+        }
+
+        return count($rows);
+    }
+
+    public function countUnfinished(int $before, ?array $lanes): array
+    {
+        $statement = $this->pdo->prepare(self::COUNT_UNFINISHED_SQL);
+        self::bindBeforeAndLanes($statement, $before, $lanes);
         $statement->execute();
 
-        /** @var list<Row> $rows */
-        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
-        // RETURNING has no order: the oldest first.
-        usort($rows, static fn (array $a, array $b): int => $a['created_at_ms'] <=> $b['created_at_ms']);
+        /** @var array<string, int> */
+        return $statement->fetchAll(PDO::FETCH_KEY_PAIR);
+    }
 
-        return array_map(self::claimed(...), $rows);
+    /** @param list<string>|null $lanes */
+    private static function bindBeforeAndLanes(PDOStatement $statement, int $before, ?array $lanes): void
+    {
+        $statement->bindValue('before', self::timestamp($before));
+        if ($lanes === null) {
+            $statement->bindValue('lanes', null, PDO::PARAM_NULL);
+        } else {
+            // An empty list matches no lane; a lane twice in the list counts one time (IN).
+            $statement->bindValue('lanes', json_encode($lanes, JSON_THROW_ON_ERROR));
+        }
     }
 
     /** @return array{id: string, created_at: string, lease: string, attempts: int, available_at: ?string, outcome: ?int} */
@@ -255,6 +307,18 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
         );
 
         return new ClaimedDelivery($record, $row['available_at_ms']);
+    }
+
+    private function rollBack(): void
+    {
+        if ($this->pdo->inTransaction()) {
+            try {
+                $this->pdo->rollBack();
+            } catch (Throwable) {
+                // Dead connection: the transaction died with it. The caller
+                // propagates the original failure, not the rollback's.
+            }
+        }
     }
 
     private static function timestamp(int $epochMilliseconds): string

@@ -20,15 +20,12 @@ final class DeliveryLoopConfigTest extends TestCase
         self::assertSame(25, $config->limitForEachLane);
         self::assertSame(30_000, $config->laneRefreshMs);
         self::assertNull($config->laneFilter);
-        self::assertSame(259_200_000, $config->maxAgeMs, '3 days');
-        self::assertSame(60_000, $config->expiredCheckIntervalMs);
-        self::assertSame(7, $config->retentionDays);
         self::assertSame(200, $config->idleSleepMs);
     }
 
     public function testAcceptsTheValueOneForEachNumber(): void
     {
-        $config = new DeliveryLoopConfig(1, 1, 1, 1, ['crm'], 1, 1, 1, 1);
+        $config = new DeliveryLoopConfig(1, 1, 1, 1, ['crm'], 1);
 
         self::assertSame(['crm'], $config->laneFilter);
         self::assertSame(1, $config->idleSleepMs);
@@ -37,7 +34,7 @@ final class DeliveryLoopConfigTest extends TestCase
     /** @return iterable<string, array{string}> */
     public static function numbers(): iterable
     {
-        foreach (['leaseMs', 'batchSize', 'limitForEachLane', 'laneRefreshMs', 'maxAgeMs', 'expiredCheckIntervalMs', 'retentionDays', 'idleSleepMs'] as $name) {
+        foreach (['leaseMs', 'batchSize', 'limitForEachLane', 'laneRefreshMs', 'idleSleepMs'] as $name) {
             yield $name => [$name];
         }
     }

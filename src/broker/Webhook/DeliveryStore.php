@@ -75,14 +75,42 @@ interface DeliveryStore
     public function complete(array $outcomes): array;
 
     /**
-     * Claim due, unfinished rows of any lane with created_at earlier than
-     * $before: at most $limit rows, the oldest first. The lease is the same
-     * as in claim(). The delivery loop gives these rows a dead letter with
-     * the reason "expired".
+     * Abandon old rows, for an operator: at most $limit unfinished rows with
+     * created_at earlier than $before, of the given lanes (null: of all
+     * lanes; an empty list: of no lane), in no defined order. Each row gets
+     * its dead letter ({@see DeliveryDeadLetter::abandoned()}: error class
+     * `abandoned`, source `webhook:<lane>`) and the final state dead with
+     * completed_at, in one transaction of the store. The dead letter follows
+     * the open row rule, as in complete(). When the transaction fails,
+     * nothing is written and the error propagates.
      *
-     * @param int $before epoch milliseconds: now minus the maximum age
+     * A lease does not protect a row: a leased row is abandoned too, and the
+     * later complete() of its worker changes nothing (the row is finished).
+     * Concurrent writers skip the rows of each other: a row that a different
+     * session locks at this time is skipped (for a database: FOR UPDATE SKIP
+     * LOCKED), so a call can return fewer than $limit rows, also 0, while
+     * more are left. A return of 0 does not prove that no row is left: use
+     * countUnfinished() to see the rows that are left.
      *
-     * @return list<ClaimedDelivery>
+     * @param int $before epoch milliseconds: a row whose created_at is earlier is abandoned
+     * @param list<string>|null $lanes the lanes to abandon rows of; null = all lanes
+     * @param int $limit the most rows of this call
+     *
+     * @return int the number of rows that this call abandoned
      */
-    public function claimExpired(int $before, int $limit, int $leaseMs): array;
+    public function abandon(int $before, ?array $lanes, int $limit): int;
+
+    /**
+     * Count, with no change, the unfinished rows with created_at earlier
+     * than $before, for each lane of the given lanes (null: of all lanes; an
+     * empty list: of no lane): the rows that abandon() with the same
+     * arguments would take. A lane with no such row is not in the result.
+     *
+     * @param int $before epoch milliseconds
+     * @param list<string>|null $lanes null = all lanes
+     *
+     * @return array<string, int> lane => row count, in the byte order of the lane names
+     *                            (PHP turns a numeric lane name into an int key; cast it back to string)
+     */
+    public function countUnfinished(int $before, ?array $lanes): array;
 }

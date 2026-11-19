@@ -86,9 +86,6 @@ final class WebhookRunCommandTest extends TestCase
             limitForEachLane: 5,
             laneRefreshMs: 1_000,
             laneFilter: ['old'],
-            maxAgeMs: 3_600_000,
-            expiredCheckIntervalMs: 2_000,
-            retentionDays: 9,
             idleSleepMs: 7,
         );
         $tester = new CommandTester($this->command($base));
@@ -106,9 +103,6 @@ final class WebhookRunCommandTest extends TestCase
             limitForEachLane: 3,
             laneRefreshMs: 1_000,
             laneFilter: ['crm', 'erp'],
-            maxAgeMs: 3_600_000,
-            expiredCheckIntervalMs: 2_000,
-            retentionDays: 9,
             idleSleepMs: 7,
         )], $this->configs);
         self::assertSame([[
@@ -282,9 +276,7 @@ final class WebhookRunCommandTest extends TestCase
                 default => self::fail("Give the test a value for the type {$type->getName()} of \${$parameter->getName()}"),
             };
         }
-        // The lease must stay longer than maxSendMs() of the sender, and the maximum age
-        // plus the longest retry delay shorter than the retention period, for the start checks.
-        $arguments['maxAgeMs'] = 3_600_000;
+        // The lease (its default plus 1,000) stays longer than maxSendMs() of the sender, for the start check.
         // A short idle sleep (not the default 200) keeps the one pass of the test fast.
         $arguments['idleSleepMs'] = 1;
 

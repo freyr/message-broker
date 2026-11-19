@@ -7,6 +7,7 @@ namespace Freyr\MessageBroker\Testing;
 use Freyr\MessageBroker\Time\EpochMillis;
 use Freyr\MessageBroker\Webhook\ClaimedDelivery;
 use Freyr\MessageBroker\Webhook\DeliveryCompletionKind;
+use Freyr\MessageBroker\Webhook\DeliveryDeadLetter;
 use Freyr\MessageBroker\Webhook\DeliveryRecord;
 use Freyr\MessageBroker\Webhook\DeliveryStore;
 use LogicException;
@@ -15,7 +16,8 @@ use LogicException;
  * In-memory delivery store that implements the contract of
  * {@see DeliveryStore}: the claim with a lease (available_at = now + lease),
  * the row limit for each lane and the total, the lease check of complete(),
- * and the claim of expired rows. The dead letters of complete() go to an
+ * the abandon of old rows and their count. The dead letters of complete() and abandon()
+ * go to an
  * {@see InMemoryDeadLetterStore} through store(), which keeps one open row
  * for each pair of message ID and source.
  *
@@ -34,9 +36,6 @@ final class InMemoryDeliveryStore implements DeliveryStore, TransactionParticipa
 
     /** @var list<array{lanes: list<string>, limitForEachLane: int, total: int, leaseMs: int}> the arguments of each claim() */
     public array $claims = [];
-
-    /** @var list<array{before: int, limit: int, leaseMs: int}> the arguments of each claimExpired() */
-    public array $expiredClaims = [];
 
     /** @var (callable(int): void)|null called at the start of each claim() with the call number */
     public $onClaim;
@@ -119,23 +118,40 @@ final class InMemoryDeliveryStore implements DeliveryStore, TransactionParticipa
         return $changed;
     }
 
-    public function claimExpired(int $before, int $limit, int $leaseMs): array
+    public function abandon(int $before, ?array $lanes, int $limit): int
     {
-        $this->expiredClaims[] = compact('before', 'limit', 'leaseMs');
         $now = EpochMillis::now();
-        $expired = array_filter(
-            $this->rows,
-            fn (DeliveryRecord $row): bool => $row->createdAt < $before && $this->isDue($row, $now),
-        );
-        usort($expired, static fn (DeliveryRecord $a, DeliveryRecord $b): int => $a->createdAt <=> $b->createdAt);
+        $count = 0;
+        foreach ($this->rows as $row) {
+            if ($count >= $limit) {
+                break;
+            }
+            if (isset($this->finished[$row->id]) || $row->createdAt >= $before || ($lanes !== null && !in_array($row->lane, $lanes, true))) {
+                continue;
+            }
+            $this->deadLetters->store(DeliveryDeadLetter::abandoned($row, $before, $now));
+            $this->finished[$row->id] = DeliveryCompletionKind::Dead;
+            ++$count;
+        }
 
-        return array_map(
-            fn (DeliveryRecord $row): ClaimedDelivery => $this->lease($row, $now + $leaseMs),
-            array_slice($expired, 0, $limit),
-        );
+        return $count;
     }
 
-    /** The dead letter store that complete() writes to. */
+    public function countUnfinished(int $before, ?array $lanes): array
+    {
+        $counts = [];
+        foreach ($this->rows as $row) {
+            if (isset($this->finished[$row->id]) || $row->createdAt >= $before || ($lanes !== null && !in_array($row->lane, $lanes, true))) {
+                continue;
+            }
+            $counts[$row->lane] = ($counts[$row->lane] ?? 0) + 1;
+        }
+        ksort($counts, SORT_STRING);
+
+        return $counts;
+    }
+
+    /** The dead letter store that complete() and abandon() write to. */
     public function deadLetters(): InMemoryDeadLetterStore
     {
         return $this->deadLetters;

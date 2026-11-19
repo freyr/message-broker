@@ -17,9 +17,9 @@ use Symfony\Component\Console\Output\OutputInterface;
  * the daily partitions ahead of time, then drop the expired ones. An expired
  * partition that still holds an unfinished row is kept: it is reported and
  * the command exits with FAILURE, so a scheduler alerts. There is no option
- * to drop such a partition: the maximum age of the delivery loop ends each
- * row before its partition expires, so a kept partition shows a fault, for
- * example a --retention-days that is not the retention period of the loop.
+ * to drop such a partition: a delivery has no time limit, so the partition
+ * stays until each of its rows reaches a final state or an operator abandons
+ * it with message-broker:webhook:abandon.
  * A dry run changes nothing and always exits with SUCCESS.
  */
 #[AsCommand(
@@ -37,7 +37,7 @@ final class WebhookMaintainCommand extends Command
     protected function configure(): void
     {
         $this
-            ->addOption('retention-days', null, InputOption::VALUE_REQUIRED, 'Keep rows at least this many days; use the retention period of the delivery loop', '7')
+            ->addOption('retention-days', null, InputOption::VALUE_REQUIRED, 'Keep finished rows at least this many days', '7')
             ->addOption('premake-days', null, InputOption::VALUE_REQUIRED, 'Create daily partitions this many days ahead', '3')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Report what would change without changing anything');
     }
@@ -70,7 +70,7 @@ final class WebhookMaintainCommand extends Command
             $verb = $dryRun ? 'would be kept' : 'is kept';
             $output->writeln(
                 "<error>{$prefix}{$name} {$verb}: it holds {$count} unfinished row(s) older than the retention period. "
-                .'Check that --retention-days is the retention period of the delivery loop.</error>',
+                .'They wait for a final state; end old rows with message-broker:webhook:abandon --before=<date>.</error>',
             );
         }
 

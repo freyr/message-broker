@@ -14,7 +14,7 @@ use Freyr\MessageBroker\DeadLetter\DeadLetter;
  *  - retry: one more attempt, and available_at = $availableAt;
  *  - dead: the attempt count of the dead letter, the final state dead, and
  *    the dead letter (source `webhook:<lane>`). A dead letter after a result
- *    counts that request; a dead letter of an expired row counts none.
+ *    counts that request.
  */
 final readonly class DeliveryCompletion
 {

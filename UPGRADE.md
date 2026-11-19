@@ -1,5 +1,49 @@
 # Upgrade guide
 
+## From 0.12.x to 0.13.0
+
+A webhook delivery has no time limit now: a row waits until it is delivered,
+reaches the retry limit, or gets a permanent refusal. An operator ends old
+rows with the new command `message-broker:webhook:abandon`. The change is
+breaking for an application that uses the webhook queue. It changes no schema
+and no other part of the library.
+
+- **BREAKING:** remove the parameters `maxAgeMs`, `expiredCheckIntervalMs` and
+  `retentionDays` from each `new DeliveryLoopConfig(...)`. The loop has no
+  maximum age, no check of expired rows and no start check against the
+  retention period. The start check of the lease against
+  `DeliverySender::maxSendMs()` stays.
+- **BREAKING:** `Webhook\DeliveryStore::claimExpired()` is removed, and the
+  port has two new methods: `abandon(int $before, ?array $lanes, int $limit):
+  int` and `countUnfinished(int $before, ?array $lanes): array`. A store of
+  your own must implement them; `DeliveryStoreContractTestCase` states their
+  contract. `PostgreSqlDeliveryStore` and `InMemoryDeliveryStore` implement
+  them.
+- **BREAKING:** `Webhook\DeliveryRetryPolicy::longestDelayMs()` is removed.
+  Remove it from a retry policy of your own.
+  `DefaultDeliveryRetryPolicy::longestDelayMs()` is removed too.
+- **BREAKING:** the event `BrokerEvents::WEBHOOK_EXPIRED` (`webhook.expired`)
+  and the constant `DeliveryLoop::REASON_EXPIRED` are removed. A listener for
+  `webhook.expired` receives no event: listen to the new event
+  `BrokerEvents::WEBHOOK_ABANDONED` (`webhook.abandoned`, context `lane` and
+  `count`) instead. The dead letters of the loop have no error class
+  `expired` any more; an abandoned row has the error class `abandoned`.
+- Add `Console\WebhookAbandonCommand` to your console application:
+  `new WebhookAbandonCommand(new PostgreSqlDeliveryStore($pdo), $events,
+  $logger)`. Run `message-broker:webhook:abandon --before=<date>
+  [--lane=<lane>]... [--dry-run]` by hand for old rows that no rule ends: the
+  rows of a lane whose endpoint is blocked, and the rows of a subscription
+  that you removed. The abandoned rows go to the dead letters, so
+  `dlq:replay` can send them again (see `docs/core/CLI_REFERENCE.md`).
+- `--retention-days` of `webhook:maintain` is no longer tied to a value of the
+  loop. A partition that holds an unfinished row stays until the row ends;
+  the command reports it and exits with code 1, as before. Keep the alert on
+  that exit code, and end the old rows with `webhook:abandon`.
+- An unfinished row that the earlier versions would expire now stays and is
+  delivered when its endpoint accepts it. Before the upgrade, decide for the
+  old rows of a removed subscription: abandon them after the upgrade with
+  `webhook:abandon --before=<date>`.
+
 ## From 0.12.2 to 0.12.3
 
 This release adds the webhook delivery queue (see `docs/core/WEBHOOKS.md`). It
@@ -13,7 +57,8 @@ runs no new DDL.
   `WebhookSetupCommand`, `WebhookMaintainCommand` and `WebhookRunCommand` to
   your console application (see `docs/core/CLI_REFERENCE.md`).
 - Give `--retention-days` of `webhook:maintain` the value of `retentionDays` of
-  the `DeliveryLoopConfig` (default `7` for both).
+  the `DeliveryLoopConfig` (default `7` for both). Since 0.13.0 this value of
+  the loop is removed (see above).
 - To replay webhook dead letters (source `webhook:<lane>`), pass the delivery
   store to `ReplayService` as its new last argument, on the connection of the
   transaction: `new ReplayService($deadLetters, $outbox, $transaction,

@@ -20,7 +20,8 @@ flowchart LR
     SP --> L
     L -->|"DeliverySender"| E["Subscriber endpoints"]
     L -->|"results"| T
-    L -->|"retry limit, refusal, age"| DL[("dead_letters")]
+    L -->|"retry limit, refusal"| DL[("dead_letters")]
+    Op["Operator<br/>(webhook:abandon)"] -->|"old rows"| DL
 ```
 
 - **Subscription.** `Webhook\Subscription` has an ID (1 to 64 characters), a
@@ -57,13 +58,19 @@ flowchart LR
   rows leased. They are due again after the lease, with no attempt used. A
   second request for the same delivery is possible; it has the same message
   ID.
-- **Maximum age.** At an interval, the loop claims the due, unfinished rows
-  that are older than the maximum age, from all lanes, and moves them to the
-  dead letters with the reason `expired`. This also ends the rows of a
-  subscription that your application removed.
+- **No time limit.** A delivery waits until it is delivered, reaches the
+  retry limit, or gets a permanent refusal. The age of a row does not end it.
+- **Abandon.** An operator ends old rows with `message-broker:webhook:abandon
+  --before=<date>`: the rows of a lane whose endpoint is blocked, and the rows
+  of a subscription that your application removed. No other rule ends these
+  rows. An abandoned row goes to the dead letters with the reason
+  `abandoned`, so `dlq:replay` can send it again. A worker that holds the
+  lease of an abandoned row can still send its request; its result write
+  changes nothing, because of the lease check.
 - **Unknown lane.** When `SubscriptionProvider::find()` gives no subscription
   for the lane of a claimed row, the loop sends no request and uses no
-  attempt. The row waits for the maximum age.
+  attempt. The row waits until the subscription returns or an operator
+  abandons it.
 - **Database error.** A database error, and an error of the sender's own code
   or configuration, stops the worker (crash-only, as the relay). The claimed
   rows are due again when their lease ends.
@@ -72,16 +79,16 @@ flowchart LR
 
 A delivery goes to the `dead_letters` table when the retry policy decides a
 dead letter (by default: the 8th failed attempt), when the result is a
-refusal, or when the row passes the maximum age. The dead letter has:
+refusal, or when an operator abandons the row. The dead letter has:
 
 | Field | Value |
 |---|---|
 | `source` | `webhook:<lane>` |
 | `messageId`, `messageName`, `body`, `headers` | the values of the row |
-| `errorClass` | the reason: `failed`, `refused` or `expired` |
-| `errorMessage` | the text of the last result; for a refusal `<reason code>: <text>`; for an expired row `The delivery is older than the maximum age of <n> ms` |
+| `errorClass` | the reason: `failed`, `refused` or `abandoned` |
+| `errorMessage` | the text of the last result; for a refusal `<reason code>: <text>`; for an abandoned row `Abandoned by an operator: created before <date> UTC` |
 | `errorTrace` | empty |
-| `attempts` | the attempts of the row, with the request of the last result |
+| `attempts` | the attempts of the row, with the request of the last result; for an abandoned row the attempts of the row |
 | `replayable` | `true` |
 
 The dead letter follows the open row rule of the dead letter store: one open
@@ -98,7 +105,7 @@ webhook replays apart (see
 | Port | Methods | Notes |
 |---|---|---|
 | `Webhook\SubscriptionProvider` | `forMessage(string $messageName): list<Subscription>`, `find(string $lane): ?Subscription`, `lanes(): list<string>` | Required. `forMessage()` runs inside your transaction, so it must be fast. `find()` gives `null` for a removed subscription. |
-| `Webhook\DeliveryRetryPolicy` | `decide(int $attempt, DeliveryResult $result, DeliveryRecord $delivery): DeliveryDecision`, `longestDelayMs(): int` | Optional. The default is `DefaultDeliveryRetryPolicy`. |
+| `Webhook\DeliveryRetryPolicy` | `decide(int $attempt, DeliveryResult $result, DeliveryRecord $delivery): DeliveryDecision` | Optional. The default is `DefaultDeliveryRetryPolicy`. |
 
 The adapters implement `Webhook\DeliveryStore`, `Webhook\DeliverySender` and
 `Webhook\DeliveryRetention`. [PORTS.md](PORTS.md) lists all ports.
@@ -114,8 +121,6 @@ $maxReceiverDelayMs = 86_400_000)`:
 - A refused result is a dead letter at once.
 - A retry time from the receiver (for example from `Retry-After`) replaces the
   delay when it is later, up to now plus `$maxReceiverDelayMs` (default 1 day).
-- `longestDelayMs()` is the longest delay or `$maxReceiverDelayMs`, whichever
-  is larger.
 
 ## Configuration
 
@@ -125,13 +130,10 @@ $maxReceiverDelayMs = 86_400_000)`:
 | Value | Default | Purpose |
 |---|---|---|
 | `leaseMs` | `60_000` (60 s) | The lease of a claim. Must be longer than `DeliverySender::maxSendMs()`. |
-| `batchSize` | `100` | The most rows of one claim, all lanes together. Also the size of one claim of expired rows. |
+| `batchSize` | `100` | The most rows of one claim, all lanes together. |
 | `limitForEachLane` | `25` | The most rows of one lane in one claim. |
 | `laneRefreshMs` | `30_000` (30 s) | The interval of the read of `SubscriptionProvider::lanes()`. A new subscription waits up to this time. |
 | `laneFilter` | `null` | Claim only these lanes; `null` claims all lanes. |
-| `maxAgeMs` | `259_200_000` (3 days) | A due, unfinished row older than this goes to the dead letters with the reason `expired`. |
-| `expiredCheckIntervalMs` | `60_000` (60 s) | The interval of the check of expired rows. One check claims batches until a batch is not full. |
-| `retentionDays` | `7` | The retention period of the table. Use the same value for `--retention-days` of `message-broker:webhook:maintain`. |
 | `idleSleepMs` | `200` | The sleep after a pass that delivered nothing, plus up to a quarter of it as jitter. |
 
 ```php
@@ -150,17 +152,11 @@ $loop = new DeliveryLoop(
 $loop->run(new WorkerLimits(maxMessages: 10_000));
 ```
 
-### Start checks
+### Start check
 
-`run()` refuses to start, with an `InvalidArgumentException`, when:
-
-- The lease is not longer than `maxSendMs()` of the sender. A shorter lease
-  lets a second worker claim a row while the first one still sends it.
-- The maximum age plus `longestDelayMs()` of the retry policy is not shorter
-  than the retention period. Each row must reach a final state before its
-  partition expires: the check of expired rows takes only due rows, so a row
-  reaches a final state not later than the maximum age plus the longest retry
-  delay. The defaults give 3 days plus 1 day, below 7 days.
+`run()` refuses to start, with an `InvalidArgumentException`, when the lease
+is not longer than `maxSendMs()` of the sender. A shorter lease lets a second
+worker claim a row while the first one still sends it.
 
 ### Worker limits
 
@@ -180,16 +176,18 @@ application, as the other commands (see [CLI_REFERENCE.md](CLI_REFERENCE.md)):
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryRetention;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliverySchemaInstaller;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryStore;
+use Freyr\MessageBroker\Console\WebhookAbandonCommand;
 use Freyr\MessageBroker\Console\WebhookMaintainCommand;
 use Freyr\MessageBroker\Console\WebhookRunCommand;
 use Freyr\MessageBroker\Console\WebhookSetupCommand;
 use Freyr\MessageBroker\Webhook\DeliveryLoop;
 use Freyr\MessageBroker\Webhook\DeliveryLoopConfig;
 
-$config = new DeliveryLoopConfig(retentionDays: 7);
+$config = new DeliveryLoopConfig(batchSize: 100, limitForEachLane: 25);
 
 $application->add(new WebhookSetupCommand(new PostgreSqlDeliverySchemaInstaller($pdo)));
 $application->add(new WebhookMaintainCommand(new PostgreSqlDeliveryRetention($pdo)));
+$application->add(new WebhookAbandonCommand(new PostgreSqlDeliveryStore($pdo), $events, $logger));
 $application->add(new WebhookRunCommand(
     static fn (DeliveryLoopConfig $config) => new DeliveryLoop(
         new PostgreSqlDeliveryStore($workerPdo),
@@ -206,27 +204,30 @@ $application->add(new WebhookRunCommand(
 | `message-broker:webhook:setup --premake-days=N` | Create the table and its daily partitions. Run it at deployment. |
 | `message-broker:webhook:maintain` | Create the partitions ahead and drop the expired ones, once a day. Options `--retention-days`, `--premake-days`, `--dry-run`; the exit codes of `outbox:maintain`. |
 | `message-broker:webhook:run` | Run the delivery loop. Options `--lane` (repeatable), `--batch-size`, `--lane-limit`, and the worker limits `--limit`, `--time-limit`, `--memory-limit`. |
+| `message-broker:webhook:abandon --before=<date>` | End the old unfinished rows by date, by hand. Options `--lane` (repeatable) and `--dry-run`. |
 
-**`--retention-days` of `webhook:maintain` and `retentionDays` of the loop
-must have the same value.** The start check of the loop proves that each row
-reaches a final state inside `retentionDays`. A smaller `--retention-days` lets
-a partition expire while it holds unfinished rows: the command keeps it and
-exits with code 1, and it has no option to drop it. Alert on that exit code.
+**A partition with an unfinished row stays.** A delivery has no time limit,
+so `webhook:maintain` keeps an expired partition that holds an unfinished row,
+until the row reaches a final state or an operator abandons it. The command
+reports such a partition and exits with code 1, and it has no option to drop
+it. Alert on that exit code. Then find the lanes of the old rows, and end the
+rows that no rule ends with `webhook:abandon` (run it with `--dry-run` first).
 
 ## Events
 
-`DeliveryLoop` records these `BrokerEvents` for each row that the store
-changed. A row that the lease check skipped gives no event.
+`DeliveryLoop` records the first three `BrokerEvents` for each row that the
+store changed. A row that the lease check skipped gives no event.
+`webhook:abandon` records `WEBHOOK_ABANDONED` one time for each lane.
 
 | Constant | Name | Context |
 |---|---|---|
 | `WEBHOOK_DELIVERED` | `webhook.delivered` | `lane`, `message_id`, `delivery_id`, `attempts`, `request_ms` |
 | `WEBHOOK_RETRIED` | `webhook.retried` | `lane`, `message_id`, `delivery_id`, `attempts`, `retry_at` (epoch ms) |
 | `WEBHOOK_DEAD_LETTERED` | `webhook.dead_lettered` | `lane`, `message_id`, `delivery_id`, `attempts`, `reason` (`failed` or `refused`), `reason_code` (the reason code of a refusal, else `null`) |
-| `WEBHOOK_EXPIRED` | `webhook.expired` | `lane`, `message_id`, `delivery_id`, `attempts` |
+| `WEBHOOK_ABANDONED` | `webhook.abandoned` | `lane`, `count` (the abandoned rows of the lane) |
 
-An expired row gives only `WEBHOOK_EXPIRED`, not `WEBHOOK_DEAD_LETTERED`. Use
-the `reason_code` `gone` to disable a subscription in your application.
+An abandoned row gives no `WEBHOOK_DEAD_LETTERED`. Use the `reason_code` `gone`
+to disable a subscription in your application.
 
 ## Security
 

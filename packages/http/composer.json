@@ -16,14 +16,14 @@
     ],
     "require": {
         "php": ">=8.4",
-        "freyr/message-broker": "^0.12",
+        "freyr/message-broker": "^0.13",
         "psr/log": "^3.0",
         "symfony/clock": "^8.1",
         "symfony/http-client": "^8.1",
         "symfony/http-foundation": "^8.1"
     },
     "require-dev": {
-        "freyr/message-broker-postgresql": "^0.12",
+        "freyr/message-broker-postgresql": "^0.13",
         "infection/infection": "^0.35.11",
         "phpunit/phpunit": "^13.4"
     },

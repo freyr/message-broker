@@ -92,7 +92,7 @@ final class WebhookMaintainCommandTest extends TestCase
             ."Retention cutoff: 2026-03-03 00:00 UTC.\n"
             ."Dropped unit-old.\n"
             .'unit-kept is kept: it holds 2 unfinished row(s) older than the retention period. '
-            ."Check that --retention-days is the retention period of the delivery loop.\n",
+            ."They wait for a final state; end old rows with message-broker:webhook:abandon --before=<date>.\n",
             $tester->getDisplay(),
         );
     }
@@ -121,7 +121,7 @@ final class WebhookMaintainCommandTest extends TestCase
             ."[dry-run] Retention cutoff: 2026-03-03 00:00 UTC.\n"
             ."[dry-run] Dropped unit-old.\n"
             .'[dry-run] unit-kept would be kept: it holds 4 unfinished row(s) older than the retention period. '
-            ."Check that --retention-days is the retention period of the delivery loop.\n",
+            ."They wait for a final state; end old rows with message-broker:webhook:abandon --before=<date>.\n",
             $tester->getDisplay(),
         );
     }

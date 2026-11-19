@@ -228,15 +228,14 @@ for example `new WebhookMaintainCommand(new PostgreSqlDeliveryRetention($pdo))`.
 
 | Option | Description |
 | --- | --- |
-| `--retention-days` | Keep rows at least this many days (default `7`). The cutoff is today midnight UTC minus this value. **Use the same value as `retentionDays` of the delivery loop** (see [WEBHOOKS.md](WEBHOOKS.md#start-checks)). |
+| `--retention-days` | Keep finished rows at least this many days (default `7`). The cutoff is today midnight UTC minus this value. |
 | `--premake-days` | Create daily partitions from today to today plus this many days (default `3`, `0` creates only today). |
 | `--dry-run` | Report what would be dropped and what would be kept; change nothing. |
 
 An expired partition that holds an unfinished row is kept and reported. The
-command has no option that drops such a partition: the maximum age of the
-delivery loop ends each row before its partition expires, when
-`--retention-days` and `retentionDays` of the loop have the same value. Thus a
-kept partition shows a fault, for example two different values.
+command has no option that drops such a partition. A delivery has no time
+limit, so the partition stays until each of its rows reaches a final state or
+an operator abandons it with `message-broker:webhook:abandon` (below).
 
 Exit codes: `0` success (always on `--dry-run`); `1` at least one expired
 partition was kept because of unfinished rows; `2` invalid options
@@ -253,7 +252,7 @@ The lane filter, the batch size and the row limit for each lane are fields of
 the `DeliveryLoopConfig` that the loop takes in its constructor, so the command
 takes a factory `callable(DeliveryLoopConfig): DeliveryLoop` and a base
 config. The options replace their fields of the base config; each other field
-(lease, maximum age, retention period, ...) stays:
+(lease, lane refresh interval, idle sleep) stays:
 
 ```php
 use Freyr\MessageBroker\Console\WebhookRunCommand;
@@ -269,7 +268,7 @@ $application->add(new WebhookRunCommand(
         logger: $logger,
         events: $events,
     ),
-    new DeliveryLoopConfig(retentionDays: 7),
+    new DeliveryLoopConfig(leaseMs: 60_000),
 ));
 ```
 
@@ -291,13 +290,56 @@ the loop logs one `info` line ("Worker limit reached; the worker stops") and
 Exit codes: `0` after the loop returned, also after a limit stop; `1` with
 `--require-signals` and no `ext-pcntl`; `2` for an invalid option value (no
 loop is made). A failed start check of the loop (the lease is not longer than
-`maxSendMs()` of the sender; the maximum age plus the longest retry delay is
-not shorter than the retention period) and a database error are not caught:
-the process ends with an error, and the supervisor restarts it.
+`maxSendMs()` of the sender) and a database error are not caught: the process
+ends with an error, and the supervisor restarts it.
 
 **Supervisor rule.** A limit stop exits with code `0`, so the supervisor must
 start a new process after each exit, exit code `0` included. See
 [Worker limits in PRODUCTION.md](PRODUCTION.md#worker-limits).
+
+## `message-broker:webhook:abandon`
+
+Ends the old unfinished webhook deliveries, by date. A delivery has no time
+limit, so this command is the only way to end rows that no rule ends: the
+rows of a lane whose endpoint is blocked, and the rows of a subscription that
+the application removed. Run it by hand.
+
+**Constructor:** `new WebhookAbandonCommand(DeliveryStore $store, ?BrokerEvents $events = null, LoggerInterface $logger = new NullLogger(), int $batchSize = 1_000)`,
+for example `new WebhookAbandonCommand(new PostgreSqlDeliveryStore($pdo), $events, $logger)`.
+
+| Option | Description |
+| --- | --- |
+| `--before=<date>` | Required. Abandon the rows with a `created_at` earlier than this value: a date (`2026-01-31`, midnight UTC) or an ISO 8601 time (`2026-01-31T12:00:00Z`, `2026-01-31T14:00:00+02:00`). A time with no offset is UTC. |
+| `--lane=<id>` | Abandon only the rows of this lane (a subscription ID). Repeat it for more lanes. Default: all lanes, also lanes with no subscription. |
+| `--dry-run` | Print the count of each lane; change nothing. |
+
+The command counts the rows of each lane (`DeliveryStore::countUnfinished()`).
+Then, for each lane, it calls `DeliveryStore::abandon()` with batches of
+`$batchSize` rows until a call finds no row, and prints the count of the lane.
+Each abandoned row goes to the dead letters with the error class `abandoned`
+and the source `webhook:<lane>`, and gets the final state dead.
+`dlq:replay` can send it again to its lane. The command records the event
+`webhook.abandoned` (`lane`, `count`) and logs one `warning` line for each
+lane.
+
+A leased row is abandoned too. The worker that holds the lease can still send
+its request, but its result write changes nothing, because of the lease check.
+A row that a different session locks at that moment (a claim or a result
+write) is skipped. When the last call of a lane finds no row because only
+locked rows are left, the command counts the lane again and prints
+`<lane>: <n> row(s) left (locked by a different session); run the command
+again.` The exit code stays `0`. Run the command again to end these rows.
+
+```
+$ bin/console message-broker:webhook:abandon --before=2026-01-01 --dry-run
+[dry-run] Unfinished deliveries created before 2026-01-01 00:00:00.000 UTC:
+[dry-run] crm: 120 row(s) would be abandoned.
+[dry-run] old-subscription: 3 row(s) would be abandoned.
+[dry-run] Total: 123 row(s) would be abandoned.
+```
+
+Exit codes: `0` success (also when no row matches, and always on
+`--dry-run`); `2` invalid `--before` or an empty `--lane`.
 
 ## Dead letter filter options
 

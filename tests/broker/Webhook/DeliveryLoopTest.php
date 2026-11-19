@@ -150,11 +150,6 @@ final class DeliveryLoopTest extends TestCase
 
                 return DeliveryDecision::retryAt(42);
             }
-
-            public function longestDelayMs(): int
-            {
-                return 0;
-            }
         };
 
         $this->loop(policy: $policy)->deliverOnce();
@@ -243,6 +238,24 @@ final class DeliveryLoopTest extends TestCase
         self::assertSame([], $this->events->records);
     }
 
+    public function testARowThatTheOperatorAbandonsDuringTheSendStaysFinishedWhenTheWorkerWritesItsResult(): void
+    {
+        $this->subscribe('crm');
+        $row = $this->insert('crm', attempts: 2);
+        // The operator abandons the leased row while the request runs.
+        $this->sender->onSend = function (): void {
+            self::assertSame(1, $this->store->abandon($this->now, null, 10));
+        };
+
+        self::assertSame(0, $this->loop()->deliverOnce());
+
+        self::assertSame([$row->id], $this->sender->sentIds(), 'the worker still sends its request');
+        self::assertSame(DeliveryCompletionKind::Dead, $this->store->outcome($row->id));
+        self::assertSame(2, $this->store->row($row->id)->attempts, 'the result write changed no row');
+        self::assertSame('abandoned', $this->onlyDeadLetter()->errorClass);
+        self::assertSame([], $this->events->records, 'no delivered event for a row that the store did not change');
+    }
+
     public function testOnlyTheRowsThatTheStoreChangedCountAsDelivered(): void
     {
         $this->subscribe('crm');
@@ -259,87 +272,18 @@ final class DeliveryLoopTest extends TestCase
         self::assertCount(1, $this->events->records);
     }
 
-    public function testARowOlderThanTheMaximumAgeGivesADeadLetterWithTheReasonExpired(): void
+    public function testARowOfThirtyDaysAgoStaysDueAndIsDelivered(): void
     {
-        $old = $this->insert('removed', attempts: 2, createdAt: $this->now - 3 * self::DAY_MS - 1);
-        $young = $this->insert('removed', createdAt: $this->now - 3 * self::DAY_MS);
+        $this->subscribe('crm');
+        $old = $this->insert('crm', attempts: 3, createdAt: $this->now - 30 * self::DAY_MS);
 
-        self::assertSame(0, $this->loop()->deliverOnce());
+        self::assertSame(1, $this->loop()->deliverOnce());
 
-        self::assertSame(DeliveryCompletionKind::Dead, $this->store->outcome($old->id));
-        self::assertNull($this->store->outcome($young->id), 'a row at the maximum age is not older than it');
-        self::assertSame(2, $this->store->row($old->id)->attempts, 'the expiry uses no attempt');
-        $deadLetter = $this->onlyDeadLetter();
-        self::assertSame('webhook:removed', $deadLetter->source);
-        self::assertSame($old->messageId, $deadLetter->messageId);
-        self::assertSame('expired', $deadLetter->errorClass);
-        self::assertSame('The delivery is older than the maximum age of 259200000 ms', $deadLetter->errorMessage);
-        self::assertSame(2, $deadLetter->attempts);
-        self::assertSame($this->now, $deadLetter->failedAt);
-        self::assertSame([], $this->sender->calls);
-        self::assertSame([[
-            'event' => BrokerEvents::WEBHOOK_EXPIRED,
-            'context' => [
-                'lane' => 'removed',
-                'message_id' => $old->messageId,
-                'delivery_id' => $old->id,
-                'attempts' => 2,
-            ],
-        ]], $this->events->records);
-        self::assertSame([[
-            'before' => $this->now - 3 * self::DAY_MS,
-            'limit' => 100,
-            'leaseMs' => 60_000,
-        ]], $this->store->expiredClaims);
-    }
-
-    public function testTheMaximumAgeIsConfiguration(): void
-    {
-        $old = $this->insert('removed', createdAt: $this->now - 10_001);
-
-        $this->loop(new DeliveryLoopConfig(maxAgeMs: 10_000, idleSleepMs: 1))->deliverOnce();
-
-        self::assertSame(DeliveryCompletionKind::Dead, $this->store->outcome($old->id));
-        self::assertSame('The delivery is older than the maximum age of 10000 ms', $this->onlyDeadLetter()->errorMessage);
-    }
-
-    public function testTheCheckOfExpiredRowsRunsAtItsInterval(): void
-    {
-        $loop = $this->loop(new DeliveryLoopConfig(maxAgeMs: 1_000, expiredCheckIntervalMs: 60_000, idleSleepMs: 1));
-        $loop->deliverOnce();
-        $row = $this->insert('removed', createdAt: $this->now - 2_000);
-
-        $this->clock->sleep(59.999);
-        $loop->deliverOnce();
-        self::assertNull($this->store->outcome($row->id), 'not yet at the interval');
-
-        $this->clock->sleep(0.001);
-        $loop->deliverOnce();
-        self::assertSame(DeliveryCompletionKind::Dead, $this->store->outcome($row->id));
-        self::assertCount(2, $this->store->expiredClaims);
-    }
-
-    public function testTheCheckOfExpiredRowsRepeatsWhileTheClaimIsFull(): void
-    {
-        $rows = array_map(fn (): DeliveryRecord => $this->insert('removed', createdAt: $this->now - 5_000), range(1, 5));
-
-        $this->loop(new DeliveryLoopConfig(batchSize: 2, limitForEachLane: 2, maxAgeMs: 1_000, idleSleepMs: 1))->deliverOnce();
-
-        foreach ($rows as $row) {
-            self::assertSame(DeliveryCompletionKind::Dead, $this->store->outcome($row->id));
-        }
-        self::assertCount(3, $this->store->expiredClaims, '2, 2, then 1: a short claim ends the check');
-    }
-
-    public function testAnExpiredRowThatTheStoreDoesNotChangeRecordsNoEvent(): void
-    {
-        $this->insert('removed', createdAt: $this->now - 5_000);
-        $store = new FailingDeliveryStore($this->store);
-        $store->changeNothing = true;
-
-        $this->loop(new DeliveryLoopConfig(maxAgeMs: 1_000, idleSleepMs: 1), store: $store)->deliverOnce();
-
-        self::assertSame([], $this->events->records);
+        self::assertSame([$old->id], $this->sender->sentIds(), 'a delivery has no time limit');
+        self::assertSame(DeliveryCompletionKind::Delivered, $this->store->outcome($old->id));
+        self::assertSame(4, $this->store->row($old->id)->attempts);
+        self::assertSame(0, $this->store->deadLetters()->count(new DeadLetterFilter()));
+        self::assertSame([BrokerEvents::WEBHOOK_DELIVERED], array_column($this->events->records, 'event'));
     }
 
     public function testAnUnknownLaneSendsNoRequestAndUsesNoAttempt(): void
@@ -357,7 +301,7 @@ final class DeliveryLoopTest extends TestCase
         self::assertSame([$known->id], $this->sender->sentIds());
         self::assertNull($this->store->outcome($unknown->id));
         self::assertSame(0, $this->store->row($unknown->id)->attempts);
-        self::assertSame($this->now + 60_000, $this->store->row($unknown->id)->availableAt, 'the row waits for the lease and then for the maximum age');
+        self::assertSame($this->now + 60_000, $this->store->row($unknown->id)->availableAt, 'the row waits for its subscription or an abandon');
     }
 
     public function testAClaimOfOnlyUnknownLanesSendsNothing(): void
@@ -532,7 +476,6 @@ final class DeliveryLoopTest extends TestCase
         }
 
         self::assertSame(0, $this->store->claimCalls, 'the loop does not start');
-        self::assertSame([], $this->store->expiredClaims);
     }
 
     public function testTheRunAcceptsALeaseOneMillisecondLongerThanTheLongestSendCall(): void
@@ -540,38 +483,6 @@ final class DeliveryLoopTest extends TestCase
         $this->subscribe('crm');
         $this->sender = new FakeDeliverySender(maxSendMs: 59_999);
         $loop = $this->loop(new DeliveryLoopConfig(leaseMs: 60_000, idleSleepMs: 1));
-        $this->store->onClaim = static fn () => $loop->stop();
-
-        $loop->run();
-
-        self::assertSame(1, $this->store->claimCalls);
-    }
-
-    public function testTheRunRefusesAMaximumAgeAndALongestRetryDelayThatAreNotShorterThanTheRetention(): void
-    {
-        $this->subscribe('crm');
-        $policy = new DefaultDeliveryRetryPolicy([1_000], maxReceiverDelayMs: self::DAY_MS);
-        $loop = $this->loop(new DeliveryLoopConfig(maxAgeMs: 6 * self::DAY_MS, retentionDays: 7, idleSleepMs: 1), $policy);
-        $this->store->onClaim = static fn () => $loop->stop(); // a loop that starts ends after one pass
-
-        try {
-            $loop->run();
-            self::fail('expected the refusal');
-        } catch (InvalidArgumentException $e) {
-            self::assertSame(
-                'The maximum age (518400000 ms) plus the longest retry delay (86400000 ms) must be shorter than the retention period (7 days)',
-                $e->getMessage(),
-            );
-        }
-
-        self::assertSame(0, $this->store->claimCalls);
-    }
-
-    public function testTheRunAcceptsASumOneMillisecondShorterThanTheRetention(): void
-    {
-        $this->subscribe('crm');
-        $policy = new DefaultDeliveryRetryPolicy([1_000], maxReceiverDelayMs: self::DAY_MS - 1);
-        $loop = $this->loop(new DeliveryLoopConfig(maxAgeMs: 6 * self::DAY_MS, retentionDays: 7, idleSleepMs: 1), $policy);
         $this->store->onClaim = static fn () => $loop->stop();
 
         $loop->run();
@@ -688,7 +599,7 @@ final class DeliveryLoopTest extends TestCase
 
         self::assertGreaterThanOrEqual(20.0, (hrtime(true) - $start) / 1e6, 'the idle pass sleeps at least the idle interval');
 
-        $this->insert('crm', createdAt: EpochMillis::now()); // the real time: not expired
+        $this->insert('crm', createdAt: EpochMillis::now());
         $busy = $this->loop(new DeliveryLoopConfig(idleSleepMs: 2_000));
         $this->sender->onSend = static fn () => $busy->stop();
         $start = hrtime(true);
@@ -729,17 +640,15 @@ final class DeliveryLoopTest extends TestCase
         self::assertSame(1, $this->store->claimCalls);
     }
 
-    public function testALoopWithNoEventListenerDeliversAndExpires(): void
+    public function testALoopWithNoEventListenerDelivers(): void
     {
         $this->subscribe('crm');
         $row = $this->insert('crm');
-        $old = $this->insert('crm', createdAt: $this->now - 3 * self::DAY_MS - 1);
         $loop = new DeliveryLoop($this->store, $this->sender, $this->subscriptions, config: new DeliveryLoopConfig(idleSleepMs: 1));
 
         self::assertSame(1, $loop->deliverOnce());
 
         self::assertSame(DeliveryCompletionKind::Delivered, $this->store->outcome($row->id));
-        self::assertSame(DeliveryCompletionKind::Dead, $this->store->outcome($old->id));
     }
 
     private function subscribe(string $lane): Subscription

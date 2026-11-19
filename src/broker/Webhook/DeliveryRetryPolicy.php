@@ -20,12 +20,4 @@ interface DeliveryRetryPolicy
      * @param DeliveryResult $result a failed or refused result; the loop never passes a delivered one
      */
     public function decide(int $attempt, DeliveryResult $result, DeliveryRecord $delivery): DeliveryDecision;
-
-    /**
-     * The longest time from a result to the retry time that decide() can
-     * return, in milliseconds, also with a retry time from the receiver. The
-     * delivery loop refuses to start when the maximum age plus this value is
-     * not shorter than the retention period.
-     */
-    public function longestDelayMs(): int;
 }

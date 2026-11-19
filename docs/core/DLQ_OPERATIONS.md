@@ -317,8 +317,8 @@ $replay = new ReplayService(
 
 A replayed delivery that fails again gets a new dead letter (one open row for
 each pair of message ID and source). A subscription that the application
-removed has no subscription for the lane, so the replayed row waits for the
-maximum age and goes to the dead letters again with the reason `expired`.
+removed has no subscription for the lane, so the replayed row waits until an
+operator abandons it again with `message-broker:webhook:abandon`.
 
 ## Purging
 

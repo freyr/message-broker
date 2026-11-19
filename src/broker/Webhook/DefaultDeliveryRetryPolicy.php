@@ -47,9 +47,4 @@ final readonly class DefaultDeliveryRetryPolicy implements DeliveryRetryPolicy
 
         return DeliveryDecision::retryAt($retryAt);
     }
-
-    public function longestDelayMs(): int
-    {
-        return max([$this->maxReceiverDelayMs, ...$this->delaysMs]);
-    }
 }

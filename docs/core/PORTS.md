@@ -25,9 +25,9 @@ ports and extends the contract test cases of the test kit (see
 | `ErrorHandler` | Receive each handled failure with its context. | Your own class |
 | `DeadLetter\DeadLetterSink` | Make a dead letter durable at the destination of a consumer (`store()`), the table or a queue of the transport. `DeadLetterStore` extends it. `DeliveryProcessor` takes a sink as `deadLetters`. | `PostgreSqlDeadLetterStore` (PostgreSQL adapter); `AmqpDeadLetterSink` (AMQP adapter); `InMemoryDeadLetterStore` (test kit) |
 | `Webhook\SubscriptionProvider` | Give the webhook subscriptions: by message name (`forMessage()`), by lane (`find()`), and all lanes (`lanes()`). See [WEBHOOKS.md](WEBHOOKS.md). | Your own class; `InMemorySubscriptionProvider` (test kit) |
-| `Webhook\DeliveryStore` | Insert delivery rows. Claim due rows of many lanes with a lease (`claim()`), write the results with the lease check and the dead letters (`complete()`), and claim the expired rows (`claimExpired()`). | `PostgreSqlDeliveryStore` (PostgreSQL adapter); `InMemoryDeliveryStore` (test kit) |
+| `Webhook\DeliveryStore` | Insert delivery rows. Claim due rows of many lanes with a lease (`claim()`), write the results with the lease check and the dead letters (`complete()`), abandon old rows by date (`abandon()`), and count them (`countUnfinished()`). | `PostgreSqlDeliveryStore` (PostgreSQL adapter); `InMemoryDeliveryStore` (test kit) |
 | `Webhook\DeliverySender` | Send a batch of deliveries, each with its subscription, and return one result for each (`send()`). State the longest time of one call (`maxSendMs()`). | `FakeDeliverySender` (test kit) |
-| `Webhook\DeliveryRetryPolicy` | Decide between a retry at a time and a dead letter after a failed or refused result. State the longest retry delay (`longestDelayMs()`). | `DefaultDeliveryRetryPolicy` (core); your own policy |
+| `Webhook\DeliveryRetryPolicy` | Decide between a retry at a time and a dead letter after a failed or refused result. | `DefaultDeliveryRetryPolicy` (core); your own policy |
 | `Webhook\DeliveryRetention` | Create the upcoming partitions of `webhook_deliveries` and drop the expired ones that hold no unfinished row. | `PostgreSqlDeliveryRetention` (PostgreSQL adapter) |
 
 `DeliveryControl` has no reject: the processor never rejects or nacks a
@@ -138,9 +138,19 @@ abandoned_at IS NULL`).
   its `available_at` is equal to the lease value of the claim. The dead letter
   follows the open row rule of `DeadLetterStore::store()`. It returns the IDs
   of the rows that it changed.
-- `claimExpired(int $before, int $limit, int $leaseMs): array` claims due,
-  unfinished rows of any lane with `created_at` earlier than `$before`, the
-  oldest first, with the same lease as `claim()`.
+- `abandon(int $before, ?array $lanes, int $limit): int` gives at most
+  `$limit` unfinished rows with `created_at` earlier than `$before`, of the
+  lanes (`null`: all lanes; `[]`: no lane), the dead letter of
+  `DeliveryDeadLetter::abandoned()` (error class `abandoned`, source
+  `webhook:<lane>`, open row rule) and the final state dead, in one
+  transaction. A lease does not protect a row. Rows that a different session
+  locks are skipped, so a call can return 0 while rows are left;
+  `countUnfinished()` shows them. It returns the
+  number of rows.
+- `countUnfinished(int $before, ?array $lanes): array` counts, with no change,
+  the rows that `abandon()` with the same arguments would take: lane => count,
+  in the byte order of the lane names. PHP turns a numeric lane name into an
+  `int` key; cast it back to `string`.
 
 `DeliveryRetention` has the methods of `OutboxRetention` without
 `dropUnpublished`: `ensureCapacity(int $daysAhead)` and `purge(int

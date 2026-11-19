@@ -7,7 +7,7 @@ namespace Freyr\MessageBroker\Observability;
 /**
  * Optional lifecycle listener for lifecycle transitions: produce, relay,
  * dispatch, dedup-hit, retry, discard, dead-letter, replay, replay skip, abandon,
- * and the webhook deliveries (delivered, retried, dead-lettered, expired). Mirrors ErrorHandler's minimal,
+ * and the webhook deliveries (delivered, retried, dead-lettered, abandoned). Mirrors ErrorHandler's minimal,
  * optional shape — the library's behavior never depends on it. For
  * metrics/tracing: derive throughput, lag, duplicate-rate, retry rate, and DLQ flow.
  */
@@ -38,8 +38,8 @@ interface BrokerEvents
      * attempts, reason ('failed' or 'refused'), reason_code (the reason code of a refused result, else null).
      */
     public const string WEBHOOK_DEAD_LETTERED = 'webhook.dead_lettered';
-    /** A webhook delivery passed the maximum age and went to the dead letters; context: lane, message_id, delivery_id, attempts. */
-    public const string WEBHOOK_EXPIRED = 'webhook.expired';
+    /** An operator abandoned the old webhook deliveries of one lane (webhook:abandon); context: lane, count. */
+    public const string WEBHOOK_ABANDONED = 'webhook.abandoned';
 
     /** @param array<string, mixed> $context */
     public function record(string $event, array $context = []): void;

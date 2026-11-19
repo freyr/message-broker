@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Webhook;
 
-use Freyr\MessageBroker\DeadLetter\DeadLetter;
 use Freyr\MessageBroker\Observability\BrokerEvents;
 use Freyr\MessageBroker\Outbox\IdleSleep;
 use Freyr\MessageBroker\Time\EpochMillis;
@@ -14,33 +13,32 @@ use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Random\Randomizer;
-use Symfony\Component\Uid\Uuid;
 use UnexpectedValueException;
 
 /**
  * The webhook delivery loop. One worker serves all lanes; any number of
  * identical workers can run. Each pass:
  *
- *  1. Expired rows, at an interval: claim the due, unfinished rows that are
- *     older than the maximum age, from all lanes, and move them to the dead
- *     letters with the reason "expired".
- *  2. Lanes: the lanes of SubscriptionProvider::lanes(), read at a refresh
+ *  1. Lanes: the lanes of SubscriptionProvider::lanes(), read at a refresh
  *     interval, kept to the lane filter, in a random order for each claim.
- *  3. Claim: at most the batch size, at most the row limit of each lane, with
+ *  2. Claim: at most the batch size, at most the row limit of each lane, with
  *     a lease that the store commits before a request starts.
- *  4. Pairs: the subscription of each claimed delivery (find(lane)). A lane
+ *  3. Pairs: the subscription of each claimed delivery (find(lane)). A lane
  *     with no subscription sends no request and uses no attempt; its row
- *     waits for the maximum age.
- *  5. Send: one send() call with no open transaction.
- *  6. Results: delivered; else the retry policy decides between a retry and a
+ *     waits until the subscription returns or an operator abandons it.
+ *  4. Send: one send() call with no open transaction.
+ *  5. Results: delivered; else the retry policy decides between a retry and a
  *     dead letter (source `webhook:<lane>`). The results go to the store in
  *     one complete() call, with the lease check.
+ *
+ * A delivery has no time limit: a row waits until it is delivered, reaches
+ * the retry limit, or gets a permanent refusal. An operator ends old rows
+ * with DeliveryStore::abandon() (the command message-broker:webhook:abandon).
  *
  * A database error or a sender error propagates and stops the worker
  * (crash-only): the claimed rows are due again when their lease ends.
  *
- * Dead letters: the error class is the reason (`failed`, `refused` or
- * `expired`); the error message is the text of the last result (for a
+ * Dead letters: the error class is the reason (`failed` or `refused`); the error message is the text of the last result (for a
  * refused result: `<reason code>: <text>`); the trace is empty; the attempt
  * count is the attempts of the row, with the request of the last result.
  *
@@ -48,12 +46,9 @@ use UnexpectedValueException;
  */
 final class DeliveryLoop
 {
-    public const string SOURCE_PREFIX = 'webhook:';
-    public const string REASON_FAILED = 'failed';
-    public const string REASON_REFUSED = 'refused';
-    public const string REASON_EXPIRED = 'expired';
-
-    private const int DAY_MS = 86_400_000;
+    public const string SOURCE_PREFIX = DeliveryDeadLetter::SOURCE_PREFIX;
+    public const string REASON_FAILED = DeliveryDeadLetter::REASON_FAILED;
+    public const string REASON_REFUSED = DeliveryDeadLetter::REASON_REFUSED;
 
     private bool $shouldStop = false;
 
@@ -61,8 +56,6 @@ final class DeliveryLoop
     private ?array $lanes = null;
 
     private int $lanesReadAt = 0;
-
-    private ?int $expiredCheckedAt = null;
 
     private readonly Randomizer $randomizer;
 
@@ -85,9 +78,8 @@ final class DeliveryLoop
      * is checked at the end of each pass, so the run can deliver up to one
      * batch above a message limit; the message count is the delivered rows.
      *
-     * @throws InvalidArgumentException when a start check fails: the lease is not longer than
-     *                                  the longest send call, or the maximum age plus the
-     *                                  longest retry delay is not shorter than the retention period
+     * @throws InvalidArgumentException when the start check fails: the lease is not longer than
+     *                                  the longest send call
      */
     public function run(?WorkerLimits $limits = null): void
     {
@@ -123,16 +115,13 @@ final class DeliveryLoop
     }
 
     /**
-     * One pass: expired rows (at their interval), lanes, claim, pairs, send, results.
+     * One pass: lanes, claim, pairs, send, results.
      *
      * @return int the rows that this pass delivered
      */
     public function deliverOnce(): int
     {
-        $now = EpochMillis::now();
-        $this->expire($now);
-
-        $lanes = $this->lanes($now);
+        $lanes = $this->lanes(EpochMillis::now());
         if ($lanes === []) {
             return 0;
         }
@@ -158,49 +147,6 @@ final class DeliveryLoop
                 $maxSendMs,
             ));
         }
-
-        $longestDelayMs = $this->retryPolicy->longestDelayMs();
-        if ($this->config->maxAgeMs + $longestDelayMs >= $this->config->retentionDays * self::DAY_MS) {
-            throw new InvalidArgumentException(sprintf(
-                'The maximum age (%d ms) plus the longest retry delay (%d ms) must be shorter than the retention period (%d days)',
-                $this->config->maxAgeMs,
-                $longestDelayMs,
-                $this->config->retentionDays,
-            ));
-        }
-    }
-
-    /** Move the due, unfinished rows older than the maximum age to the dead letters, at the check interval. */
-    private function expire(int $now): void
-    {
-        if ($this->expiredCheckedAt !== null && $now - $this->expiredCheckedAt < $this->config->expiredCheckIntervalMs) {
-            return;
-        }
-        $this->expiredCheckedAt = $now;
-
-        $message = sprintf('The delivery is older than the maximum age of %d ms', $this->config->maxAgeMs);
-        do {
-            $expired = $this->store->claimExpired($now - $this->config->maxAgeMs, $this->config->batchSize, $this->config->leaseMs);
-            if ($expired === []) {
-                return;
-            }
-            $completions = array_map(
-                fn (ClaimedDelivery $claimed): DeliveryCompletion => DeliveryCompletion::dead(
-                    $claimed,
-                    $this->deadLetter($claimed->delivery, self::REASON_EXPIRED, $message, $claimed->delivery->attempts),
-                ),
-                $expired,
-            );
-            $changed = array_flip($this->store->complete($completions));
-            foreach ($expired as $claimed) {
-                $record = $claimed->delivery;
-                if (isset($changed[$record->id])) {
-                    $this->events?->record(BrokerEvents::WEBHOOK_EXPIRED, self::context($record) + [
-                        'attempts' => $record->attempts,
-                    ]);
-                }
-            }
-        } while (count($expired) === $this->config->batchSize);
     }
 
     /** @return list<string> the lanes of the next claim, in a random order */
@@ -297,30 +243,13 @@ final class DeliveryLoop
         $message = $refused ? "{$result->reasonCode}: {$result->text}" : $result->text;
 
         return [
-            DeliveryCompletion::dead($claimed, $this->deadLetter($record, $reason, $message, $attempts)),
+            DeliveryCompletion::dead($claimed, DeliveryDeadLetter::of($record, $reason, $message, $attempts, EpochMillis::now())),
             [BrokerEvents::WEBHOOK_DEAD_LETTERED, self::context($record) + [
                 'attempts' => $attempts,
                 'reason' => $reason,
                 'reason_code' => $result->reasonCode,
             ]],
         ];
-    }
-
-    private function deadLetter(DeliveryRecord $record, string $reason, string $message, int $attempts): DeadLetter
-    {
-        return new DeadLetter(
-            id: Uuid::v7()->toString(),
-            source: self::SOURCE_PREFIX.$record->lane,
-            messageId: $record->messageId,
-            messageName: $record->messageName,
-            body: $record->body,
-            headers: $record->headers,
-            errorClass: $reason,
-            errorMessage: $message,
-            errorTrace: '',
-            attempts: $attempts,
-            failedAt: EpochMillis::now(),
-        );
     }
 
     /** @return array{lane: string, message_id: string, delivery_id: string} */

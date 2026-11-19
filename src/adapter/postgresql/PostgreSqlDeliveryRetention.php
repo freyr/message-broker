@@ -31,10 +31,9 @@ use Symfony\Component\Clock\Clock;
  *    retention cutoff: DETACH PARTITION ... CONCURRENTLY (no ACCESS EXCLUSIVE
  *    lock on webhook_deliveries), then DROP TABLE on the detached table. An
  *    expired partition that holds an unfinished row (completed_at IS NULL) is
- *    kept and reported; there is no option to drop it. The delivery loop
- *    makes each row final before its partition expires (maximum age plus the
- *    longest retry delay is shorter than the retention period), so a kept
- *    partition shows a fault.
+ *    kept and reported; there is no option to drop it. A delivery has no
+ *    time limit, so the partition stays until each of its rows reaches a
+ *    final state or an operator abandons it (DeliveryStore::abandon()).
  *
  * Safety. The check and the detach are not one atomic step, so purge() counts
  * the unfinished rows twice: before the detach, and again on the detached

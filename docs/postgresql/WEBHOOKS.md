@@ -27,7 +27,7 @@ secret: the delivery loop reads the subscription of a lane at send time.
 | `message_name` | `VARCHAR(255)` | The name of the message. |
 | `body` | `BYTEA` | The final bytes of the request body. |
 | `headers` | `JSONB` | The produce-time headers. |
-| `created_at` | `TIMESTAMP(3)` | The partition key, and the start of the maximum age. |
+| `created_at` | `TIMESTAMP(3)` | The partition key, and the date that `webhook:abandon` compares. |
 | `available_at` | `TIMESTAMP(3)` | The earliest time of the next claim. A claim sets it to the end of the lease. |
 | `attempts` | `INTEGER` | The number of requests that got a result. |
 | `completed_at` | `TIMESTAMP(3) NULL` | The time of the final state. `NULL` means unfinished. |
@@ -45,7 +45,7 @@ of time.
 **The index.** The partial index `idx_webhook_deliveries_due` on
 `(lane, available_at) WHERE completed_at IS NULL` serves the claim. A finished
 row leaves the index, so the index holds only the unfinished rows and stays
-small. The claim of expired rows and the alert query read it too.
+small. The alert query reads it too.
 
 ## Schema setup
 
@@ -108,8 +108,19 @@ $retention = new PostgreSqlDeliveryRetention($maintenancePdo);
   message that dies in two lanes has two open dead letters, and a failure
   after a replay inserts a new row. When one call holds two outcomes for one
   row, the first outcome applies.
-- **Expired rows.** `claimExpired()` leases the due, unfinished rows of all
-  lanes that are older than the cut, the oldest first.
+- **Abandon.** `abandon()` is one `UPDATE` in a transaction of the store. A
+  subquery picks at most the limit of unfinished rows with `created_at`
+  earlier than the date, of the lanes of a JSON array or of all lanes, with
+  `FOR UPDATE SKIP LOCKED`. The `UPDATE` sets the final state dead and keeps
+  `available_at` and `attempts`; then the dead letters (error class
+  `abandoned`) go in through `PostgreSqlDeadLetterStore::store()`, in the same
+  transaction. A lease does not protect a row, so a leased row is abandoned
+  too, and the later `complete()` of its worker fails the lease check because
+  the row is finished. A row that a different session locks (a claim or a
+  result write in progress) is skipped. The condition on `created_at` lets
+  PostgreSQL skip the partitions of later days.
+- **Count.** `countUnfinished()` counts the same rows for each lane, with no
+  lock and no change, in the byte order of the lane names (`COLLATE "C"`).
 - **Pooler.** The store holds no session state and no session lock, so it
   works behind pgbouncer in transaction mode (see
   [CONNECTION_POOLING.md](CONNECTION_POOLING.md)).
@@ -134,7 +145,7 @@ rules of the outbox retention:
 - An expired partition that holds an unfinished row (`completed_at IS NULL`)
   is kept and reported in `RetentionReport::$kept` (partition name and count
   of unfinished rows). There is no option to drop it. A later run drops it
-  when its rows are final.
+  when its rows are final. An abandoned row is final.
 - The rows are counted again on the detached table, before `DROP TABLE`. A
   table with a row that arrived between the first count and the detach is
   attached again and reported as kept. The same rule applies to a partition
@@ -142,10 +153,14 @@ rules of the outbox retention:
   table that an earlier run detached.
 - No step takes an `ACCESS EXCLUSIVE` lock on `webhook_deliveries`.
 
-The delivery loop makes each row final before its partition expires: it
-refuses to start when the maximum age plus the longest retry delay is not
-shorter than the retention period (default 7 days). Thus a kept partition
-shows a fault: alert on a report with a kept partition.
+A delivery has no time limit, so **a partition with an unfinished row stays
+until the row ends**: it is delivered, it reaches the retry limit, it gets a
+permanent refusal, or an operator abandons it. The rows of a lane whose
+endpoint is blocked, and of a subscription that the application removed, end
+only by the abandon. Alert on a report with a kept partition, then end the old
+rows with `message-broker:webhook:abandon --before=<date>` (see
+[../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md)). The next run of the
+retention drops the partition.
 
 Run the retention once a day, for example:
 
@@ -153,7 +168,8 @@ Run the retention once a day, for example:
 $retention->ensureCapacity(3);
 $report = $retention->purge(7);
 if ($report->hasKept()) {
-    // alert: a partition with unfinished rows passed the retention period
+    // alert: a partition with unfinished rows passed the retention period;
+    // end the old rows with message-broker:webhook:abandon
 }
 ```
 
