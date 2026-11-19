@@ -1,0 +1,264 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Freyr\MessageBroker\Adapter\PostgreSql;
+
+use Freyr\MessageBroker\Time\EpochMillis;
+use Freyr\MessageBroker\Webhook\ClaimedDelivery;
+use Freyr\MessageBroker\Webhook\DeliveryCompletion;
+use Freyr\MessageBroker\Webhook\DeliveryCompletionKind;
+use Freyr\MessageBroker\Webhook\DeliveryRecord;
+use Freyr\MessageBroker\Webhook\DeliveryStore;
+use PDO;
+use Throwable;
+
+/**
+ * PostgreSQL access to the webhook_deliveries table (plain PDO), the
+ * implementation of the DeliveryStore port. Constructed with the connection
+ * of the application on the produce side (insert() joins its transaction)
+ * and with a dedicated connection in the delivery worker.
+ *
+ * The time of a claim is the database time: now() in UTC, cast once to
+ * TIMESTAMP(3). The same value is the due limit (available_at <= it) and the
+ * start of the lease that the claim writes. PostgreSQL rounds a value stored
+ * in TIMESTAMP(3); a comparison of a rounded stored lease with a raw
+ * microsecond now() could find a lease of 0 ms not yet due.
+ *
+ * claim() and claimExpired() are one statement each: in autocommit mode the
+ * statement is the transaction, and its commit makes the lease visible before
+ * the method returns. The row locks of FOR UPDATE SKIP LOCKED last only for
+ * that statement. No session state: the store works behind a transaction-mode
+ * pooler.
+ *
+ * @phpstan-type Row array{id: string, message_id: string, lane: string, message_name: string, body: resource|string, headers: string, attempts: int, created_at_ms: int, available_at_ms: int}
+ */
+final readonly class PostgreSqlDeliveryStore implements DeliveryStore
+{
+    private const int OUTCOME_DELIVERED = 1;
+    private const int OUTCOME_DEAD = 2;
+
+    private const string COLUMNS = <<<'SQL'
+        w.id, w.message_id, w.lane, w.message_name, w.body, w.headers, w.attempts,
+        CAST(EXTRACT(EPOCH FROM w.created_at) * 1000 AS BIGINT) AS created_at_ms,
+        CAST(EXTRACT(EPOCH FROM w.available_at) * 1000 AS BIGINT) AS available_at_ms
+        SQL;
+
+    /**
+     * The lanes keep their position in the list (WITH ORDINALITY). For each
+     * lane a LATERAL subquery starts at the partial index
+     * idx_webhook_deliveries_due and takes at most :limit_for_each_lane due
+     * rows; the total limit then cuts the rows in the order of the lane
+     * position. The lanes come as a JSON array, so a lane can hold any
+     * character.
+     *
+     * The UPDATE finds the picked rows by their primary key (= ANY of an
+     * array), so it reads the primary key index of each partition and not the
+     * whole table.
+     */
+    private const string CLAIM_SQL = <<<'SQL'
+        WITH clock AS (
+            SELECT CAST(now() AT TIME ZONE 'UTC' AS TIMESTAMP(3)) AS now_ms
+        ),
+        picked AS (
+            SELECT d.id, d.created_at
+            FROM jsonb_array_elements_text(CAST(:lanes AS JSONB)) WITH ORDINALITY AS l(lane, position)
+            CROSS JOIN LATERAL (
+                SELECT c.id, c.created_at
+                FROM webhook_deliveries c
+                WHERE c.lane = l.lane AND c.completed_at IS NULL AND c.available_at <= (SELECT now_ms FROM clock)
+                ORDER BY c.available_at
+                LIMIT :limit_for_each_lane
+                FOR UPDATE SKIP LOCKED
+            ) AS d
+            ORDER BY l.position
+            LIMIT :total
+        )
+        UPDATE webhook_deliveries w
+        SET available_at = (SELECT now_ms FROM clock) + CAST(:lease_ms AS INTEGER) * INTERVAL '1 millisecond'
+        WHERE w.id = ANY(ARRAY(SELECT id FROM picked)) AND w.created_at = ANY(ARRAY(SELECT created_at FROM picked))
+        RETURNING
+        SQL.' '.self::COLUMNS;
+
+    private const string CLAIM_EXPIRED_SQL = <<<'SQL'
+        WITH clock AS (
+            SELECT CAST(now() AT TIME ZONE 'UTC' AS TIMESTAMP(3)) AS now_ms
+        ),
+        picked AS (
+            SELECT c.id, c.created_at
+            FROM webhook_deliveries c
+            WHERE c.completed_at IS NULL AND c.created_at < CAST(:before AS TIMESTAMP(3))
+              AND c.available_at <= (SELECT now_ms FROM clock)
+            ORDER BY c.created_at
+            LIMIT :limit
+            FOR UPDATE SKIP LOCKED
+        )
+        UPDATE webhook_deliveries w
+        SET available_at = (SELECT now_ms FROM clock) + CAST(:lease_ms AS INTEGER) * INTERVAL '1 millisecond'
+        WHERE w.id = ANY(ARRAY(SELECT id FROM picked)) AND w.created_at = ANY(ARRAY(SELECT created_at FROM picked))
+        RETURNING
+        SQL.' '.self::COLUMNS;
+
+    /**
+     * One statement for all outcomes. The lease check is the condition
+     * completed_at IS NULL AND available_at = lease; created_at lets
+     * PostgreSQL find the partition of each row.
+     */
+    private const string COMPLETE_SQL = <<<'SQL'
+        UPDATE webhook_deliveries w
+        SET attempts = o.attempts,
+            available_at = COALESCE(o.available_at, w.available_at),
+            completed_at = CASE WHEN o.outcome IS NULL THEN NULL ELSE CAST(now() AT TIME ZONE 'UTC' AS TIMESTAMP(3)) END,
+            outcome = o.outcome
+        FROM jsonb_to_recordset(CAST(:outcomes AS JSONB))
+            AS o(id UUID, created_at TIMESTAMP(3), lease TIMESTAMP(3), attempts INTEGER, available_at TIMESTAMP(3), outcome SMALLINT)
+        WHERE w.id = o.id AND w.created_at = o.created_at AND w.completed_at IS NULL AND w.available_at = o.lease
+        RETURNING w.id
+        SQL;
+
+    public function __construct(
+        private PDO $pdo,
+    ) {}
+
+    public function insert(array $records): void
+    {
+        $statement = $this->pdo->prepare(<<<'SQL'
+            INSERT INTO webhook_deliveries
+                (id, message_id, lane, message_name, body, headers, created_at, available_at, attempts)
+            VALUES
+                (:id, :message_id, :lane, :message_name, :body, :headers, :created_at, :available_at, :attempts)
+            SQL);
+        foreach ($records as $record) {
+            $statement->bindValue('id', $record->id);
+            $statement->bindValue('message_id', $record->messageId);
+            $statement->bindValue('lane', $record->lane);
+            $statement->bindValue('message_name', $record->messageName);
+            // BYTEA requires a binary bind; PARAM_LOB makes pdo_pgsql send binary format.
+            $statement->bindValue('body', $record->body, PDO::PARAM_LOB);
+            $statement->bindValue('headers', json_encode($record->headers, JSON_THROW_ON_ERROR));
+            $statement->bindValue('created_at', self::timestamp($record->createdAt));
+            $statement->bindValue('available_at', self::timestamp($record->availableAt ?? $record->createdAt));
+            $statement->bindValue('attempts', $record->attempts, PDO::PARAM_INT);
+            $statement->execute();
+        }
+    }
+
+    public function claim(array $lanes, int $limitForEachLane, int $total, int $leaseMs): array
+    {
+        $statement = $this->pdo->prepare(self::CLAIM_SQL);
+        // A lane that is two times in the list counts one time.
+        $statement->bindValue('lanes', json_encode(array_values(array_unique($lanes)), JSON_THROW_ON_ERROR));
+        $statement->bindValue('limit_for_each_lane', $limitForEachLane, PDO::PARAM_INT);
+        $statement->bindValue('total', $total, PDO::PARAM_INT);
+        $statement->bindValue('lease_ms', $leaseMs, PDO::PARAM_INT);
+        $statement->execute();
+
+        /** @var list<Row> $rows */
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_map(self::claimed(...), $rows);
+    }
+
+    public function complete(array $outcomes): array
+    {
+        $first = [];
+        foreach ($outcomes as $outcome) {
+            // The first outcome of a row wins, as when each outcome ran in turn.
+            $first[$outcome->claimed->delivery->id] ??= $outcome;
+        }
+
+        $this->pdo->beginTransaction();
+
+        try {
+            $statement = $this->pdo->prepare(self::COMPLETE_SQL);
+            $statement->bindValue('outcomes', json_encode(array_values(array_map(self::outcomeRow(...), $first)), JSON_THROW_ON_ERROR));
+            $statement->execute();
+            /** @var list<string> $ids */
+            $ids = $statement->fetchAll(PDO::FETCH_COLUMN);
+            $changed = array_flip($ids);
+
+            $deadLetters = new PostgreSqlDeadLetterStore($this->pdo);
+            foreach ($first as $id => $outcome) {
+                // Only a dead outcome has a dead letter. The open row rule: one
+                // open dead letter for each message ID and source.
+                if ($outcome->deadLetter !== null && isset($changed[$id])) {
+                    $deadLetters->store($outcome->deadLetter);
+                }
+            }
+
+            $this->pdo->commit();
+        } catch (Throwable $error) {
+            if ($this->pdo->inTransaction()) {
+                try {
+                    $this->pdo->rollBack();
+                } catch (Throwable) {
+                    // Dead connection: the transaction died with it. Propagate
+                    // the original failure, not the rollback's.
+                }
+            }
+
+            throw $error;
+        }
+
+        return array_values(array_filter(array_keys($first), static fn (string $id): bool => isset($changed[$id])));
+    }
+
+    public function claimExpired(int $before, int $limit, int $leaseMs): array
+    {
+        $statement = $this->pdo->prepare(self::CLAIM_EXPIRED_SQL);
+        $statement->bindValue('before', self::timestamp($before));
+        $statement->bindValue('limit', $limit, PDO::PARAM_INT);
+        $statement->bindValue('lease_ms', $leaseMs, PDO::PARAM_INT);
+        $statement->execute();
+
+        /** @var list<Row> $rows */
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        // RETURNING has no order: the oldest first.
+        usort($rows, static fn (array $a, array $b): int => $a['created_at_ms'] <=> $b['created_at_ms']);
+
+        return array_map(self::claimed(...), $rows);
+    }
+
+    /** @return array{id: string, created_at: string, lease: string, attempts: int, available_at: ?string, outcome: ?int} */
+    private static function outcomeRow(DeliveryCompletion $outcome): array
+    {
+        return [
+            'id' => $outcome->claimed->delivery->id,
+            'created_at' => self::timestamp($outcome->claimed->delivery->createdAt),
+            'lease' => self::timestamp($outcome->claimed->lease),
+            'attempts' => $outcome->attempts,
+            'available_at' => $outcome->availableAt === null ? null : self::timestamp($outcome->availableAt),
+            'outcome' => match ($outcome->kind) {
+                DeliveryCompletionKind::Delivered => self::OUTCOME_DELIVERED,
+                DeliveryCompletionKind::Dead => self::OUTCOME_DEAD,
+                DeliveryCompletionKind::Retry => null,
+            },
+        ];
+    }
+
+    /** @param Row $row */
+    private static function claimed(array $row): ClaimedDelivery
+    {
+        $headers = json_decode($row['headers'], true, flags: JSON_THROW_ON_ERROR);
+        /** @var array<string, mixed> $headers the column holds the JSON object of the insert */
+        $record = new DeliveryRecord(
+            id: $row['id'],
+            messageId: $row['message_id'],
+            lane: $row['lane'],
+            messageName: $row['message_name'],
+            // pdo_pgsql returns BYTEA as a stream resource.
+            body: is_string($row['body']) ? $row['body'] : (string) stream_get_contents($row['body']),
+            headers: $headers,
+            createdAt: $row['created_at_ms'],
+            attempts: $row['attempts'],
+            availableAt: $row['available_at_ms'],
+        );
+
+        return new ClaimedDelivery($record, $row['available_at_ms']);
+    }
+
+    private static function timestamp(int $epochMilliseconds): string
+    {
+        return EpochMillis::toDateTime($epochMilliseconds)->format('Y-m-d H:i:s.v');
+    }
+}

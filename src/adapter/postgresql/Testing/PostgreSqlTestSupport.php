@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Adapter\PostgreSql\Testing;
 
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryRetention;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliverySchemaInstaller;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxRetention;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlSchemaInstaller;
 use Freyr\MessageBroker\Testing\TestIsolation;
@@ -55,18 +57,22 @@ trait PostgreSqlTestSupport
         self::$pdo->exec('DROP TABLE IF EXISTS dead_letters');
         self::$pdo->exec('DROP TABLE IF EXISTS message_deduplication');
         self::$pdo->exec('DROP TABLE IF EXISTS outbox_messages');
-        $leftovers = self::$pdo->query("SELECT relname FROM pg_class WHERE relkind = 'r' AND relname ~ '^outbox_messages_p[0-9]{8}$'");
+        self::$pdo->exec('DROP TABLE IF EXISTS webhook_deliveries');
+        $leftovers = self::$pdo->query("SELECT relname FROM pg_class WHERE relkind = 'r' AND relname ~ '^(outbox_messages|webhook_deliveries)_p[0-9]{8}$'");
         self::assertNotFalse($leftovers);
         foreach ($leftovers->fetchAll(PDO::FETCH_COLUMN) as $name) {
             self::$pdo->exec(sprintf('DROP TABLE "%s"', (string) $name)); // detached daily tables survive the parent
         }
         self::schemaInstaller()->install(1);
+        (new PostgreSqlDeliverySchemaInstaller(self::$pdo))->install(1);
     }
 
     protected function setUp(): void
     {
         // No DEFAULT partition: rows of today (and of tomorrow, past midnight) need theirs.
         (new PostgreSqlOutboxRetention(self::$pdo))->ensureCapacity(1);
+        (new PostgreSqlDeliveryRetention(self::$pdo))->ensureCapacity(1);
+        self::$pdo->exec('DELETE FROM webhook_deliveries');
         self::$pdo->exec('DELETE FROM outbox_messages');
         self::$pdo->exec('DELETE FROM message_deduplication');
         self::$pdo->exec('DELETE FROM dead_letters');

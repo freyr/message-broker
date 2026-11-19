@@ -6,7 +6,9 @@ partitions of `outbox_messages`. The table is described in
 a core console command; its options and exit codes are in
 [../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md). The class that does the
 work is `PostgreSqlOutboxRetention`, which implements the core port
-`OutboxRetention`.
+`OutboxRetention`. The retention of `webhook_deliveries` has the same rules,
+with no option to drop a partition that holds an unfinished row; it is in
+[WEBHOOKS.md](WEBHOOKS.md).
 
 The relay never deletes rows. It sets `published_at`, and the rows stay until
 retention drops their partition, once every row of it is published or abandoned. `outbox_messages` is partitioned by

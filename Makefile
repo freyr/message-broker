@@ -31,6 +31,7 @@ test-pgbouncer: ## Run the rotation guard, the PostgreSQL contract tests and the
 		tests/adapter/postgresql/Functional/PostgreSqlOutboxStoreContractTest.php \
 		tests/adapter/postgresql/Functional/PostgreSqlDeduplicationStoreContractTest.php \
 		tests/adapter/postgresql/Functional/PostgreSqlDeadLetterStoreContractTest.php \
+		tests/adapter/postgresql/Functional/PostgreSqlDeliveryStoreContractTest.php \
 		tests/adapter/postgresql/Functional/PdoTransactionContractTest.php \
 		tests/adapter/amqp/Functional/AmqpConsumerTest.php \
 		tests/adapter/amqp/Functional/EndToEndTest.php \
