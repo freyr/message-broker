@@ -96,9 +96,10 @@ final class HttpDeliverySender implements DeliverySender
      * One limit remains: PHP cannot interrupt a lookup of the operating
      * system (getaddrinfo() has no timeout). A lookup that starts before the
      * end of the allowance and takes longer than the time that is left of
-     * this limit makes send() return late by that excess, at most the
-     * resolver timeout of the operating system (resolv.conf `timeout` times
-     * `attempts`). Such a pair fails with the category dns.
+     * this limit makes send() return late by that excess. With the default
+     * lookup the excess is at most two resolver timeouts of the operating
+     * system (the A lookup, then the AAAA lookup; each resolv.conf `timeout`
+     * times `attempts`). Such a pair fails with the category dns.
      */
     public function maxSendMs(): int
     {
@@ -264,8 +265,7 @@ final class HttpDeliverySender implements DeliverySender
      */
     private function lookup(string $url, int $dnsEndMs): array|DeliveryResult
     {
-        // The client uses the lower-case host name as the key of the resolve option.
-        $host = strtolower((string) parse_url($url, \PHP_URL_HOST));
+        $host = self::asciiHost((string) parse_url($url, \PHP_URL_HOST));
         if (filter_var(trim($host, '[]'), \FILTER_VALIDATE_IP) !== false) {
             return [];
         }
@@ -291,6 +291,21 @@ final class HttpDeliverySender implements DeliverySender
         return [
             $host => $address,
         ];
+    }
+
+    /**
+     * The host as Symfony HttpClient normalizes it for the request
+     * (HttpClientTrait::parseUrl()): the ASCII form of an internationalized
+     * name, else the name in lower case. The lookup and the key of the
+     * resolve option thus use the name that the client connects to. Without
+     * ext-intl or symfony/polyfill-intl-idn a non-ASCII name stays as it is
+     * and does not resolve.
+     */
+    private static function asciiHost(string $host): string
+    {
+        return \defined('INTL_IDNA_VARIANT_UTS46')
+            ? idn_to_ascii($host, \IDNA_DEFAULT | \IDNA_USE_STD3_RULES | \IDNA_CHECK_BIDI | \IDNA_CHECK_CONTEXTJ | \IDNA_NONTRANSITIONAL_TO_ASCII, \INTL_IDNA_VARIANT_UTS46) ?: strtolower($host)
+            : strtolower($host);
     }
 
     /**

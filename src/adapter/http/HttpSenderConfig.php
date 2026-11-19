@@ -18,7 +18,8 @@ final readonly class HttpSenderConfig
      * @param int $totalTimeoutMs the total limit of one request, and the deadline of the transfers of one send() call
      * @param int $connectTimeoutMs the limit of the DNS lookup, the TCP connect and the TLS handshake of one request
      * @param int $dnsAllowanceMs the time that the private network check can use for the DNS lookups before
-     *                            the transfers start; maxSendMs() is the total limit plus this value
+     *                            the transfers start; maxSendMs() is the total limit plus this value; 1 or
+     *                            more when the check is on, 0 or more when it is off or a proxy is set
      * @param int $maxHostConnections the parallel connections for each host, for the client that the sender
      *                                creates; use the batch size of the delivery loop or more
      * @param int $clientResetIntervalMs the interval of the reset of the client: the reset clears the DNS cache
@@ -54,6 +55,12 @@ final readonly class HttpSenderConfig
         }
         if ($dnsAllowanceMs < 0) {
             throw new InvalidArgumentException("\$dnsAllowanceMs must be 0 or more, {$dnsAllowanceMs} given");
+        }
+        // With the check on, the sender's lookups must end inside the allowance: 0 would fail each host name.
+        if ($dnsAllowanceMs < 1 && $blockPrivateNetworks && $proxy === null) {
+            throw new InvalidArgumentException(
+                "\$dnsAllowanceMs must be 1 or more when the private network check is on, {$dnsAllowanceMs} given",
+            );
         }
         if ($connectTimeoutMs > $totalTimeoutMs) {
             throw new InvalidArgumentException('$connectTimeoutMs must not be longer than $totalTimeoutMs');

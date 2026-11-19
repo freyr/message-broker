@@ -15,6 +15,7 @@ use Freyr\MessageBroker\Webhook\DeliveryRecord;
 use Freyr\MessageBroker\Webhook\DeliveryResultKind;
 use Freyr\MessageBroker\Webhook\Subscription;
 use Generator;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LogLevel;
 use Symfony\Component\Clock\Clock;
@@ -727,6 +728,60 @@ final class HttpDeliverySenderTest extends TestCase
             ['x-message-name: order%0D%0Ax-evil: 1%00'],
             $response->getRequestOptions()['normalized_headers']['x-message-name'],
         );
+    }
+
+    public function testAnInternationalizedHostIsLookedUpAndPinnedInItsAsciiForm(): void
+    {
+        $looked = [];
+        $resolver = static function (string $host) use (&$looked): string {
+            $looked[] = $host;
+
+            return '93.184.215.14';
+        };
+        $response = new MockResponse('ok', [
+            'http_code' => 200,
+        ]);
+        $sender = new HttpDeliverySender(new HttpSenderConfig(), new MockHttpClient($response), resolver: $resolver);
+
+        $results = $sender->send([self::pair('d-1', url: 'https://München.de/hook')]);
+
+        self::assertSame(['xn--mnchen-3ya.de'], $looked);
+        self::assertSame([
+            'xn--mnchen-3ya.de' => '93.184.215.14',
+        ], $response->getRequestOptions()['resolve']);
+        self::assertSame('https://xn--mnchen-3ya.de/hook', $response->getRequestUrl());
+        self::assertSame(DeliveryResultKind::Delivered, $results['d-1']->kind);
+    }
+
+    #[DataProvider('hostNames')]
+    public function testTheLookupUsesTheHostNameThatTheClientSends(string $url, string $lookedUp): void
+    {
+        $looked = [];
+        $resolver = static function (string $host) use (&$looked): ?string {
+            $looked[] = $host;
+
+            return null;
+        };
+        $client = new MockHttpClient();
+        $sender = new HttpDeliverySender(new HttpSenderConfig(), $client, resolver: $resolver);
+
+        $results = $sender->send([self::pair('d-1', url: $url)]);
+
+        self::assertSame([$lookedUp], $looked);
+        self::assertSame('no address (dns)', $results['d-1']->text);
+        self::assertSame(0, $client->getRequestsCount());
+    }
+
+    /** @return iterable<string, array{string, string}> */
+    public static function hostNames(): iterable
+    {
+        yield 'upper case and a trailing dot' => ['https://Hooks.Example.COM./x', 'hooks.example.com.'];
+        yield 'nontransitional sharp s' => ['https://Faß.de/x', 'xn--fa-hia.de'];
+        // idn_to_ascii() refuses these names; the client then sends them in lower case.
+        yield 'invalid punycode' => ['https://XN--A.Example/hook', 'xn--a.example'];
+        yield 'joiner without context' => ["https://\u{200D}X.example/", "\u{200D}x.example"];
+        yield 'underscore (STD3 rules)' => ['https://Ex_Ample.com/', 'ex_ample.com'];
+        yield 'left-to-right and right-to-left in one label (BIDI rules)' => ["https://A\u{05D0}.example/", "a\u{05D0}.example"];
     }
 
     /** @param list<string> $secrets */

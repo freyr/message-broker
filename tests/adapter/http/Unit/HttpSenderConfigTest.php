@@ -42,6 +42,16 @@ final class HttpSenderConfigTest extends TestCase
         self::assertFalse(new HttpSenderConfig(proxy: 'http://proxy.internal:3128')->checksPrivateNetworks());
     }
 
+    public function testNoDnsAllowanceIsValidWhenThePrivateNetworkCheckIsOff(): void
+    {
+        self::assertSame(0, new HttpSenderConfig(dnsAllowanceMs: 0, blockPrivateNetworks: false)->dnsAllowanceMs);
+    }
+
+    public function testADnsAllowanceOfOneIsValidWithThePrivateNetworkCheck(): void
+    {
+        self::assertSame(1, new HttpSenderConfig(dnsAllowanceMs: 1)->dnsAllowanceMs);
+    }
+
     public function testAcceptsTheSmallestValues(): void
     {
         $config = new HttpSenderConfig(
@@ -83,6 +93,9 @@ final class HttpSenderConfigTest extends TestCase
         yield 'reset 0' => [[
             'clientResetIntervalMs' => 0,
         ], '$clientResetIntervalMs must be 1 or more, 0 given'];
+        yield 'no dns allowance with the private network check' => [[
+            'dnsAllowanceMs' => 0,
+        ], '$dnsAllowanceMs must be 1 or more when the private network check is on, 0 given'];
         yield 'dns negative' => [[
             'dnsAllowanceMs' => -1,
         ], '$dnsAllowanceMs must be 0 or more, -1 given'];

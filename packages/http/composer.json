@@ -26,6 +26,10 @@
         "infection/infection": "^0.35.11",
         "phpunit/phpunit": "^13.4"
     },
+    "suggest": {
+        "ext-intl": "Internationalized host names in subscription URLs (or symfony/polyfill-intl-idn)",
+        "symfony/polyfill-intl-idn": "Internationalized host names in subscription URLs, when ext-intl is not loaded"
+    },
     "provide": {
         "freyr/message-broker-webhook-sender-implementation": "1.0"
     },
