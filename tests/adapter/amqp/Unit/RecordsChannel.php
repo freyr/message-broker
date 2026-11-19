@@ -27,8 +27,18 @@ trait RecordsChannel
     /** @var list<int> */
     private array $acked = [];
 
-    /** @var list<array{message: AMQPMessage, exchange: string, routingKey: string}> */
+    /** @var list<array{message: AMQPMessage, exchange: string, routingKey: string, mandatory: bool}> */
     private array $published = [];
+
+    private int $returnListeners = 0;
+
+    private ?\Closure $returnListener = null;
+
+    /** @var list<mixed> the timeout of each wait_for_pending_acks_returns */
+    private array $pendingAckReturnTimeouts = [];
+
+    /** What the broker does during a wait_for_pending_acks_returns: call the nack handler or the return listener, or throw. */
+    private ?\Closure $duringConfirmWait = null;
 
     /** @var list<array<int, mixed>> */
     private array $declared = [];
@@ -131,14 +141,25 @@ trait RecordsChannel
             $this->declared[] = $args;
         });
         $this->channel->method('basic_publish')->willReturnCallback(
-            function (AMQPMessage $message, string $exchange, string $routingKey): void {
+            function (AMQPMessage $message, string $exchange, string $routingKey, bool $mandatory = false): void {
                 $this->published[] = [
                     'message' => $message,
                     'exchange' => $exchange,
                     'routingKey' => $routingKey,
+                    'mandatory' => $mandatory,
                 ];
             },
         );
+        $this->channel->method('set_return_listener')->willReturnCallback(function (\Closure $listener): void {
+            ++$this->returnListeners;
+            $this->returnListener = $listener;
+        });
+        $this->channel->method('wait_for_pending_acks_returns')->willReturnCallback(function ($timeout): void {
+            $this->pendingAckReturnTimeouts[] = $timeout;
+            if ($this->duringConfirmWait !== null) {
+                ($this->duringConfirmWait)();
+            }
+        });
         $this->channel->method('wait_for_pending_acks')->willReturnCallback(function ($timeout): void {
             $this->pendingAckTimeouts[] = $timeout;
             if ($this->confirmTimesOut) {
