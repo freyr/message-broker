@@ -21,17 +21,19 @@ final class CircuitBreakerPolicyTest extends TestCase
         self::assertSame(70, $policy->errorRatePercent);
         self::assertSame(600_000, $policy->openMs, '10 minutes');
         self::assertSame(5_000, $policy->slowLimitMs, '5 seconds');
+        self::assertSame(3, $policy->maxConsecutiveOpenings);
     }
 
     public function testAcceptsTheSmallestValues(): void
     {
-        $policy = new CircuitBreakerPolicy(1, 1, 1, 1, 0);
+        $policy = new CircuitBreakerPolicy(1, 1, 1, 1, 0, 0);
 
         self::assertSame(1, $policy->windowMs);
         self::assertSame(1, $policy->minimumRequests);
         self::assertSame(1, $policy->errorRatePercent);
         self::assertSame(1, $policy->openMs);
         self::assertSame(0, $policy->slowLimitMs);
+        self::assertSame(0, $policy->maxConsecutiveOpenings);
     }
 
     public function testAcceptsAnErrorRateOfOneHundredPercent(): void
@@ -60,6 +62,9 @@ final class CircuitBreakerPolicyTest extends TestCase
         yield 'slow limit -1' => [[
             'slowLimitMs' => -1,
         ], '$slowLimitMs must be 0 or more, -1 given'];
+        yield 'maximum consecutive openings -1' => [[
+            'maxConsecutiveOpenings' => -1,
+        ], '$maxConsecutiveOpenings must be 0 or more, -1 given'];
     }
 
     /** @param array<string, int> $arguments */
@@ -135,5 +140,32 @@ final class CircuitBreakerPolicyTest extends TestCase
         self::assertFalse($policy->countsAsFailure(DeliveryResult::delivered(0)));
         self::assertFalse($policy->countsAsFailure(DeliveryResult::delivered(1)));
         self::assertTrue($policy->countsAsFailure(DeliveryResult::delivered(2)));
+    }
+
+    public function testTheBlockRuleBlocksATripWhenTheOpeningsInARowHaveTheMaximum(): void
+    {
+        $policy = new CircuitBreakerPolicy();
+
+        self::assertFalse($policy->blocks(0));
+        self::assertFalse($policy->blocks(2));
+        self::assertTrue($policy->blocks(3), 'the fourth trip in a row');
+        self::assertTrue($policy->blocks(4));
+    }
+
+    public function testTheBlockRuleUsesTheConfiguredMaximum(): void
+    {
+        $policy = new CircuitBreakerPolicy(maxConsecutiveOpenings: 1);
+
+        self::assertFalse($policy->blocks(0));
+        self::assertTrue($policy->blocks(1));
+    }
+
+    public function testAMaximumOfZeroNeverBlocks(): void
+    {
+        $policy = new CircuitBreakerPolicy(maxConsecutiveOpenings: 0);
+
+        self::assertFalse($policy->blocks(0));
+        self::assertFalse($policy->blocks(1));
+        self::assertFalse($policy->blocks(1_000));
     }
 }

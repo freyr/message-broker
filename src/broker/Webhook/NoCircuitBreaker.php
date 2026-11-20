@@ -16,4 +16,9 @@ final class NoCircuitBreaker implements CircuitBreaker
     {
         return new LaneTransitions();
     }
+
+    public function policy(): CircuitBreakerPolicy
+    {
+        return new CircuitBreakerPolicy();
+    }
 }

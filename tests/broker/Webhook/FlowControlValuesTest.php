@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Webhook;
 
+use Freyr\MessageBroker\Webhook\CircuitBreakerPolicy;
 use Freyr\MessageBroker\Webhook\LaneCounts;
 use Freyr\MessageBroker\Webhook\LaneState;
 use Freyr\MessageBroker\Webhook\LaneTransitions;
@@ -53,19 +54,21 @@ final class FlowControlValuesTest extends TestCase
 
         self::assertSame([], $transitions->left);
         self::assertSame([], $transitions->returned);
+        self::assertSame([], $transitions->blocked);
     }
 
-    public function testLaneTransitionsHoldTheLanesThatLeftAndReturned(): void
+    public function testLaneTransitionsHoldTheLanesThatLeftReturnedAndWereBlocked(): void
     {
-        $transitions = new LaneTransitions(['crm'], ['erp', 'bi']);
+        $transitions = new LaneTransitions(['crm'], ['erp', 'bi'], ['ads']);
 
         self::assertSame(['crm'], $transitions->left);
         self::assertSame(['erp', 'bi'], $transitions->returned);
+        self::assertSame(['ads'], $transitions->blocked);
     }
 
     public function testLaneStateHoldsEachField(): void
     {
-        $state = new LaneState('crm', 1_000, 12, 9, 601_000, 3);
+        $state = new LaneState('crm', 1_000, 12, 9, 601_000, 3, 2, 5_000);
 
         self::assertSame('crm', $state->lane);
         self::assertSame(1_000, $state->windowStartedAt);
@@ -73,6 +76,8 @@ final class FlowControlValuesTest extends TestCase
         self::assertSame(9, $state->failures);
         self::assertSame(601_000, $state->openUntil);
         self::assertSame(3, $state->openedCount);
+        self::assertSame(2, $state->consecutiveOpenings);
+        self::assertSame(5_000, $state->blockedAt);
     }
 
     public function testNoCircuitBreakerHasNoOpenLaneAndNoTransition(): void
@@ -81,5 +86,6 @@ final class FlowControlValuesTest extends TestCase
 
         self::assertEquals(new LaneTransitions(), $breaker->record([new LaneCounts('crm', 100, 100)]));
         self::assertSame([], $breaker->openLanes());
+        self::assertEquals(new CircuitBreakerPolicy(), $breaker->policy(), 'the default policy');
     }
 }

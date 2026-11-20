@@ -19,8 +19,10 @@ interface LaneStates
     public function all(): array;
 
     /**
-     * Put the lane back into circulation: open_until becomes null and the
-     * window starts again from 0 at the present time. The opened count stays.
+     * Put the lane back into circulation, also a blocked lane: open_until and
+     * the block become null, the window starts again from 0 at the present
+     * time, and the openings in a row become 0. The opened count stays. It is
+     * the only way to end a block.
      *
      * @return bool false when the lane has no state
      */
