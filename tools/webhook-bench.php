@@ -26,8 +26,9 @@ declare(strict_types=1);
 //  - the acquire() duration (p50, p99) and, for postgresql, the share of the
 //    samples of pg_stat_activity (each 10 ms) with a session that waits for a
 //    lock on webhook_rate_limit;
-//  - "limit active" (each steady window has a limited grant and 98% or more
-//    of 10 x rps requests) and, with a lane limit, "lanes limited" (each lane
+//  - "limit active" (each steady window has a limited grant, a bucket-cut call
+//    and 98% or more of 10 x rps requests) and, with a lane limit, "lanes
+//    limited" (each steady window has a bucket-cut call, and each lane
 //    has a limited grant in each steady window).
 // The last line is one JSON object with the same values (prefix RESULT).
 
@@ -132,6 +133,9 @@ final class SteadyWindow
     /** the lane grants below the wanted count */
     public int $limited = 0;
 
+    /** the acquire() calls whose grant sum was below min(total, wanted sum): a bucket cut them, not the batch size */
+    public int $bucketCut = 0;
+
     /** @var array<string, true> the lanes with a limited grant */
     public array $limitedLanes = [];
 
@@ -200,6 +204,14 @@ printf(
     $endpointMs,
     $seconds,
 );
+
+// The test server must have the short log of this tool; a container that started before a change of
+// server.mjs runs the old code.
+$probe = @file_get_contents("{$serverUrl}/_times?prefix=/none");
+if ($probe === false || !str_starts_with(trim($probe), '[')) {
+    fwrite(STDERR, "The test server at {$serverUrl} does not answer GET /_times. Restart it: docker compose restart webhook-server\n");
+    exit(1);
+}
 
 // Set-up: the tables, an empty state, and the backlog (due now, spread over the lanes).
 $db = $pdo();
@@ -450,7 +462,8 @@ $bucketLimitedCalls = 0;
 $durations = [];
 foreach ($acquires as [$end, $duration, $limited, $wantedSum, $grantSum, $total]) {
     $durations[] = $duration;
-    if ($grantSum < min($total, $wantedSum)) {
+    $cut = $grantSum < min($total, $wantedSum);
+    if ($cut) {
         ++$bucketLimitedCalls;
     }
     if ($end < $first + 10_000) {
@@ -458,6 +471,7 @@ foreach ($acquires as [$end, $duration, $limited, $wantedSum, $grantSum, $total]
     }
     $k = (int) floor(($end - $first - 10_000) / 10_000);
     if ($k < count($steady)) {
+        $steady[$k]->bucketCut += $cut ? 1 : 0;
         $steady[$k]->limited += count($limited);
         foreach ($limited as $lane) {
             $steady[$k]->limitedLanes[$lane] = true;
@@ -488,8 +502,9 @@ $minimum = 0.98 * 10 * $rps;
 $limitActive = $steady !== [];
 $lanesLimited = $steady !== [];
 foreach ($steady as $window) {
-    $limitActive = $limitActive && $window->limited > 0 && $window->requests >= $minimum;
-    $lanesLimited = $lanesLimited && count($window->limitedLanes) === $lanes;
+    // The batch size alone can give a lane a grant below its wanted count; a bucket-cut call shows that a bucket set the grants.
+    $limitActive = $limitActive && $window->limited > 0 && $window->bucketCut > 0 && $window->requests >= $minimum;
+    $lanesLimited = $lanesLimited && $window->bucketCut > 0 && count($window->limitedLanes) === $lanes;
 }
 
 printf("backlog: %d rows; remaining unfinished %d (retried %d); delivered %d; lanes opened by the breaker %d\n", $backlog, $remaining, $retried, $delivered, $opened);
@@ -503,12 +518,13 @@ printf(
 );
 foreach ($steady as $window) {
     printf(
-        "steady window %4.0f-%4.0f s: %6d requests (%7.1f /s), limited grants %6d, lanes with a limited grant %d/%d\n",
+        "steady window %4.0f-%4.0f s: %6d requests (%7.1f /s), limited grants %6d, bucket-cut calls %5d, lanes with a limited grant %d/%d\n",
         $window->fromS,
         $window->fromS + 10,
         $window->requests,
         $window->requests / 10,
         $window->limited,
+        $window->bucketCut,
         count($window->limitedLanes),
         $lanes,
     );
@@ -518,9 +534,9 @@ printf("D (grant to the first request of its pass): max %s, p99 %s, passes %d, u
 if ($lockSamples !== null) {
     printf("lock wait on webhook_rate_limit: %d of %d samples (%.2f%%)\n", $lockSamples['waiting'], $lockSamples['samples'], $lockSamples['samples'] > 0 ? $lockSamples['waiting'] / $lockSamples['samples'] * 100 : 0);
 }
-printf("limit active (each steady window: a limited grant and %.0f or more requests): %s\n", $minimum, $limitActive ? 'yes' : 'no');
+printf("limit active (each steady window: a limited grant, a bucket-cut call and %.0f or more requests): %s\n", $minimum, $limitActive ? 'yes' : 'no');
 if ($laneRate !== null) {
-    printf("lanes limited (each lane has a limited grant in each steady window): %s\n", $lanesLimited ? 'yes' : 'no');
+    printf("lanes limited (each steady window: a bucket-cut call, and a limited grant for each lane): %s\n", $lanesLimited ? 'yes' : 'no');
 }
 
 echo 'RESULT '.json_encode([
@@ -544,6 +560,7 @@ echo 'RESULT '.json_encode([
         'requests' => $w->requests,
         'rate' => $w->requests / 10,
         'limited' => $w->limited,
+        'bucket_cut' => $w->bucketCut,
         'limited_lanes' => count($w->limitedLanes),
     ], $steady),
     'acquires' => count($acquires),

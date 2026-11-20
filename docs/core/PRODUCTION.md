@@ -344,8 +344,20 @@ containers ran on the same machine.
 **Settings of each run.** 20 lanes, a row limit of 25 for each lane (the
 default), a batch size of 100, the connections for each host of the sender
 equal to the batch size, endpoints that answer 200 after 50 ms, 60 s for each
-worker, the default circuit breaker policy (no lane opened in any run), and
-the defaults of `DeliveryLoopConfig` for the other values.
+worker, the default circuit breaker policy (no lane opened in any run), a
+lane refresh interval (`laneRefreshMs`) of 1 hour, so no refresh in a run,
+and the defaults of `DeliveryLoopConfig` for the other values.
+
+**Validity.** The batch size alone gives a lane a grant below its wanted
+count (20 lanes × 25 wanted rows against a total of 100). So a limited grant
+does not prove that a bucket set the rate. A *bucket-cut call* does: an
+`acquire()` whose sum of grants is below min(batch size, sum of the wanted
+counts). The tool now requires a bucket-cut call in each steady window for
+both verdicts ("limit active" and "lanes limited"). The runs below were
+judged before this change, by the limited-grant rule and the bucket-cut count
+of the whole run. In each global and lane run, at most 2 calls were not cut,
+of 835 to 8,535 calls, and each steady window holds more than 200 calls. So
+each steady window of each valid run had bucket-cut calls.
 
 **The test server alone.** At 1,200 requests each second with a delay of
 50 ms for 30 s, the server logged 1,197 to 1,203 requests in each second
@@ -356,9 +368,9 @@ the defaults of `DeliveryLoopConfig` for the other values.
 
 RPS 1,000, burst 100, no lane limit. Three runs for each store and worker
 count. A run is valid only when the limit was active: each steady window has
-a limited grant and 9,800 requests or more. All 18 runs were valid. In each
-run, the global bucket cut nearly every `acquire()` (the sum of the grants was
-below min(batch size, wanted)), so the bucket and not the batch size set the
+a limited grant, a bucket-cut call and 9,800 requests or more. All 18 runs
+were valid. In each run, the global bucket cut all `acquire()` calls but 1 or
+2 (for example 834 of 835), so the bucket and not the batch size set the
 rate. Bound for all lanes: 10,201 requests in 10 s.
 
 | Store | Workers | Max in 10 s, all lanes (3 runs) | Max in 10 s, any lane | Delivered rate in the steady windows | Limited grants in a steady window | D max | Acquire p50 / p99 | Lock wait share |
@@ -379,9 +391,13 @@ requests can move at most about 35 requests into a window.
 
 8 workers, a lane rate of 40 with the default burst of 4 for each of the 20
 lanes, RPS 1,000 with a burst of 100, three runs for each store. A run is
-valid only when each lane had a limited grant in each steady window: all 6
-runs were valid (20 of 20 lanes in each steady window). Bound for one lane:
-408 requests in 10 s.
+valid only when each steady window has a bucket-cut call and a limited grant
+for each lane: all 6 runs were valid. The batch size alone gives each lane a
+limited grant, so "20 of 20 lanes" is not the proof. The proof is that the
+lane buckets cut every `acquire()` (7,525 to 8,535 calls of each run, all
+cut), and that the 20 lanes together deliver 800 requests each second
+(20 × 40), below the global 1,000. With no lane limit, one lane takes up to
+about 52 requests each second. Bound for one lane: 408 requests in 10 s.
 
 | Store | Max in 10 s, any lane (3 runs) | Max in 10 s, all lanes | Delivered rate in the steady windows | Limited grants in a steady window | D max | Acquire p50 / p99 | Lock wait share |
 |---|---|---|---|---|---|---|---|

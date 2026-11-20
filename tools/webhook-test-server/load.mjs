@@ -21,6 +21,13 @@ if (!base || !(rps > 0) || !(delay >= 0) || !(seconds > 0)) {
   process.exit(2);
 }
 
+// A server container that started before a change of server.mjs runs the old code, with no /_times.
+const probe = await fetch(`${base}/_times?prefix=/none`).then((r) => r.text()).catch(() => '');
+if (!probe.trim().startsWith('[')) {
+  console.error(`The test server at ${base} does not answer GET /_times. Restart it: docker compose restart webhook-server`);
+  process.exit(1);
+}
+
 const agent = new http.Agent({ keepAlive: true, maxSockets: 2000 });
 const prefix = `/load-${Date.now()}`;
 
