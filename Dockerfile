@@ -11,6 +11,7 @@ RUN apk add --no-cache git unzip && \
         pcntl \
         pcov \
         pdo_pgsql \
+        redis \
         sockets \
         zip
 

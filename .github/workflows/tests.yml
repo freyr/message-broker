@@ -87,13 +87,24 @@ jobs:
           --health-timeout=3s
           --health-retries=10
 
+      # Redis of the suite redis (the Redis rate limit store).
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
     steps:
       - uses: actions/checkout@v7
 
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: pdo_pgsql, sockets, mbstring, pcntl
+          extensions: pdo_pgsql, sockets, mbstring, pcntl, redis
           coverage: none
           tools: composer:v2
 
@@ -118,6 +129,7 @@ jobs:
           AMQP_PASSWORD: guest
           AMQP_VHOST: "/"
           WEBHOOK_SERVER_URL: "http://localhost:8080"
+          REDIS_HOST: 127.0.0.1
         run: vendor/bin/phpunit
 
   # Infection runs on the newest supported PHP only. The test suite is the same on each version,
@@ -154,6 +166,17 @@ jobs:
           --health-timeout=3s
           --health-retries=10
 
+      # Redis of the suite redis (the Redis rate limit store).
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
     env:
       POSTGRES_DSN: "pgsql:host=127.0.0.1;port=5432;dbname=message_broker_test"
       POSTGRES_USER: broker
@@ -164,6 +187,7 @@ jobs:
       AMQP_PASSWORD: guest
       AMQP_VHOST: "/"
       WEBHOOK_SERVER_URL: "http://localhost:8080"
+      REDIS_HOST: 127.0.0.1
 
     steps:
       - uses: actions/checkout@v7
@@ -173,7 +197,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
-          extensions: pdo_pgsql, sockets, mbstring, pcntl
+          extensions: pdo_pgsql, sockets, mbstring, pcntl, redis
           coverage: pcov
           ini-values: pcov.directory=src
           tools: composer:v2
@@ -238,13 +262,24 @@ jobs:
           --health-timeout=3s
           --health-retries=10
 
+      # Redis of the suite redis (the Redis rate limit store).
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
     steps:
       - uses: actions/checkout@v7
 
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.6'
-          extensions: pdo_pgsql, sockets, mbstring, pcntl
+          extensions: pdo_pgsql, sockets, mbstring, pcntl, redis
           coverage: none
           tools: composer:v2
 
@@ -269,18 +304,20 @@ jobs:
           AMQP_PASSWORD: guest
           AMQP_VHOST: "/"
           WEBHOOK_SERVER_URL: "http://localhost:8080"
+          REDIS_HOST: 127.0.0.1
         run: vendor/bin/phpunit
 
   # Each future package (see packages/ and "Package manifests and split rehearsal" in CLAUDE.md) is assembled in a
   # temporary folder, installed ALONE through Composer path repositories, and its tests run alone.
   # The core entry does not use the services or the webhook test server; all entries have them for a simple matrix.
+  # The redis entry needs only the Redis service.
   split-rehearsal:
     name: Split rehearsal (${{ matrix.package }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        package: [core, postgresql, amqp, http]
+        package: [core, postgresql, amqp, http, redis]
 
     services:
       postgres:
@@ -310,6 +347,17 @@ jobs:
           --health-timeout=3s
           --health-retries=10
 
+      # Redis of the suite redis (the Redis rate limit store).
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
     env:
       POSTGRES_DSN: "pgsql:host=127.0.0.1;port=5432;dbname=message_broker_test"
       POSTGRES_USER: broker
@@ -320,6 +368,7 @@ jobs:
       AMQP_PASSWORD: guest
       AMQP_VHOST: "/"
       WEBHOOK_SERVER_URL: "http://localhost:8080"
+      REDIS_HOST: 127.0.0.1
 
     steps:
       - uses: actions/checkout@v7
@@ -328,7 +377,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-          extensions: pdo_pgsql, sockets, mbstring, pcntl
+          extensions: pdo_pgsql, sockets, mbstring, pcntl, redis
           coverage: ${{ github.event_name == 'push' && 'pcov' || 'none' }}
           tools: composer:v2
 
@@ -454,10 +503,44 @@ jobs:
           tests/adapter/amqp/Functional/EndToEndTest.php
           tests/adapter/amqp/Functional/ParallelConsumptionTest.php
 
+  # The suite redis against Valkey 8 (the Redis rate limit store supports Redis 7.0 or later and Valkey 7.2 or later).
+  # The suite needs no PostgreSQL and no RabbitMQ. The other jobs run it against Redis 7.
+  valkey:
+    name: Valkey 8 (suite redis)
+    runs-on: ubuntu-latest
+
+    services:
+      valkey:
+        image: valkey/valkey:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="valkey-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, redis
+          coverage: none
+          tools: composer:v2
+
+      - run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
+
+      - name: Run the suite redis
+        env:
+          REDIS_HOST: 127.0.0.1
+        run: vendor/bin/phpunit --testsuite redis
+
   ci-gate:
     name: ci-gate
     if: always()
-    needs: [ecs, phpstan, deptrac, functional-tests, mutation, split-rehearsal, pgbouncer]
+    needs: [ecs, phpstan, deptrac, functional-tests, mutation, split-rehearsal, pgbouncer, valkey]
     runs-on: ubuntu-latest
     steps:
       - uses: freyr/.github/actions/ci-gate@b0c5431e29887b95f0031751c6d92506a2b2fc81 # v2.0.0

@@ -112,6 +112,9 @@ an in-memory implementation of each. The PostgreSQL adapter implements the
 three ports: `PostgreSqlRateLimiter`, and `PostgreSqlCircuitBreaker` (also
 `LaneStates`); see
 [../postgresql/WEBHOOKS.md](../postgresql/WEBHOOKS.md#flow-control-tables).
+The Redis adapter implements the rate limiter in Redis: `RedisRateLimiter`;
+see [../redis/RATE_LIMIT.md](../redis/RATE_LIMIT.md). A deployment uses one
+rate limit store for all its workers.
 
 A store error of either port propagates: the flow control never fails open.
 `Webhook\NoRateLimit` has no bucket, and `Webhook\NoCircuitBreaker` opens no

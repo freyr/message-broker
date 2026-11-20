@@ -1,0 +1,26 @@
+{
+    "$schema": "vendor/infection/infection/resources/schema.json",
+    "source": {
+        "directories": ["src"],
+        // The test set-up (src/Testing) is test code: it is not mutated.
+        // The name is relative to the source directory.
+        "excludes": ["Testing"]
+    },
+    // Parallel workers are isolated: each TEST_TOKEN gets its own key prefix.
+    "timeout": 20,
+    "logs": {
+        "text": "var/infection/infection.log",
+        "html": "var/infection/infection.html",
+        "summary": "var/infection/summary.log"
+    },
+    "tmpDir": "var/infection/tmp",
+    "mutators": {
+        "@default": true
+    },
+    "testFramework": "phpunit",
+    "testFrameworkOptions": "--no-progress",
+    // The first pull request measured 100% (86 mutants, all killed); few mutants, so the
+    // threshold keeps a margin. Raise it as tests improve; never lower it.
+    "minMsi": 97,
+    "minCoveredMsi": 97
+}
