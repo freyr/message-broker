@@ -18,12 +18,15 @@ services:
       AMQP_PASSWORD: guest
       AMQP_VHOST: "/"
       WEBHOOK_SERVER_URL: "http://webhook-server:8080"
+      REDIS_HOST: redis
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
       webhook-server:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   postgres:
@@ -96,6 +99,15 @@ services:
       - ./tools/webhook-test-server:/srv:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/_health"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  # Redis of the Redis adapter tests (suite redis). No host port and no volume: the tests need no state between runs.
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 2s
       timeout: 3s
       retries: 15

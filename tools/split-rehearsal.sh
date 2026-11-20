@@ -2,15 +2,15 @@
 #
 # Split rehearsal: proves that each future package installs ALONE and that its tests pass ALONE.
 #
-# Usage: tools/split-rehearsal.sh <core|postgresql|amqp|http> [--infection]
+# Usage: tools/split-rehearsal.sh <core|postgresql|amqp|http|redis> [--infection]
 #
 # The script runs inside the PHP environment (the `php` service of compose, or the CI runner).
 # It is POSIX sh (the PHP image is Alpine and has no bash). It needs PHP, Composer and the extensions of the packages. It does not call Docker or Git.
-# Functional tests need the PostgreSQL and RabbitMQ settings and the URL of the webhook test server (WEBHOOK_SERVER_URL)
-# in the environment (see compose.yaml).
+# Functional tests need the PostgreSQL and RabbitMQ settings, the URL of the webhook test server (WEBHOOK_SERVER_URL)
+# and the Redis host (REDIS_HOST) in the environment (see compose.yaml).
 #
 # Steps:
-#   1. Assemble the four future repos in a temporary folder: the files of packages/<name>/ at the
+#   1. Assemble the five future repos in a temporary folder: the files of packages/<name>/ at the
 #      root, the code folder as src/ and the tests folder as tests/. Files are copied, never linked.
 #   2. In the package under test, add Composer path repositories for the packages that it needs.
 #      Each path package gets the rehearsal version, so no package of this repo comes from Packagist.
@@ -24,7 +24,7 @@ REHEARSAL_VERSION="${REHEARSAL_VERSION:-0.14.0}"
 export COMPOSER_ROOT_VERSION="${REHEARSAL_VERSION}"
 
 usage() {
-    echo "Usage: tools/split-rehearsal.sh <core|postgresql|amqp|http> [--infection]" >&2
+    echo "Usage: tools/split-rehearsal.sh <core|postgresql|amqp|http|redis> [--infection]" >&2
     exit 2
 }
 
@@ -42,6 +42,7 @@ case "${PACKAGE}" in
     postgresql) NEEDS="core" ;;
     amqp) NEEDS="core postgresql" ;;
     http) NEEDS="core postgresql" ;;
+    redis) NEEDS="core" ;;
     *) usage ;;
 esac
 
@@ -79,8 +80,8 @@ finish() {
 }
 trap finish EXIT
 
-# Step 1: assemble the four future repos.
-for name in core postgresql amqp http; do
+# Step 1: assemble the five future repos.
+for name in core postgresql amqp http redis; do
     target="${WORK}/${name}"
     mkdir -p "${target}"
     cp "${REPO_ROOT}/packages/${name}/composer.json" \

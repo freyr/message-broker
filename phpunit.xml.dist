@@ -23,6 +23,9 @@
         <testsuite name="http">
             <directory>tests/adapter/http</directory>
         </testsuite>
+        <testsuite name="redis">
+            <directory>tests/adapter/redis</directory>
+        </testsuite>
     </testsuites>
 
     <source>
@@ -31,10 +34,12 @@
             <directory>src/adapter/postgresql</directory>
             <directory>src/adapter/amqp</directory>
             <directory>src/adapter/http</directory>
+            <directory>src/adapter/redis</directory>
         </include>
         <exclude>
             <directory>src/broker/Testing</directory>
             <directory>src/adapter/postgresql/Testing</directory>
+            <directory>src/adapter/redis/Testing</directory>
         </exclude>
     </source>
 

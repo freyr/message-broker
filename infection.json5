@@ -1,8 +1,8 @@
 {
     "$schema": "vendor/infection/infection/resources/schema.json",
     "source": {
-        "directories": ["src/broker", "src/adapter/postgresql", "src/adapter/amqp", "src/adapter/http"],
-        // The test kit (src/broker/Testing, src/adapter/postgresql/Testing) is test code: it is not mutated.
+        "directories": ["src/broker", "src/adapter/postgresql", "src/adapter/amqp", "src/adapter/http", "src/adapter/redis"],
+        // The test kit (src/broker/Testing, src/adapter/postgresql/Testing, src/adapter/redis/Testing) is test code: it is not mutated.
         // The names are relative to each source directory.
         "excludes": ["Testing"]
     },

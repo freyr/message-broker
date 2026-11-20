@@ -20,6 +20,10 @@ deptrac:
       collectors:
         - type: directory
           value: src/adapter/http/.*
+    - name: Redis
+      collectors:
+        - type: directory
+          value: src/adapter/redis/.*
     - name: Pdo
       collectors:
         - type: classNameRegex
@@ -33,6 +37,11 @@ deptrac:
       collectors:
         - type: classNameRegex
           value: '#^Symfony\\(Component\\HttpClient|Contracts\\HttpClient|Component\\HttpFoundation)\\.+#'
+    # The Redis clients that the Redis adapter accepts: phpredis (Redis, RedisCluster), Relay and Predis.
+    - name: RedisClient
+      collectors:
+        - type: classNameRegex
+          value: '#^(Redis|RedisCluster|RedisException|RedisClusterException|Relay\\.+|Predis\\.+)$#'
   ruleset:
     Core: []
     PostgreSql:
@@ -44,3 +53,6 @@ deptrac:
     Http:
       - Core
       - SymfonyHttpClient
+    Redis:
+      - Core
+      - RedisClient
