@@ -15,6 +15,6 @@ final class RedisScriptError extends RuntimeException
 {
     public static function fromReply(string $reply, ?Throwable $previous = null): self
     {
-        return new self('The Redis script failed: '.$reply, 0, $previous);
+        return new self('The Redis script failed: '.$reply, previous: $previous);
     }
 }
