@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Webhook;
 
 use Freyr\MessageBroker\Webhook\DeliveryLoopConfig;
+use Freyr\MessageBroker\Webhook\Rate;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -22,15 +23,20 @@ final class DeliveryLoopConfigTest extends TestCase
         self::assertNull($config->laneFilter);
         self::assertSame(200, $config->idleSleepMs);
         self::assertSame(50, $config->permitWaitMs);
-        self::assertNull($config->burstCapacity, 'no burst capacity: the loop does not check the batch size');
+        self::assertNull($config->globalRate, 'no global bucket');
+        self::assertNull($config->defaultLaneRate, 'no lane limit for a subscription with no rate');
     }
 
-    public function testAcceptsTheValueOneForThePermitWaitAndTheBurstCapacity(): void
+    public function testKeepsTheRatesAndAcceptsTheValueOneForThePermitWait(): void
     {
-        $config = new DeliveryLoopConfig(permitWaitMs: 1, burstCapacity: 1);
+        $global = new Rate(1_000.0, 100);
+        $lane = new Rate(40.0);
+
+        $config = new DeliveryLoopConfig(permitWaitMs: 1, globalRate: $global, defaultLaneRate: $lane);
 
         self::assertSame(1, $config->permitWaitMs);
-        self::assertSame(1, $config->burstCapacity);
+        self::assertSame($global, $config->globalRate);
+        self::assertSame($lane, $config->defaultLaneRate);
     }
 
     public function testAcceptsTheValueOneForEachNumber(): void
@@ -44,7 +50,7 @@ final class DeliveryLoopConfigTest extends TestCase
     /** @return iterable<string, array{string}> */
     public static function numbers(): iterable
     {
-        foreach (['leaseMs', 'batchSize', 'limitForEachLane', 'laneRefreshMs', 'idleSleepMs', 'permitWaitMs', 'burstCapacity'] as $name) {
+        foreach (['leaseMs', 'batchSize', 'limitForEachLane', 'laneRefreshMs', 'idleSleepMs', 'permitWaitMs'] as $name) {
             yield $name => [$name];
         }
     }

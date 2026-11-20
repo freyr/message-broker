@@ -55,7 +55,7 @@ interface DeliveryStore
      * The keys are lane IDs. PHP turns a numeric key into an integer, so an
      * implementation reads each key as a string.
      *
-     * @param array<array-key, int<0, max>> $limitForEachLane lane => the most rows of that lane, in priority order
+     * @param array<array-key, int> $limitForEachLane lane => the most rows of that lane (0 or more), in priority order
      *
      * @return list<ClaimedDelivery> each with the record (attempts as stored) and its lease value
      */
@@ -69,7 +69,7 @@ interface DeliveryStore
      * for no permit.
      *
      * @param list<string> $lanes
-     * @param int<1, max> $cap the most rows to count for each lane
+     * @param int $cap the most rows to count for each lane, 1 or more
      *
      * @return array<array-key, int> lane => due row count from 0 to $cap, for each given lane, in the order of
      *                               $lanes (PHP turns a numeric lane name into an int key; cast it back to string)
