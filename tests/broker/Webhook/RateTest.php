@@ -53,7 +53,7 @@ final class RateTest extends TestCase
     /** @return iterable<string, array{float, int|null, string}> */
     public static function invalidRates(): iterable
     {
-        yield 'a rate of 0' => [0.0, null, '$perSecond must be above 0 and finite, 0 given'];
+        yield 'a rate of 0' => [0.0, null, '$perSecond must be above 0 and finite, 0.0 given'];
         yield 'a negative rate' => [-0.1, 3, '$perSecond must be above 0 and finite, -0.1 given'];
         yield 'NAN' => [NAN, null, '$perSecond must be above 0 and finite, NAN given'];
         yield 'INF' => [INF, 3, '$perSecond must be above 0 and finite, INF given'];

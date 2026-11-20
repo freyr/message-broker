@@ -28,7 +28,8 @@ final readonly class Rate
         ?int $burst = null,
     ) {
         if (!($perSecond > 0) || is_infinite($perSecond)) {
-            throw new InvalidArgumentException("\$perSecond must be above 0 and finite, {$perSecond} given");
+            // var_export: PHP 8.5 warns when NAN is coerced to a string
+            throw new InvalidArgumentException('$perSecond must be above 0 and finite, '.var_export($perSecond, true).' given');
         }
         $burst ??= max(1, (int) floor($perSecond / 10));
         if ($burst < 1) {
