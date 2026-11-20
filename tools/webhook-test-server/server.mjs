@@ -17,7 +17,10 @@
 // case names) and the body.
 //   GET    /_requests?prefix=<path>  the records whose path starts with the prefix, as a JSON array in the
 //                                    order of arrival (no prefix: all records)
-//   DELETE /_requests                remove all records
+//   GET    /_times?prefix=<path>     the same records in a short form for the benchmark, as a JSON array of
+//                                    [time_ms, path, webhook-id header or null]
+//   DELETE /_requests?prefix=<path>  remove the records whose path starts with the prefix (no prefix: all
+//                                    records)
 //   GET    /_health                  200 when the server runs
 //
 // Each test uses its own path prefix, so parallel test workers can share one server.
@@ -35,16 +38,28 @@ function json(res, status, value) {
   res.end(body);
 }
 
+function selected(url) {
+  const prefix = url.searchParams.get('prefix');
+  return prefix === null ? records : records.filter((r) => r.path.startsWith(prefix));
+}
+
 function control(req, res, url) {
   if (url.pathname === '/_health') {
     return json(res, 200, { status: 'ok', requests: records.length });
   }
   if (url.pathname === '/_requests' && req.method === 'GET') {
-    const prefix = url.searchParams.get('prefix');
-    return json(res, 200, prefix === null ? records : records.filter((r) => r.path.startsWith(prefix)));
+    return json(res, 200, selected(url));
+  }
+  if (url.pathname === '/_times' && req.method === 'GET') {
+    return json(res, 200, selected(url).map((r) => [r.time_ms, r.path, r.headers['webhook-id'] ?? null]));
   }
   if (url.pathname === '/_requests' && req.method === 'DELETE') {
-    records.length = 0;
+    const prefix = url.searchParams.get('prefix');
+    let kept = 0;
+    for (const r of records) {
+      if (prefix !== null && !r.path.startsWith(prefix)) records[kept++] = r;
+    }
+    records.length = kept;
     return json(res, 200, { status: 'cleared' });
   }
   return json(res, 404, { error: 'unknown control path' });
