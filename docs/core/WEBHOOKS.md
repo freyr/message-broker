@@ -71,13 +71,9 @@ flowchart LR
   for the lane of a claimed row, the loop sends no request and uses no
   attempt. The row waits until the subscription returns or an operator
   abandons it.
-- **Flow control.** Before a claim, the loop removes the lanes that the
-  circuit breaker took out of circulation and takes permits from the global
-  rate limit. See [Flow control](#flow-control).
-- **Database error.** A database error (also of the rate limiter or the
-  circuit breaker), and an error of the sender's own code or configuration,
-  stops the worker (crash-only, as the relay). The claimed rows are due again
-  when their lease ends.
+- **Database error.** A database error, and an error of the sender's own code
+  or configuration, stops the worker (crash-only, as the relay). The claimed
+  rows are due again when their lease ends.
 
 ### Dead letters
 
@@ -106,87 +102,105 @@ webhook replays apart (see
 
 ## Flow control
 
-Two ports of the core control the flow of the loop: a global rate limit and a
-circuit breaker for each lane. Each pass of the loop runs these steps:
+The core has two ports that control the flow of webhook requests: a rate
+limiter with a global bucket and a bucket for each lane, and a circuit breaker
+for each lane. This release has the ports, their values and the test kit. The
+delivery loop does not call them yet, and no adapter implements them yet.
 
-1. Open lanes: the loop reads `CircuitBreaker::openLanes()` and removes those
-   lanes from the lane list. When no lane is left, the pass ends with no
-   permit and no claim.
-2. Permits: the loop calls `RateLimiter::acquire(batchSize)`. With a grant of
-   0, the loop records `webhook.permit_wait`, sleeps `permitWaitMs` and does
-   not claim. That pass has no idle sleep.
-3. Claim: at most the grant, and at most the row limit of each lane.
-4. Give back: when the claim returns fewer rows than the grant, the loop calls
-   `RateLimiter::giveBack()` with the difference.
-5. Send and results, as above.
-6. Record: the loop calls `CircuitBreaker::record()` one time, with the
-   requests and the failures of each lane of the batch, after the result
-   write. It records `webhook.lane_opened` for each lane that the call took
-   out of circulation and `webhook.lane_returned` for each lane that returned.
-
-The flow control never fails open: a database error of either port stops the
-worker. `Webhook\NoRateLimit` and `Webhook\NoCircuitBreaker` limit nothing;
-the loop uses them when your application gives no rate limiter and no circuit
-breaker. To turn a part off, configure its `No` class: there is no schema
-change.
+A store error of either port propagates: the flow control never fails open.
+`Webhook\NoRateLimit` has no bucket, and `Webhook\NoCircuitBreaker` opens no
+lane.
 
 ### Rate limit
 
-The rate limit is a token bucket that all workers of one deployment share.
-Each request needs one permit: a first attempt, a retry, and a request for a
-row that a different worker sent before a stop. The bucket refills at the
-configured rate (requests each second) and holds at most the burst capacity.
-The burst capacity has a default of one tenth of the rate, and a minimum of 1.
-The rate and the burst capacity are the configuration of the implementation of
-`RateLimiter`; each worker must get the same values.
+The rate limit has two levels of token buckets that all workers of one
+deployment share: one global bucket, and one bucket for each lane with a
+limit. A request needs a permit of both, also a retry. A bucket refills at its
+rate up to its burst capacity, and a new bucket starts full.
 
-- The batch size of the loop must not be larger than the burst capacity. Set
-  `burstCapacity` of `DeliveryLoopConfig` to the burst capacity of the rate
-  limiter, and the loop refuses to start with a larger batch size.
-- A worker that stops between the grant and the requests loses its permits.
-  The rate is then lower for a moment, never higher.
-- The limit is exact at the grant. A worker sends its requests some time after
-  the grant, so the requests at the receiver can be a little above the limit
-  in a short window.
+- **`Webhook\Rate`**: the requests each second (1 or more) and the burst
+  capacity (1 or more). The burst capacity has a default of one tenth of the
+  rate, with a minimum of 1: `new Rate(1_000)` has a burst capacity of 100.
+  There is no value for "no limit".
+- **`Webhook\RateLimits`**: the global `Rate`, and a map from a lane to its
+  `Rate`. A null global rate means no global bucket. A lane that is not in the
+  map has no lane limit.
+- **The rates are parameters of each call.** The store holds no rate and no
+  burst capacity, so each worker must give the same values.
+
+One `acquire(array $wanted, int $total, RateLimits $limits)` takes the
+permits of all lanes of one pass, as one atomic step:
+
+1. The store refills each bucket of the call from its stored time to the
+   present time, up to its burst capacity. A present time earlier than the
+   stored time gives a refill of 0.
+2. The availability of a lane is `min(wanted, floor(lane tokens))`, or the
+   wanted count for a lane with no limit. The global grant `G` is
+   `min($total, floor(global tokens))`, or `$total` with no global bucket.
+3. If the sum of the availabilities is `G` or less, each lane gets its
+   availability. Else each lane gets `min(availability, L)`, where the level
+   `L` is the largest whole number for which the sum of
+   `min(availability, L)` is `G` or less. The rest of `G` goes one permit at a
+   time to the lanes above `L`, in the order of the call. This is the max-min
+   division: a lane with a large backlog does not take the permits of the
+   small lanes.
+4. The store subtracts each grant from its lane bucket and the sum from the
+   global bucket, and returns the grants.
+
+For example, a global grant of 10 and the availabilities `[8, 2, 5]` give
+`[4, 2, 4]`; a global grant of 11 gives `[5, 2, 4]`.
+
+`giveBack(array $unused, RateLimits $limits)` puts each unused count into its
+lane bucket and their sum into the global bucket, each up to its burst
+capacity.
+
+`Webhook\PermitDivision` holds the rules that each store shares, as pure
+functions: `refill()` (step 1) and `divide()` (step 3). The availabilities,
+`G`, `L` and the grants are whole numbers; only the tokens of a bucket have
+decimals. Thus equal inputs give equal grants in all stores.
+
+The keys of each map are lane IDs. PHP turns a numeric key into an integer, so
+an implementation reads each key as a string.
 
 ### Circuit breaker
 
 The circuit breaker keeps one state for each lane, which all workers share. A
 lane leaves circulation for the open time when the error rate of its count
 window reaches the threshold. After the open time, the lane returns with a new
-window; there is no probe state.
+window; there is no probe state. A lane that still fails after a number of
+timed openings in a row is blocked until an operator closes it.
 
 - **What counts as a failure:** each result that is not delivered (also a
   refusal and a timeout), and a delivered result whose request time is above
-  the slow limit. The row of a slow delivered result stays delivered and uses
-  no retry. The loop makes the counts, so the circuit breaker does not know
-  this rule.
+  the slow limit (`CircuitBreakerPolicy::countsAsFailure()`). The caller of
+  `record()` makes the counts with the policy of the breaker
+  (`CircuitBreaker::policy()`), so the breaker does not know this rule.
 - **The trip rule:** the window has the minimum number of requests or more,
-  and failures divided by requests is the error rate or more. A trip sets
-  `open_until` to the present time plus the open time, and starts a new
-  window.
+  and failures divided by requests is the error rate or more. A trip starts a
+  new window and adds 1 to the opened count and to the openings in a row. It
+  sets `open_until` to the present time plus the open time.
 - **A new window** starts when the present window is older than the window
   length, and at the first `record()` after `open_until` (also when the open
-  time is shorter than the window length).
-- **An open lane:** while `open_until` is later than the present time, no
-  worker claims the rows of the lane, and `record()` ignores its counts (the
-  results of the batches in flight do not move `open_until`). Its deliveries
-  keep their `attempts` and their retry time. When the lane returns, they are
-  due at the same time, and the rate limit and the row limit for each lane
-  spread them. The retry limit still ends a delivery; a delivery has no time
-  limit.
-- **Requests in flight:** a batch that a worker claimed before the trip
-  completes its requests. With W workers, at most W batches reach the lane
-  after the trip.
-- **Events:** the worker whose `record()` call made the trip records
-  `webhook.lane_opened`. The worker whose `record()` call started the first
-  window after `open_until` records `webhook.lane_returned`. So each trip has
-  one event of each kind. An operator close (`LaneStates::close()`) gives no
-  `webhook.lane_returned`.
+  time is shorter than the window length). That `record()` reports the lane in
+  `returned`, one time for each trip.
+- **An open lane:** while `open_until` is later than the present time,
+  `openLanes()` gives the lane, and `record()` ignores its counts (the results
+  of the batches in flight do not move `open_until`).
+- **A recovery:** a window that ends with the minimum number of requests or
+  more and no trip. The first `record()` after the window length finds it and
+  sets the openings in a row to 0.
+- **The block:** a trip when the openings in a row already have the maximum
+  (default 3) blocks the lane in place of a timed opening: the fourth trip in
+  a row sets `blocked_at`, and `record()` reports the lane in `blocked`, not in
+  `left`. A blocked lane is out of circulation with no time limit, also after
+  its open time, and `record()` ignores its counts. Only
+  `LaneStates::close()` ends a block. A maximum of 0 turns the block off.
+- **A close** (`LaneStates::close()`) puts the lane back into circulation:
+  `open_until` and the block become `null`, a new window starts, and the
+  openings in a row become 0. The opened count stays. A close gives no
+  `returned`.
 
-`Webhook\CircuitBreakerPolicy` holds the values, for all lanes together. Give
-the same value to the circuit breaker and to the loop (`breakerPolicy`): the
-loop uses the slow limit.
+`Webhook\CircuitBreakerPolicy` holds the values, for all lanes together:
 
 | Value | Default | Purpose |
 |---|---|---|
@@ -195,33 +209,15 @@ loop uses the slow limit.
 | `errorRatePercent` | `70` | The error rate of a trip, failures divided by requests. 1 to 100. |
 | `openMs` | `600_000` (10 min) | The time that a lane is out of circulation after a trip. 1 or more. |
 | `slowLimitMs` | `5_000` (5 s) | A delivered result with a longer request time counts as a failure. `0` turns the slow rule off. |
+| `maxConsecutiveOpenings` | `3` | The timed openings in a row before a trip blocks the lane (`blocks()`). `0` turns the block off. |
 
 ### The flow control ports
 
 | Port | Methods | Notes |
 |---|---|---|
-| `Webhook\RateLimiter` | `acquire(int $wanted): int`, `giveBack(int $count): void` | `acquire()` grants 0 to `$wanted` permits. `giveBack()` puts unused permits back, up to the burst capacity. |
-| `Webhook\CircuitBreaker` | `openLanes(): list<string>`, `record(list<LaneCounts> $counts): LaneTransitions` | `record()` writes the counts of all lanes of a batch in one write, in the order of the lane ID, and returns the lanes that left circulation (`left`) and the lanes that returned (`returned`). `LaneCounts` has `lane`, `requests` (1 or more) and `failures` (0 to `requests`). |
-| `Webhook\LaneStates` | `all(): list<LaneState>`, `close(string $lane): bool` | For the operator. `all()` gives each lane with a result, in the order of the lane ID: `lane`, `windowStartedAt`, `requests`, `failures`, `openUntil` (epoch ms, or `null`), `openedCount`. `close()` sets `openUntil` to `null` and starts a new window; it returns `false` for a lane with no state. The implementation of `CircuitBreaker` implements it too; the loop does not use it. |
-
-```php
-use Freyr\MessageBroker\Webhook\CircuitBreakerPolicy;
-use Freyr\MessageBroker\Webhook\DeliveryLoop;
-use Freyr\MessageBroker\Webhook\DeliveryLoopConfig;
-
-$policy = new CircuitBreakerPolicy(); // the defaults
-
-$loop = new DeliveryLoop(
-    store: $deliveryStore,
-    sender: $sender,
-    subscriptions: $subscriptions,
-    config: new DeliveryLoopConfig(batchSize: 100, burstCapacity: 100),
-    events: $events,
-    rateLimiter: $rateLimiter,        // a RateLimiter with a rate of 1 000 and a burst capacity of 100
-    circuitBreaker: $circuitBreaker,  // a CircuitBreaker with the same $policy
-    breakerPolicy: $policy,
-);
-```
+| `Webhook\RateLimiter` | `acquire(array $wanted, int $total, RateLimits $limits): array`, `giveBack(array $unused, RateLimits $limits): void` | `acquire()` returns a grant for each lane of `$wanted`, from 0 to its wanted count, in the order of the call; `$total` and the global bucket cap the sum. See [Rate limit](#rate-limit). |
+| `Webhook\CircuitBreaker` | `openLanes(): list<string>`, `record(list<LaneCounts> $counts): LaneTransitions`, `policy(): CircuitBreakerPolicy` | `openLanes()` gives the open and the blocked lanes. `record()` writes the counts of all lanes of a batch in one write, in the order of the lane ID, and returns the lanes that left circulation (`left`), the lanes that returned (`returned`) and the lanes that it blocked (`blocked`). `LaneCounts` has `lane`, `requests` (1 or more) and `failures` (0 to `requests`). |
+| `Webhook\LaneStates` | `all(): list<LaneState>`, `close(string $lane): bool` | For the operator. `all()` gives each lane with a result, in the order of the lane ID: `lane`, `windowStartedAt`, `requests`, `failures`, `openUntil` (epoch ms, or `null`), `openedCount`, `consecutiveOpenings`, `blockedAt` (epoch ms, or `null`). `close()` returns `false` for a lane with no state. The implementation of `CircuitBreaker` implements it too. |
 
 ## The ports that your application implements
 
@@ -230,10 +226,8 @@ $loop = new DeliveryLoop(
 | `Webhook\SubscriptionProvider` | `forMessage(string $messageName): list<Subscription>`, `find(string $lane): ?Subscription`, `lanes(): list<string>` | Required. `forMessage()` runs inside your transaction, so it must be fast. `find()` gives `null` for a removed subscription. |
 | `Webhook\DeliveryRetryPolicy` | `decide(int $attempt, DeliveryResult $result, DeliveryRecord $delivery): DeliveryDecision` | Optional. The default is `DefaultDeliveryRetryPolicy`. |
 
-The adapters implement `Webhook\DeliveryStore`, `Webhook\DeliverySender`,
-`Webhook\DeliveryRetention`, and the flow control ports `Webhook\RateLimiter`,
-`Webhook\CircuitBreaker` and `Webhook\LaneStates`. [PORTS.md](PORTS.md) lists
-all ports.
+The adapters implement `Webhook\DeliveryStore`, `Webhook\DeliverySender` and
+`Webhook\DeliveryRetention`. [PORTS.md](PORTS.md) lists all ports.
 
 ### The default retry policy
 
@@ -250,8 +244,7 @@ $maxReceiverDelayMs = 86_400_000)`:
 ## Configuration
 
 `Webhook\DeliveryLoopConfig` holds the values of the loop. Each number must be
-1 or more; a lane filter must name one or more lanes. The values of the flow
-control are in [Flow control](#flow-control).
+1 or more; a lane filter must name one or more lanes.
 
 | Value | Default | Purpose |
 |---|---|---|
@@ -261,8 +254,6 @@ control are in [Flow control](#flow-control).
 | `laneRefreshMs` | `30_000` (30 s) | The interval of the read of `SubscriptionProvider::lanes()`. A new subscription waits up to this time. |
 | `laneFilter` | `null` | Claim only these lanes; `null` claims all lanes. |
 | `idleSleepMs` | `200` | The sleep after a pass that delivered nothing, plus up to a quarter of it as jitter. |
-| `permitWaitMs` | `50` | The sleep after a grant of 0 permits of the rate limiter. |
-| `burstCapacity` | `null` | The burst capacity of the rate limiter. When it is set, the loop refuses to start with a larger batch size; `null` (for example with `NoRateLimit`) gives no such check. |
 
 ```php
 use Freyr\MessageBroker\Webhook\DeliveryLoop;
@@ -282,12 +273,9 @@ $loop->run(new WorkerLimits(maxMessages: 10_000));
 
 ### Start check
 
-`run()` refuses to start, with an `InvalidArgumentException`, when:
-
-- The lease is not longer than `maxSendMs()` of the sender. A shorter lease
-  lets a second worker claim a row while the first one still sends it.
-- `burstCapacity` is set and the batch size is larger than it. A grant is at
-  most the burst capacity, so a larger batch size never fills a claim.
+`run()` refuses to start, with an `InvalidArgumentException`, when the lease
+is not longer than `maxSendMs()` of the sender. A shorter lease lets a second
+worker claim a row while the first one still sends it.
 
 ### Worker limits
 
@@ -359,17 +347,6 @@ store changed. A row that the lease check skipped gives no event.
 
 An abandoned row gives no `WEBHOOK_DEAD_LETTERED`. Use the `reason_code` `gone`
 to disable a subscription in your application.
-
-The flow control records these events (see [Flow control](#flow-control)):
-
-| Constant | Name | Context |
-|---|---|---|
-| `WEBHOOK_LANE_OPENED` | `webhook.lane_opened` | `lane`: the circuit breaker took the lane out of circulation. One event for each trip. |
-| `WEBHOOK_LANE_RETURNED` | `webhook.lane_returned` | `lane`: the lane is back in circulation after its open time. One event for each trip. |
-| `WEBHOOK_PERMIT_WAIT` | `webhook.permit_wait` | `wanted` (the batch size), `sleep_ms`: the rate limiter granted 0 permits. |
-
-Alert on a lane with many `webhook.lane_opened` events, and on a constant
-`webhook.permit_wait`.
 
 ## Security
 

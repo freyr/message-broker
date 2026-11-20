@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Webhook;
 
-/** A {@see CircuitBreaker} that opens no lane and keeps no count. The default of {@see DeliveryLoop}. */
+/** A {@see CircuitBreaker} that opens no lane and keeps no count. Its policy is the default policy. */
 final class NoCircuitBreaker implements CircuitBreaker
 {
     public function openLanes(): array

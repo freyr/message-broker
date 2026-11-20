@@ -29,9 +29,9 @@ ports and extends the contract test cases of the test kit (see
 | `Webhook\DeliverySender` | Send a batch of deliveries, each with its subscription, and return one result for each (`send()`). State the longest time of one call (`maxSendMs()`). | `FakeDeliverySender` (test kit) |
 | `Webhook\DeliveryRetryPolicy` | Decide between a retry at a time and a dead letter after a failed or refused result. | `DefaultDeliveryRetryPolicy` (core); your own policy |
 | `Webhook\DeliveryRetention` | Create the upcoming partitions of `webhook_deliveries` and drop the expired ones that hold no unfinished row. | `PostgreSqlDeliveryRetention` (PostgreSQL adapter) |
-| `Webhook\RateLimiter` | The global rate limit of the webhook requests, a token bucket for all workers: grant up to a wanted number of permits (`acquire()`), and take unused permits back up to the burst capacity (`giveBack()`). See [WEBHOOKS.md](WEBHOOKS.md#flow-control). | `NoRateLimit` (core, limits nothing); `InMemoryRateLimiter` (test kit) |
-| `Webhook\CircuitBreaker` | Give the lanes that are out of circulation (`openLanes()`), and add the counts of one batch to the windows of their lanes in one write, in the order of the lane ID (`record()`, returns the lanes that left circulation and the lanes that returned). | `NoCircuitBreaker` (core, opens no lane); `InMemoryCircuitBreaker` (test kit) |
-| `Webhook\LaneStates` | Give the circuit breaker state of each lane for the operator (`all()`), and put one lane back into circulation (`close()`). The implementation of `CircuitBreaker` implements it too. | `InMemoryCircuitBreaker` (test kit) |
+| `Webhook\RateLimiter` | The rate limit of the webhook requests, with a global token bucket and a bucket for each lane with a limit, for all workers: grant the permits of the lanes of one pass, divided max-min (`acquire()`), and take unused permits back up to the burst capacity (`giveBack()`). The rates are parameters of each call. See [WEBHOOKS.md](WEBHOOKS.md#rate-limit). | `NoRateLimit` (core, no bucket); `InMemoryRateLimiter` (test kit) |
+| `Webhook\CircuitBreaker` | Give the lanes that are out of circulation, open or blocked (`openLanes()`), add the counts of one batch to the windows of their lanes in one write, in the order of the lane ID (`record()`, returns the lanes that left circulation, returned, or were blocked), and give the policy of the breaker (`policy()`). See [WEBHOOKS.md](WEBHOOKS.md#circuit-breaker). | `NoCircuitBreaker` (core, opens no lane); `InMemoryCircuitBreaker` (test kit) |
+| `Webhook\LaneStates` | Give the circuit breaker state of each lane for the operator (`all()`), and put one lane back into circulation, also a blocked lane (`close()`). The implementation of `CircuitBreaker` implements it too. | `InMemoryCircuitBreaker` (test kit) |
 
 `DeliveryControl` has no reject: the processor never rejects or nacks a
 delivery as a result of a handler failure. A dead letter goes through the sink,
@@ -157,23 +157,37 @@ abandoned_at IS NULL`).
 
 ### The methods of the flow control ports
 
-- `RateLimiter::acquire(int $wanted): int` returns 0 to `$wanted` whole
-  permits. `giveBack(int $count): void` puts `$count` permits back; the bucket
-  never holds more than the burst capacity. The rate and the burst capacity
-  are the configuration of the implementation. An implementation reads the
-  present time from its own source (for a database: the database time).
+- `RateLimiter::acquire(array $wanted, int $total, RateLimits $limits):
+  array` returns a whole grant for each lane of `$wanted`, from 0 to its
+  wanted count, in the order of the call. It refills each bucket of the call,
+  divides the global grant with `PermitDivision::divide()`, and subtracts the
+  grants, as one atomic step. `$total` and the global bucket cap the sum; a
+  null global `Rate` in `RateLimits` means no global bucket. `giveBack(array
+  $unused, RateLimits $limits): void` puts each count into its lane bucket and
+  their sum into the global bucket; a bucket never holds more than its burst
+  capacity. The store holds no rate. An implementation reads the present time
+  from its own source (for a database: the database time) and reads each key
+  as a string, because PHP turns a numeric lane ID into an `int` key.
 - `CircuitBreaker::openLanes(): list<string>` gives each lane whose
-  `open_until` is later than the present time. `record(list<LaneCounts>
-  $counts): LaneTransitions` takes each lane at most one time. For each lane:
-  the counts of an open lane are ignored; a window older than the window
-  length, and the first window after `open_until`, start again from 0; the
-  trip rule of `CircuitBreakerPolicy::trips()` sets `open_until` to now plus
-  the open time, starts a new window and adds 1 to the opened count.
+  `open_until` is later than the present time, and each blocked lane.
+  `record(list<LaneCounts> $counts): LaneTransitions` takes each lane at most
+  one time. For each lane: the counts of an open or a blocked lane are
+  ignored; a window older than the window length, and the first window after
+  `open_until`, start again from 0 (the first one reports the lane in
+  `returned`); an older window with the minimum number of requests or more is
+  a recovery and sets the openings in a row to 0; the trip rule of
+  `CircuitBreakerPolicy::trips()` starts a new window, adds 1 to the opened
+  count and to the openings in a row, and sets `open_until` to now plus the
+  open time, or blocks the lane when `CircuitBreakerPolicy::blocks()` is true
+  for the openings in a row before the trip. `policy(): CircuitBreakerPolicy`
+  gives the policy of the breaker.
 - `LaneStates::all(): list<LaneState>` gives each lane with a result, in the
-  order of the lane ID. `close(string $lane): bool` sets `openUntil` to `null`
-  and starts a new window at the present time; the opened count stays. It
-  returns `false` for a lane with no state.
-- A database error of any of these ports propagates: the delivery loop stops.
+  order of the lane ID. `close(string $lane): bool` sets `openUntil` and
+  `blockedAt` to `null`, starts a new window at the present time and sets the
+  openings in a row to 0; the opened count stays. It is the only way to end a
+  block. It returns `false` for a lane with no state.
+- A store error of any of these ports propagates: the flow control never fails
+  open.
 
 `DeliveryRetention` has the methods of `OutboxRetention` without
 `dropUnpublished`: `ensureCapacity(int $daysAhead)` and `purge(int
