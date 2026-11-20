@@ -12,15 +12,16 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * Creates the webhook_deliveries table and its daily storage units from today
- * to today + --premake-days days. It takes the schema installer of the
+ * Creates the webhook tables: webhook_deliveries with its daily storage units
+ * from today to today + --premake-days days, and the flow control tables of
+ * the rate limit and the circuit breaker. It takes the schema installer of the
  * webhook queue (the PostgreSQL adapter has one apart from the installer of
  * message-broker:setup:schema), so an application that does not use webhooks
  * runs no DDL for it. Safe to repeat.
  */
 #[AsCommand(
     name: 'message-broker:webhook:setup',
-    description: 'Create the webhook_deliveries table with its first daily partitions',
+    description: 'Create the webhook tables, with the first daily partitions of webhook_deliveries',
 )]
 final class WebhookSetupCommand extends Command
 {
@@ -46,7 +47,7 @@ final class WebhookSetupCommand extends Command
 
         $premakeDays = (int) $premakeOption;
         $this->installer->install($premakeDays);
-        $output->writeln("<info>The webhook_deliveries table and its partitions for today + {$premakeDays} days are present.</info>");
+        $output->writeln("<info>The webhook tables and the partitions of webhook_deliveries for today + {$premakeDays} days are present.</info>");
 
         return Command::SUCCESS;
     }

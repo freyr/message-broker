@@ -53,5 +53,5 @@ $deadLetters = new PostgreSqlDeadLetterStore($pdo);
 - [Storage](../../docs/postgresql/STORAGE.md): tables, schema setup, classes
 - [Retention](../../docs/postgresql/RETENTION.md): partitions, `outbox:maintain`, pg_partman
 - [Connection pooling](../../docs/postgresql/CONNECTION_POOLING.md)
-- [Webhook delivery storage](../../docs/postgresql/WEBHOOKS.md): `webhook_deliveries`, the delivery store, retention, pg_partman
+- [Webhook delivery storage](../../docs/postgresql/WEBHOOKS.md): `webhook_deliveries`, the delivery store, retention, pg_partman, and the flow control tables with `PostgreSqlRateLimiter` and `PostgreSqlCircuitBreaker`
 - [Ports of the core](../../docs/core/PORTS.md)

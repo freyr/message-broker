@@ -2,7 +2,8 @@
 
 This document describes the PostgreSQL part of the webhook queue: the table
 `webhook_deliveries`, its index, the delivery store, the retention, the
-pg_partman configuration and the alert query. The model of the queue, the
+pg_partman configuration, the alert query, and the flow control tables with
+the rate limiter and the circuit breaker. The model of the queue, the
 ports and the delivery loop are in [../core/WEBHOOKS.md](../core/WEBHOOKS.md).
 The other tables are in [STORAGE.md](STORAGE.md). The outbox retention, which
 has the same rules, is in [RETENTION.md](RETENTION.md).
@@ -12,6 +13,8 @@ has the same rules, is in [RETENTION.md](RETENTION.md).
 | `PostgreSqlDeliveryStore` | `Webhook\DeliveryStore` | `PDO $pdo` |
 | `PostgreSqlDeliverySchemaInstaller` | `Storage\SchemaInstaller` | `PDO $pdo` |
 | `PostgreSqlDeliveryRetention` | `Webhook\DeliveryRetention` | `PDO $pdo` |
+| `PostgreSqlRateLimiter` | `Webhook\RateLimiter` | `PDO $pdo` |
+| `PostgreSqlCircuitBreaker` | `Webhook\CircuitBreaker`, `Webhook\LaneStates` | `PDO $pdo, CircuitBreakerPolicy $policy = new CircuitBreakerPolicy()` |
 
 ## The table
 
@@ -50,8 +53,10 @@ small. The alert query reads it too.
 ## Schema setup
 
 `PostgreSqlDeliverySchemaInstaller` creates the table, the index and the daily
-partitions. It is apart from `PostgreSqlSchemaInstaller`, so an application
-that does not use webhooks runs no DDL for it. `install(int $daysAhead)`
+partitions, and the flow control tables `webhook_rate_limit` and
+`webhook_lanes` ([Flow control tables](#flow-control-tables)). It is apart
+from `PostgreSqlSchemaInstaller`, so an application that does not use webhooks
+runs no DDL for it. `install(int $daysAhead)`
 creates what is missing, with the partitions from today to today plus
 `$daysAhead`, and is safe to repeat. `sql(int $daysAhead)` returns the DDL of
 a new database; its partition DDL is not idempotent (`ATTACH`). The dead
@@ -223,3 +228,124 @@ The query reads the partial index, which holds only the unfinished rows. A
 lane with no due row has no result row: its age is 0. Alert when
 `oldest_due_seconds` of a lane passes a limit that you choose from the retry
 delays and the load, and on a report of `purge()` with a kept partition.
+
+## Flow control tables
+
+The rate limiter and the circuit breaker of the core
+([../core/WEBHOOKS.md](../core/WEBHOOKS.md#flow-control)) keep their state in
+two small tables, with no partitions and no retention.
+`message-broker:webhook:setup` creates them. Construct each store with the
+dedicated connection of the delivery worker, which is in no transaction of the
+application. A database error of a store stops the worker: the flow control
+never fails open.
+
+### `webhook_rate_limit`
+
+One row for each token bucket: the global bucket and each lane with a limit.
+
+| Column | Type | Purpose |
+|---|---|---|
+| `name` | `VARCHAR(64)`, the key | `''` is the global bucket; else the lane ID. A lane ID has 1 to 64 characters, so `''` cannot be a lane. |
+| `tokens` | `DOUBLE PRECISION` | The permits in the bucket at `refilled_at`. |
+| `refilled_at` | `TIMESTAMPTZ` | The time of the last refill calculation, in whole milliseconds. |
+
+The table has `fillfactor` 50 and no index besides the key, so each update can
+be a HOT update. The rows hold no rate and no burst capacity: each call gives
+them. A lane with no limit has no row. The row of a removed lane, or of a lane
+that lost its limit, stays and has no effect.
+
+`PostgreSqlRateLimiter` does one call in these steps:
+
+1. The buckets of the call are `''` (only when the global rate is not `null`)
+   and the lanes of the call with a limit. A call with no bucket divides the
+   total and does not touch the database.
+2. In autocommit, one `INSERT ... ON CONFLICT (name) DO NOTHING` adds the rows
+   that do not exist, sorted by `name COLLATE "C"`, each with the burst
+   capacity of its rate (a new bucket starts full). It commits before any lock
+   of the call. The store skips it for the names that it already saw in the
+   process; that cache is a hint only.
+3. One transaction locks the rows: `SELECT ... ORDER BY name COLLATE "C" FOR
+   UPDATE`. When a row is missing (a different connection deleted it), the
+   store rolls back, inserts the rows again and repeats the lock one time; a
+   second miss throws.
+4. PHP computes the refill and the division (`PermitDivision`) with the
+   database time (`clock_timestamp()`). A database time earlier than
+   `refilled_at` gives a refill of 0 and keeps `refilled_at`.
+5. One `UPDATE ... FROM jsonb_to_recordset(...)` writes all rows, and the
+   transaction commits. `giveBack()` uses the same steps.
+
+**The lock order.** All calls lock their rows in the order of the name
+(`COLLATE "C"`, the byte order). `''` sorts first, so the global row is
+always the first lock: the calls of all workers take the global row one after
+the other, and two calls never wait for each other in a circle. With a `null`
+global rate, the store does not insert, lock or update `''`, and the lane rows
+keep the same order. The insert of new rows commits before the lock, so two
+workers that insert the same new rows wait for each other in one order only.
+A functional test runs two sessions with opposite lane orders 1,000 times,
+with rows that exist and with new rows, and gets no deadlock.
+
+### `webhook_lanes`
+
+One row for each lane that had a result. The times are `TIMESTAMP(3)` in UTC,
+as in `webhook_deliveries`.
+
+| Column | Purpose |
+|---|---|
+| `lane` | The lane ID; the key. |
+| `window_started_at` | The start of the present count window. |
+| `requests` | The requests with a result in the window. |
+| `failures` | The results in the window that count as a failure. |
+| `open_until` | The end of the last timed opening. `NULL` when the lane never left circulation, or after a close. |
+| `opened_count` | The times that the lane left circulation, also by a block, for the operator. |
+| `consecutive_openings` | The openings in a row with no recovery between them. |
+| `blocked_at` | The time of the block. `NULL` when the lane is not blocked. |
+
+`PostgreSqlCircuitBreaker` uses the database time: `now()` in UTC, cast to
+`TIMESTAMP(3)`.
+
+- `openLanes()` is one read: `blocked_at IS NOT NULL OR open_until > now`.
+- `record()` is one statement in autocommit. It locks the rows of its lanes
+  with `SELECT ... ORDER BY lane COLLATE "C" FOR UPDATE` (the order of the
+  in-memory fake), computes the window, count, trip, block, ignore and
+  recovery rules from the locked state, writes the rows, and returns the
+  lanes that left circulation, returned and were blocked. Under the lock, the
+  statement reads the latest state of each row, so each trip gives one
+  "left" (or "blocked") and one "returned" in all workers together.
+- A lane with no row gets one before the statement: one `INSERT ... ON
+  CONFLICT (lane) DO NOTHING` in autocommit, sorted by `lane COLLATE "C"`,
+  with a new window. The store skips it for the lanes that it already saw.
+  When a row is missing at the lock, the statement writes nothing; the store
+  inserts the rows again and repeats the statement one time, and a second
+  miss throws.
+- `close()` and `all()` are one statement each.
+
+A functional test runs two sessions that call `record()` with the same lanes
+in opposite orders 1,000 times, with rows that exist and with new rows, and
+gets no deadlock.
+
+The row of a removed subscription stays; it has no effect, because the lane is
+not in the lane list. An alert on a blocked lane:
+
+```sql
+SELECT lane, blocked_at, opened_count FROM webhook_lanes WHERE blocked_at IS NOT NULL;
+```
+
+`message-broker:webhook:lanes` shows the same state, and `--close=<lane>` ends
+an opening or a block ([../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md#message-brokerwebhooklanes)).
+
+### pgbouncer
+
+Both stores use only row locks of one transaction (the rate limiter) or of one
+statement (the circuit breaker), and the database time. Each statement takes
+the names or the lanes as one `jsonb` parameter, so its text is the same for
+each number of lanes, and pdo_pgsql and the pooler keep one prepared statement
+for each text. Thus both work behind pgbouncer in transaction mode, with
+`max_prepared_statements` above 0. The CI job `pgbouncer` runs their contract
+tests ([CONNECTION_POOLING.md](CONNECTION_POOLING.md)).
+
+### Rollback
+
+Configure `NoRateLimit` and `NoCircuitBreaker`. The tables stay; drop
+`webhook_rate_limit` and `webhook_lanes` by hand when you do not need them.
+A move to a different rate limit store needs no data move: the new store
+starts its buckets full.

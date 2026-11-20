@@ -42,24 +42,53 @@ final class PostgreSqlDeliverySchemaInstallerTest extends TestCase
         );
     }
 
-    public function testSqlListsTheTableAndTheIndexBeforeTheDailyPartitionsOfTodayAndTheDaysAhead(): void
+    public function testTheRateLimitTableHasOneRowForEachBucketAndRoomForHotUpdates(): void
+    {
+        self::assertSame(
+            'CREATE TABLE IF NOT EXISTS webhook_rate_limit ('
+            .' name VARCHAR(64) NOT NULL PRIMARY KEY,'
+            .' tokens DOUBLE PRECISION NOT NULL,'
+            .' refilled_at TIMESTAMPTZ NOT NULL'
+            .' ) WITH (fillfactor = 50)',
+            self::normalized($this->installer()->sql(0)[2]),
+        );
+    }
+
+    public function testTheLanesTableHasTheCircuitBreakerStateOfEachLane(): void
+    {
+        self::assertSame(
+            'CREATE TABLE IF NOT EXISTS webhook_lanes ('
+            .' lane VARCHAR(64) NOT NULL PRIMARY KEY,'
+            .' window_started_at TIMESTAMP(3) NOT NULL,'
+            .' requests INTEGER NOT NULL DEFAULT 0,'
+            .' failures INTEGER NOT NULL DEFAULT 0,'
+            .' open_until TIMESTAMP(3) NULL,'
+            .' opened_count INTEGER NOT NULL DEFAULT 0,'
+            .' consecutive_openings INTEGER NOT NULL DEFAULT 0,'
+            .' blocked_at TIMESTAMP(3) NULL'
+            .' )',
+            self::normalized($this->installer()->sql(0)[3]),
+        );
+    }
+
+    public function testSqlListsTheTablesAndTheIndexBeforeTheDailyPartitionsOfTodayAndTheDaysAhead(): void
     {
         $statements = $this->installer()->sql(2);
 
-        self::assertCount(2 + 3 * 2, $statements, 'the table and the index, then CREATE and ATTACH for each of 3 days');
+        self::assertCount(4 + 3 * 2, $statements, 'the three tables and the index, then CREATE and ATTACH for each of 3 days');
         $today = new DateTimeImmutable('today', new DateTimeZone('UTC'));
         foreach ([0, 1, 2] as $offset) {
             $day = $today->modify("+{$offset} day");
             $name = 'webhook_deliveries_p'.$day->format('Ymd');
-            self::assertStringStartsWith(sprintf('CREATE TABLE IF NOT EXISTS "%s"', $name), $statements[2 + 2 * $offset]);
-            self::assertStringStartsWith(sprintf('ALTER TABLE webhook_deliveries ATTACH PARTITION "%s"', $name), $statements[3 + 2 * $offset]);
+            self::assertStringStartsWith(sprintf('CREATE TABLE IF NOT EXISTS "%s"', $name), $statements[4 + 2 * $offset]);
+            self::assertStringStartsWith(sprintf('ALTER TABLE webhook_deliveries ATTACH PARTITION "%s"', $name), $statements[5 + 2 * $offset]);
         }
         self::assertStringNotContainsString('PARTITION OF', implode("\n", $statements), 'no DEFAULT partition: retention detaches concurrently');
     }
 
-    public function testSqlWithNoDaysAheadHoldsTheTableAndTodaysPartitionOnly(): void
+    public function testSqlWithNoDaysAheadHoldsTheTablesAndTodaysPartitionOnly(): void
     {
-        self::assertCount(2 + 2, $this->installer()->sql(0));
+        self::assertCount(4 + 2, $this->installer()->sql(0));
     }
 
     public function testSqlRejectsNegativeDaysAhead(): void

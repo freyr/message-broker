@@ -58,6 +58,8 @@ trait PostgreSqlTestSupport
         self::$pdo->exec('DROP TABLE IF EXISTS message_deduplication');
         self::$pdo->exec('DROP TABLE IF EXISTS outbox_messages');
         self::$pdo->exec('DROP TABLE IF EXISTS webhook_deliveries');
+        self::$pdo->exec('DROP TABLE IF EXISTS webhook_rate_limit');
+        self::$pdo->exec('DROP TABLE IF EXISTS webhook_lanes');
         $leftovers = self::$pdo->query("SELECT relname FROM pg_class WHERE relkind = 'r' AND relname ~ '^(outbox_messages|webhook_deliveries)_p[0-9]{8}$'");
         self::assertNotFalse($leftovers);
         foreach ($leftovers->fetchAll(PDO::FETCH_COLUMN) as $name) {
@@ -76,6 +78,8 @@ trait PostgreSqlTestSupport
         self::$pdo->exec('DELETE FROM outbox_messages');
         self::$pdo->exec('DELETE FROM message_deduplication');
         self::$pdo->exec('DELETE FROM dead_letters');
+        self::$pdo->exec('DELETE FROM webhook_rate_limit');
+        self::$pdo->exec('DELETE FROM webhook_lanes');
     }
 
     /**

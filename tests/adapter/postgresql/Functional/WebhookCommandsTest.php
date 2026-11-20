@@ -6,17 +6,21 @@ namespace Freyr\MessageBroker\Adapter\PostgreSql\Tests\Functional;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlCircuitBreaker;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryRetention;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliverySchemaInstaller;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryStore;
 use Freyr\MessageBroker\Console\WebhookAbandonCommand;
+use Freyr\MessageBroker\Console\WebhookLanesCommand;
 use Freyr\MessageBroker\Console\WebhookMaintainCommand;
 use Freyr\MessageBroker\Console\WebhookSetupCommand;
+use Freyr\MessageBroker\Webhook\CircuitBreakerPolicy;
+use Freyr\MessageBroker\Webhook\LaneCounts;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\Uid\Uuid;
 
-/** message-broker:webhook:setup, message-broker:webhook:maintain and message-broker:webhook:abandon on the PostgreSQL adapter. */
+/** message-broker:webhook:setup, maintain, abandon and lanes on the PostgreSQL adapter. */
 final class WebhookCommandsTest extends FunctionalTestCase
 {
     public function testSetupCreatesTheTableAndThePartitionsAhead(): void
@@ -33,6 +37,29 @@ final class WebhookCommandsTest extends FunctionalTestCase
         self::assertSame(1, self::fetchInt("SELECT COUNT(*) FROM pg_class WHERE relname = 'webhook_deliveries' AND relkind = 'p'"));
         self::assertContains("webhook_deliveries_p{$twoDaysAhead}", self::partitionNames());
         self::assertSame(1, self::fetchInt("SELECT COUNT(*) FROM pg_class WHERE relname = 'idx_webhook_deliveries_due'"));
+    }
+
+    public function testLanesListsEachLaneAndCloseReturnsAnOpenAndABlockedLane(): void
+    {
+        $breaker = new PostgreSqlCircuitBreaker(self::$pdo, new CircuitBreakerPolicy(minimumRequests: 1, openMs: 600_000, maxConsecutiveOpenings: 1));
+        $breaker->record([new LaneCounts('crm', 1, 1), new LaneCounts('erp', 1, 1)]);
+        self::$pdo->exec("UPDATE webhook_lanes SET open_until = window_started_at WHERE lane = 'erp'");
+        $breaker->record([new LaneCounts('erp', 1, 1)]);
+        $tester = new CommandTester(new WebhookLanesCommand($breaker));
+
+        self::assertSame(Command::SUCCESS, $tester->execute([]));
+        self::assertMatchesRegularExpression('/\\| crm +\\| open +\\|.*\\| 1 +\\| 1 +\\|\\n/', $tester->getDisplay());
+        self::assertMatchesRegularExpression('/\\| erp +\\| blocked +\\|.*\\| 2 +\\| 2 +\\|\\n/', $tester->getDisplay());
+        self::assertSame(['crm', 'erp'], $breaker->openLanes());
+
+        self::assertSame(Command::SUCCESS, (new CommandTester(new WebhookLanesCommand($breaker)))->execute([
+            '--close' => 'crm',
+        ]));
+        self::assertSame(Command::SUCCESS, (new CommandTester(new WebhookLanesCommand($breaker)))->execute([
+            '--close' => 'erp',
+        ]));
+
+        self::assertSame([], $breaker->openLanes(), 'the next claim of a worker includes both lanes');
     }
 
     public function testSetupIsSafeToRepeat(): void

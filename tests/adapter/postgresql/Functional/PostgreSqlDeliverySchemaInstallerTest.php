@@ -27,6 +27,49 @@ final class PostgreSqlDeliverySchemaInstallerTest extends FunctionalTestCase
         );
     }
 
+    public function testInstallCreatesTheRateLimitTableWithFillfactor50AndNoIndexBesidesTheKey(): void
+    {
+        self::$pdo->exec('DROP TABLE IF EXISTS webhook_rate_limit');
+
+        (new PostgreSqlDeliverySchemaInstaller(self::$pdo))->install(1);
+
+        self::assertSame('{fillfactor=50}', self::fetchString("SELECT reloptions FROM pg_class WHERE relname = 'webhook_rate_limit'"));
+        self::assertSame(
+            'CREATE UNIQUE INDEX webhook_rate_limit_pkey ON public.webhook_rate_limit USING btree (name)',
+            self::fetchString("SELECT string_agg(indexdef, '; ') FROM pg_indexes WHERE tablename = 'webhook_rate_limit'"),
+            'each update of tokens and refilled_at can be a HOT update',
+        );
+    }
+
+    public function testInstallCreatesTheLanesTableWithTheLaneAsTheKey(): void
+    {
+        self::$pdo->exec('DROP TABLE IF EXISTS webhook_lanes');
+
+        (new PostgreSqlDeliverySchemaInstaller(self::$pdo))->install(1);
+
+        self::assertSame(
+            'lane, window_started_at, requests, failures, open_until, opened_count, consecutive_openings, blocked_at',
+            self::fetchString("SELECT string_agg(column_name, ', ' ORDER BY ordinal_position) FROM information_schema.columns WHERE table_name = 'webhook_lanes'"),
+        );
+        self::assertSame(
+            'PRIMARY KEY (lane)',
+            self::fetchString("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'webhook_lanes'::regclass AND contype = 'p'"),
+        );
+    }
+
+    public function testInstallKeepsTheRowsOfTheRateLimitAndLanesTables(): void
+    {
+        $installer = new PostgreSqlDeliverySchemaInstaller(self::$pdo);
+        $installer->install(1);
+        self::$pdo->exec("INSERT INTO webhook_rate_limit (name, tokens, refilled_at) VALUES ('', 1, now())");
+        self::$pdo->exec("INSERT INTO webhook_lanes (lane, window_started_at) VALUES ('crm', now())");
+
+        $installer->install(1);
+
+        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM webhook_rate_limit'));
+        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM webhook_lanes'));
+    }
+
     public function testInstallTwiceIsSafe(): void
     {
         $this->dropDeliveries();

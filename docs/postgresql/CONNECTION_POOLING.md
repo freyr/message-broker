@@ -2,7 +2,8 @@
 
 No component holds a session-scoped lock. The relay claim and the consumer
 deduplication each run inside one transaction, and the producer joins your own
-transaction. No component uses an advisory lock, `LISTEN` or a session `SET`.
+transaction. The webhook rate limiter and circuit breaker use only row locks
+of one transaction or of one statement. No component uses an advisory lock, `LISTEN` or a session `SET`.
 
 ## Transaction mode: the requirement
 
@@ -26,7 +27,9 @@ client and prepares them again on the server connection that runs the execute.
 The CI job `pgbouncer` (and `make test-pgbouncer` locally) runs the PostgreSQL
 contract tests (`PostgreSqlOutboxStoreContractTest`,
 `PostgreSqlDeduplicationStoreContractTest`, `PostgreSqlDeadLetterStoreContractTest`,
-`PostgreSqlDeliveryStoreContractTest`, `PdoTransactionContractTest`), the consumer functional tests (`AmqpConsumerTest`,
+`PostgreSqlDeliveryStoreContractTest`, `PostgreSqlRateLimiterContractTest`,
+`PostgreSqlCircuitBreakerContractTest`, `PostgreSqlLaneStatesContractTest`,
+`PdoTransactionContractTest`), the consumer functional tests (`AmqpConsumerTest`,
 `EndToEndTest`, `ParallelConsumptionTest`) and the webhook functional test
 (`WebhookEndToEndTest`: the delivery loop, the dead letters and the replay)
 through pgbouncer 1.26.1 with these settings:
