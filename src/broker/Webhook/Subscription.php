@@ -23,11 +23,15 @@ final readonly class Subscription
     /**
      * @param string $id the lane of the delivery rows of this subscription
      * @param list<string> $secrets one or more signature secrets
+     * @param Rate|null $rateLimit the rate limit of the lane of this subscription; null = the
+     *                             default lane rate of the delivery loop (DeliveryLoopConfig::$defaultLaneRate),
+     *                             and with no default no lane limit
      */
     public function __construct(
         public string $id,
         public string $url,
         public array $secrets,
+        public ?Rate $rateLimit = null,
     ) {
         $length = mb_strlen($id);
         if ($length === 0 || $length > self::MAX_ID_LENGTH) {
