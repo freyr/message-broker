@@ -15,7 +15,18 @@
     },
     "tmpDir": "var/infection/tmp",
     "mutators": {
-        "@default": true
+        "@default": true,
+        // Equivalent mutants of the level search in PermitDivision::divide(): the list is sorted, so
+        // once the stop condition is true it stays true for each later lane. "continue" in place of
+        // "break" then skips each later lane with the same result, and ">=" in place of ">" stops at
+        // a tie (availability * lanes == remaining), which gives the same level and a rest of 0.
+        // Only the stop condition of the level search; the other ">" of divide() keep their mutants.
+        "GreaterThan": {
+            "ignoreSourceCodeByRegex": [".*\\$availability \\* \\$lanesAboveLevel > \\$remaining.*"]
+        },
+        "Break_": {
+            "ignore": ["Freyr\\MessageBroker\\Webhook\\PermitDivision::divide"]
+        }
     },
     "testFramework": "phpunit",
     "testFrameworkOptions": "--no-progress",
