@@ -31,7 +31,7 @@ final class WebhookSetupCommandTest extends TestCase
         self::assertSame(Command::SUCCESS, $status);
         self::assertSame([5], $installer->installCalls);
         self::assertSame([], $installer->sqlCalls);
-        self::assertSame("The webhook_deliveries table and its partitions for today + 5 days are present.\n", $tester->getDisplay());
+        self::assertSame("The webhook tables and the partitions of webhook_deliveries for today + 5 days are present.\n", $tester->getDisplay());
     }
 
     public function testExecuteInstallsThreeDaysAheadByDefault(): void

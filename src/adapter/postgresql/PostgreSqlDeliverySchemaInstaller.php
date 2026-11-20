@@ -19,6 +19,12 @@ use PDO;
  *   - timestamps         → TIMESTAMP(3), UTC by convention
  *   - body column        → BYTEA (the final bytes of the request body)
  *
+ * The flow control tables, small, with no partitions and no retention:
+ *   - webhook_rate_limit → one token bucket in each row ('' is the global
+ *                          bucket, else a lane), PostgreSqlRateLimiter
+ *   - webhook_lanes      → the circuit breaker state of each lane that had a
+ *                          result, PostgreSqlCircuitBreaker
+ *
  * The dead letters of the deliveries go to dead_letters (source
  * "webhook:<lane>"), which PostgreSqlSchemaInstaller creates.
  */
@@ -78,6 +84,28 @@ final readonly class PostgreSqlDeliverySchemaInstaller implements SchemaInstalle
             <<<'SQL'
                 CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_due ON webhook_deliveries (lane, available_at)
                     WHERE completed_at IS NULL
+                SQL,
+            // The rows hold no rate and no burst: each call gives them. A lane
+            // ID has 1 to 64 characters, so '' cannot be a lane. fillfactor 50
+            // and no index besides the key: each update can be a HOT update.
+            <<<'SQL'
+                CREATE TABLE IF NOT EXISTS webhook_rate_limit (
+                    name VARCHAR(64) NOT NULL PRIMARY KEY,
+                    tokens DOUBLE PRECISION NOT NULL,
+                    refilled_at TIMESTAMPTZ NOT NULL
+                ) WITH (fillfactor = 50)
+                SQL,
+            <<<'SQL'
+                CREATE TABLE IF NOT EXISTS webhook_lanes (
+                    lane VARCHAR(64) NOT NULL PRIMARY KEY,
+                    window_started_at TIMESTAMP(3) NOT NULL,
+                    requests INTEGER NOT NULL DEFAULT 0,
+                    failures INTEGER NOT NULL DEFAULT 0,
+                    open_until TIMESTAMP(3) NULL,
+                    opened_count INTEGER NOT NULL DEFAULT 0,
+                    consecutive_openings INTEGER NOT NULL DEFAULT 0,
+                    blocked_at TIMESTAMP(3) NULL
+                )
                 SQL,
         ];
     }
