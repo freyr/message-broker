@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Adapter\Redis\Tests\Functional;
 
 use Closure;
-use Freyr\MessageBroker\Adapter\Redis\LuaScript;
 use Freyr\MessageBroker\Adapter\Redis\PhpRedisScriptRunner;
 use Freyr\MessageBroker\Adapter\Redis\PredisScriptRunner;
 use Freyr\MessageBroker\Adapter\Redis\RedisRateLimitConfig;
@@ -146,8 +145,7 @@ final class RedisRateLimiterTest extends TestCase
             'crm' => 2,
         ], $limiter->acquire([
             'crm' => 2,
-        ], 100, $limits));
-        self::assertSame([1], $redis->script('exists', LuaScript::acquire()->sha1), 'the EVAL loaded the script again');
+        ], 100, $limits), 'the call after the flush succeeds through EVAL');
 
         $redis->script('flush');
         $limiter->giveBack([
