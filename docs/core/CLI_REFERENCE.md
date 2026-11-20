@@ -207,8 +207,9 @@ again after each exit, exit code `0` included: run the command in a
 ## `message-broker:webhook:setup`
 
 Creates the `webhook_deliveries` table of the webhook delivery queue, with the
-daily partitions from today to today plus `--premake-days`. A second run
-skips what exists. An application that does not use webhooks does not need
+daily partitions from today to today plus `--premake-days`, and the flow
+control tables `webhook_rate_limit` and `webhook_lanes`. A second run skips
+what exists. An application that does not use webhooks does not need
 this command. The table is described in
 [../postgresql/WEBHOOKS.md](../postgresql/WEBHOOKS.md).
 
@@ -347,6 +348,40 @@ $ bin/console message-broker:webhook:abandon --before=2026-01-01 --dry-run
 
 Exit codes: `0` success (also when no row matches, and always on
 `--dry-run`); `2` invalid `--before` or an empty `--lane`.
+
+## `message-broker:webhook:lanes`
+
+Shows the circuit breaker state of each webhook lane, and puts one lane back
+into circulation. It reads and writes through the `Webhook\LaneStates` port.
+The circuit breaker is described in [WEBHOOKS.md](WEBHOOKS.md#circuit-breaker).
+
+**Constructor:** `new WebhookLanesCommand(LaneStates $lanes)`, for example
+`new WebhookLanesCommand(new PostgreSqlCircuitBreaker($pdo, $policy))`.
+
+| Option | Description |
+| --- | --- |
+| `--close=<lane>` | Put this lane back into circulation: end its opening or its block. `open_until` and `blocked_at` become empty, a new window starts, and `consecutive_openings` becomes 0. The next claim of a worker includes the lane. It is the only way to end a block. |
+
+With no option, the command prints one table row for each lane that had a
+result, in the order of the lane ID. The times are UTC; `-` is no value.
+
+| Column | Value |
+| --- | --- |
+| `lane` | The lane (the subscription ID). |
+| `state` | `blocked`, `open` (`open_until` is later than the present time), or `in circulation`. |
+| `window_started_at`, `requests`, `failures` | The present count window. |
+| `open_until` | The end of the last timed opening. |
+| `blocked_at` | The time of the block. |
+| `opened_count` | The times that the lane left circulation, also by a block. |
+| `consecutive_openings` | The openings in a row with no recovery between them. |
+
+```
+$ bin/console message-broker:webhook:lanes --close=crm
+The lane "crm" is in circulation again.
+```
+
+Exit codes: `0` success; `1` the lane of `--close` has no state; `2` an empty
+`--close`.
 
 ## Dead letter filter options
 

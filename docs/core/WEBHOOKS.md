@@ -108,7 +108,10 @@ The core has two ports that control the flow of webhook requests: a rate
 limiter with a global bucket and a bucket for each lane, and a circuit breaker
 for each lane. The delivery loop calls both in each pass (see
 [The loop with flow control](#the-loop-with-flow-control)). The test kit has
-an in-memory implementation of each; no adapter implements them yet.
+an in-memory implementation of each. The PostgreSQL adapter implements the
+three ports: `PostgreSqlRateLimiter`, and `PostgreSqlCircuitBreaker` (also
+`LaneStates`); see
+[../postgresql/WEBHOOKS.md](../postgresql/WEBHOOKS.md#flow-control-tables).
 
 A store error of either port propagates: the flow control never fails open.
 `Webhook\NoRateLimit` has no bucket, and `Webhook\NoCircuitBreaker` opens no
@@ -199,7 +202,9 @@ timed openings in a row is blocked until an operator closes it.
   a row sets `blocked_at`, and `record()` reports the lane in `blocked`, not in
   `left`. A blocked lane is out of circulation with no time limit, also after
   its open time, and `record()` ignores its counts. Only
-  `LaneStates::close()` ends a block. A maximum of 0 turns the block off.
+  `LaneStates::close()` ends a block: the command
+  `message-broker:webhook:lanes --close=<lane>`. A maximum of 0 turns the
+  block off.
 - **A close** (`LaneStates::close()`) puts the lane back into circulation:
   `open_until` and the block become `null`, a new window starts, and the
   openings in a row become 0. The opened count stays. A close gives no
@@ -380,27 +385,36 @@ The library registers no command. Add the command classes to your console
 application, as the other commands (see [CLI_REFERENCE.md](CLI_REFERENCE.md)):
 
 ```php
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlCircuitBreaker;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryRetention;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliverySchemaInstaller;
 use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryStore;
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlRateLimiter;
 use Freyr\MessageBroker\Console\WebhookAbandonCommand;
+use Freyr\MessageBroker\Console\WebhookLanesCommand;
 use Freyr\MessageBroker\Console\WebhookMaintainCommand;
 use Freyr\MessageBroker\Console\WebhookRunCommand;
 use Freyr\MessageBroker\Console\WebhookSetupCommand;
+use Freyr\MessageBroker\Webhook\CircuitBreakerPolicy;
 use Freyr\MessageBroker\Webhook\DeliveryLoop;
 use Freyr\MessageBroker\Webhook\DeliveryLoopConfig;
+use Freyr\MessageBroker\Webhook\Rate;
 
-$config = new DeliveryLoopConfig(batchSize: 100, limitForEachLane: 25);
+$config = new DeliveryLoopConfig(batchSize: 100, limitForEachLane: 25, globalRate: new Rate(1_000));
+$policy = new CircuitBreakerPolicy();
 
 $application->add(new WebhookSetupCommand(new PostgreSqlDeliverySchemaInstaller($pdo)));
 $application->add(new WebhookMaintainCommand(new PostgreSqlDeliveryRetention($pdo)));
 $application->add(new WebhookAbandonCommand(new PostgreSqlDeliveryStore($pdo), $events, $logger));
+$application->add(new WebhookLanesCommand(new PostgreSqlCircuitBreaker($pdo, $policy)));
 $application->add(new WebhookRunCommand(
     static fn (DeliveryLoopConfig $config) => new DeliveryLoop(
         new PostgreSqlDeliveryStore($workerPdo),
         $sender,
         $subscriptions,
         config: $config,
+        rateLimiter: new PostgreSqlRateLimiter($workerPdo),
+        circuitBreaker: new PostgreSqlCircuitBreaker($workerPdo, $policy),
     ),
     $config,
 ));
@@ -408,10 +422,11 @@ $application->add(new WebhookRunCommand(
 
 | Command | Purpose |
 | --- | --- |
-| `message-broker:webhook:setup --premake-days=N` | Create the table and its daily partitions. Run it at deployment. |
+| `message-broker:webhook:setup --premake-days=N` | Create the tables, and the daily partitions of `webhook_deliveries`. Run it at deployment. |
 | `message-broker:webhook:maintain` | Create the partitions ahead and drop the expired ones, once a day. Options `--retention-days`, `--premake-days`, `--dry-run`; the exit codes of `outbox:maintain`. |
 | `message-broker:webhook:run` | Run the delivery loop. Options `--lane` (repeatable), `--batch-size`, `--lane-limit`, and the worker limits `--limit`, `--time-limit`, `--memory-limit`. |
 | `message-broker:webhook:abandon --before=<date>` | End the old unfinished rows by date, by hand. Options `--lane` (repeatable) and `--dry-run`. |
+| `message-broker:webhook:lanes` | Show the circuit breaker state of each lane. `--close=<lane>` ends an opening or a block. |
 
 **A partition with an unfinished row stays.** A delivery has no time limit,
 so `webhook:maintain` keeps an expired partition that holds an unfinished row,
@@ -448,7 +463,11 @@ The flow control events:
 
 Alerts: a `webhook.lane_blocked` (only `LaneStates::close()` ends a block); a lane with many `webhook.lane_opened`; a
 `webhook.permit_wait` in most passes for a long time; and a lane with
-`webhook.lane_at_limit` in most passes for a long time.
+`webhook.lane_at_limit` in most passes for a long time. For a blocked lane,
+`message-broker:webhook:lanes` shows its state; when the endpoint works again,
+`message-broker:webhook:lanes --close=<lane>` puts the lane back into
+circulation. With the PostgreSQL adapter, a SQL alert on a blocked lane is in
+[../postgresql/WEBHOOKS.md](../postgresql/WEBHOOKS.md#flow-control-tables).
 
 ## Security
 
