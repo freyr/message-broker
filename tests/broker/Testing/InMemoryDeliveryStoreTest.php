@@ -38,7 +38,9 @@ final class InMemoryDeliveryStoreTest extends TestCase
         $deadLetters = new InMemoryDeadLetterStore();
         $store = new InMemoryDeliveryStore($deadLetters);
         $store->insert([self::record('01900000-0000-7000-8000-000000000001'), self::record('01900000-0000-7000-8000-000000000002')]);
-        [$delivered, $dead] = $store->claim(['crm'], 10, 10, 1_000);
+        [$delivered, $dead] = $store->claim([
+            'crm' => 10,
+        ], 10, 1_000);
 
         self::assertNull($store->outcome($delivered->delivery->id), 'unfinished');
         $store->complete([

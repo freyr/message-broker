@@ -80,7 +80,7 @@ abstract class DeliveryStoreContractTestCase extends TestCase
         );
         $this->store()->insert([$inserted]);
 
-        $claimed = $this->store()->claim([self::LANE], 10, 10, self::LEASE_MS);
+        $claimed = $this->store()->claim(self::each([self::LANE], 10), 10, self::LEASE_MS);
 
         self::assertCount(1, $claimed);
         $record = $claimed[0]->delivery;
@@ -144,9 +144,9 @@ abstract class DeliveryStoreContractTestCase extends TestCase
         $other = [$this->record(lane: self::OTHER_LANE), $this->record(lane: self::OTHER_LANE), $this->record(lane: self::OTHER_LANE)];
         $this->store()->insert([...$ours, ...$other]);
 
-        $first = $this->store()->claim([self::LANE, self::OTHER_LANE], 2, 10, self::LEASE_MS);
-        $second = $this->store()->claim([self::LANE, self::OTHER_LANE], 5, 1, self::LEASE_MS);
-        $third = $this->store()->claim([self::LANE, self::OTHER_LANE], 5, 10, self::LEASE_MS);
+        $first = $this->store()->claim(self::each([self::LANE, self::OTHER_LANE], 2), 10, self::LEASE_MS);
+        $second = $this->store()->claim(self::each([self::LANE, self::OTHER_LANE], 5), 1, self::LEASE_MS);
+        $third = $this->store()->claim(self::each([self::LANE, self::OTHER_LANE], 5), 10, self::LEASE_MS);
 
         self::assertSame([
             self::LANE => 2,
@@ -167,9 +167,9 @@ abstract class DeliveryStoreContractTestCase extends TestCase
         $this->store()->insert([...$ours, ...$other]);
 
         // A lease of 0 ms: each claim sees all four rows again.
-        $oursFirst = $this->store()->claim([self::LANE, self::OTHER_LANE], 2, 2, 0);
-        $otherFirst = $this->store()->claim([self::OTHER_LANE, self::LANE], 2, 2, 0);
-        $split = $this->store()->claim([self::OTHER_LANE, self::LANE], 2, 3, 0);
+        $oursFirst = $this->store()->claim(self::each([self::LANE, self::OTHER_LANE], 2), 2, 0);
+        $otherFirst = $this->store()->claim(self::each([self::OTHER_LANE, self::LANE], 2), 2, 0);
+        $split = $this->store()->claim(self::each([self::OTHER_LANE, self::LANE], 2), 3, 0);
 
         self::assertSame([
             self::LANE => 2,
@@ -183,11 +183,127 @@ abstract class DeliveryStoreContractTestCase extends TestCase
         ], self::countByLane($split), 'the later lane gets only the rest of the total');
     }
 
+    public function testEachLaneOfAClaimHasItsOwnRowLimit(): void
+    {
+        $this->store()->insert([
+            $this->record(), $this->record(), $this->record(),
+            $this->record(lane: self::OTHER_LANE), $this->record(lane: self::OTHER_LANE), $this->record(lane: self::OTHER_LANE),
+            $this->record(lane: self::THIRD_LANE), $this->record(lane: self::THIRD_LANE),
+        ]);
+
+        $claimed = $this->store()->claim([
+            self::LANE => 1,
+            self::OTHER_LANE => 3,
+            self::THIRD_LANE => 2,
+        ], 10, self::LEASE_MS);
+
+        self::assertSame([
+            self::LANE => 1,
+            self::OTHER_LANE => 3,
+            self::THIRD_LANE => 2,
+        ], self::countByLane($claimed));
+    }
+
+    public function testTheTotalCutsAClaimWithADifferentLimitForEachLaneInTheOrderOfTheKeys(): void
+    {
+        $this->store()->insert([
+            $this->record(), $this->record(), $this->record(),
+            $this->record(lane: self::OTHER_LANE), $this->record(lane: self::OTHER_LANE), $this->record(lane: self::OTHER_LANE),
+        ]);
+
+        // A lease of 0 ms: each claim sees all six rows again.
+        $otherFirst = $this->store()->claim([
+            self::OTHER_LANE => 1,
+            self::LANE => 3,
+        ], 3, 0);
+        $oursFirst = $this->store()->claim([
+            self::LANE => 2,
+            self::OTHER_LANE => 3,
+        ], 4, 0);
+
+        self::assertSame([
+            self::LANE => 2,
+            self::OTHER_LANE => 1,
+        ], self::countByLane($otherFirst), 'the first key takes its own limit, the second the rest of the total');
+        self::assertSame([
+            self::LANE => 2,
+            self::OTHER_LANE => 2,
+        ], self::countByLane($oursFirst));
+    }
+
+    public function testTheDueCountsCountTheDueUnfinishedRowsOfEachLaneUpToTheCapAndChangeNoRow(): void
+    {
+        $due = [$this->record(), $this->record(availableAt: EpochMillis::now() - 1_000), $this->record()];
+        $notDue = $this->record(availableAt: EpochMillis::now() + 60_000);
+        $finished = $this->record();
+        $other = $this->record(lane: self::OTHER_LANE);
+        $this->store()->insert([...$due, $notDue, $finished, $other, $this->record(lane: 'contract_not_asked')]);
+        // A lease of 0 ms: the other rows of the claim are due again at once.
+        $leased = $this->store()->claim(self::each([self::LANE], 10), 10, 0);
+        $this->store()->complete([DeliveryCompletion::delivered(self::byId($leased, [$finished->id])[0])]);
+
+        $capped = $this->store()->dueCounts([self::THIRD_LANE, self::LANE, self::OTHER_LANE], 2);
+        $all = $this->store()->dueCounts([self::LANE, self::OTHER_LANE], 3);
+        $above = $this->store()->dueCounts([self::LANE], 4);
+
+        self::assertSame([
+            self::THIRD_LANE => 0,
+            self::LANE => 2,
+            self::OTHER_LANE => 1,
+        ], $capped, 'each given lane in the order of the list, also with 0; at most the cap');
+        self::assertSame([
+            self::LANE => 3,
+            self::OTHER_LANE => 1,
+        ], $all, 'a cap equal to the count');
+        self::assertSame([
+            self::LANE => 3,
+        ], $above, 'a row that is not due and a finished row do not count');
+        self::assertEqualsCanonicalizing(
+            [...self::ids($due), $other->id],
+            self::claimedIds($this->claim([self::LANE, self::OTHER_LANE])),
+            'the count changed no row and took no lease',
+        );
+    }
+
+    public function testALeasedRowIsNotDueForTheDueCounts(): void
+    {
+        $this->store()->insert([$this->record(), $this->record()]);
+        $this->store()->claim(self::each([self::LANE], 1), 1, self::LEASE_MS);
+
+        self::assertSame([
+            self::LANE => 1,
+        ], $this->store()->dueCounts([self::LANE], 10));
+    }
+
+    public function testTheDueCountsOfAnEmptyLaneListAreEmpty(): void
+    {
+        $this->store()->insert([$this->record()]);
+
+        self::assertSame([], $this->store()->dueCounts([], 10));
+    }
+
+    public function testANumericLaneIdIsReadAsAStringInTheClaimAndInTheDueCounts(): void
+    {
+        $rows = [$this->record(lane: '42'), $this->record(lane: '42'), $this->record(lane: '42')];
+        $this->store()->insert($rows);
+
+        $counts = $this->store()->dueCounts(['42'], 10);
+        // PHP makes the key '42' the integer 42; the store must find the lane '42'.
+        $claimed = $this->store()->claim([
+            '42' => 2,
+        ], 10, self::LEASE_MS);
+
+        self::assertSame(['42'], array_map(strval(...), array_keys($counts)));
+        self::assertSame(3, $counts['42']);
+        self::assertCount(2, $claimed, 'the row limit of the lane 42');
+        self::assertSame(['42', '42'], array_map(static fn (ClaimedDelivery $c): string => $c->delivery->lane, $claimed));
+    }
+
     public function testAnEmptyLaneListClaimsNothing(): void
     {
         $this->store()->insert([$this->record()]);
 
-        self::assertSame([], $this->store()->claim([], 10, 10, self::LEASE_MS));
+        self::assertSame([], $this->store()->claim(self::each([], 10), 10, self::LEASE_MS));
         self::assertCount(1, $this->claim(), 'the row is still due');
     }
 
@@ -210,7 +326,7 @@ abstract class DeliveryStoreContractTestCase extends TestCase
         $row = $this->record();
         $this->store()->insert([$row]);
 
-        $first = $this->store()->claim([self::LANE], 10, 10, 0);
+        $first = $this->store()->claim(self::each([self::LANE], 10), 10, 0);
         $second = $this->claim();
 
         self::assertSame([$row->id], self::claimedIds($second), 'a lease of 0 ms ends at once');
@@ -222,7 +338,7 @@ abstract class DeliveryStoreContractTestCase extends TestCase
     {
         $row = $this->record();
         $this->store()->insert([$row]);
-        $claimed = $this->store()->claim([self::LANE], 10, 10, 0);
+        $claimed = $this->store()->claim(self::each([self::LANE], 10), 10, 0);
 
         $changed = $this->store()->complete([DeliveryCompletion::delivered($claimed[0])]);
 
@@ -244,7 +360,7 @@ abstract class DeliveryStoreContractTestCase extends TestCase
         ]);
 
         self::assertEqualsCanonicalizing([$soon->id, $later->id], $changed);
-        $again = $this->store()->claim([self::LANE], 10, 10, 0);
+        $again = $this->store()->claim(self::each([self::LANE], 10), 10, 0);
         self::assertSame([$soon->id], self::claimedIds($again), 'only the row whose retry time passed is due');
         self::assertSame(1, $again[0]->delivery->attempts);
         self::assertSame($soon->body, $again[0]->delivery->body);
@@ -262,7 +378,7 @@ abstract class DeliveryStoreContractTestCase extends TestCase
         $changed = $this->store()->complete([DeliveryCompletion::dead($claimed, $deadLetter)]);
 
         self::assertSame([$row->id], $changed);
-        self::assertSame([], $this->store()->claim([self::LANE], 10, 10, 0), 'a dead row is never claimed again');
+        self::assertSame([], $this->store()->claim(self::each([self::LANE], 10), 10, 0), 'a dead row is never claimed again');
         $stored = $this->deadLetterStore()->find($deadLetter->id);
         self::assertNotNull($stored);
         self::assertSame('webhook:'.self::LANE, $stored->source);
@@ -282,7 +398,7 @@ abstract class DeliveryStoreContractTestCase extends TestCase
     {
         $row = $this->record();
         $this->store()->insert([$row]);
-        $old = $this->store()->claim([self::LANE], 10, 10, 0)[0];
+        $old = $this->store()->claim(self::each([self::LANE], 10), 10, 0)[0];
         $current = $this->claim()[0];
 
         $late = $this->store()->complete([
@@ -310,7 +426,7 @@ abstract class DeliveryStoreContractTestCase extends TestCase
         ]);
 
         self::assertSame([], $again);
-        self::assertSame([], $this->store()->claim([self::LANE], 10, 10, 0));
+        self::assertSame([], $this->store()->claim(self::each([self::LANE], 10), 10, 0));
         self::assertSame(0, $this->deadLetterStore()->count(new DeadLetterFilter()));
     }
 
@@ -369,7 +485,7 @@ abstract class DeliveryStoreContractTestCase extends TestCase
         $young = $this->record(createdAt: $now - 5_000);
         $oldFinished = $this->record(createdAt: $now - 50_000);
         $this->store()->insert([$old, $oldOtherLane, $oldNotGiven, $atTheDate, $justBefore, $young, $oldFinished]);
-        $finished = self::byId($this->store()->claim([self::LANE], 10, 10, 0), [$oldFinished->id]);
+        $finished = self::byId($this->store()->claim(self::each([self::LANE], 10), 10, 0), [$oldFinished->id]);
         $this->store()->complete([DeliveryCompletion::delivered($finished[0])]);
 
         $count = $this->store()->abandon($before, [self::LANE, self::OTHER_LANE], 10);
@@ -377,7 +493,7 @@ abstract class DeliveryStoreContractTestCase extends TestCase
         self::assertSame(3, $count, 'created_at at the date is not earlier than it');
         self::assertEqualsCanonicalizing(
             [$oldNotGiven->id, $atTheDate->id, $young->id],
-            self::claimedIds($this->store()->claim([self::LANE, self::OTHER_LANE, self::THIRD_LANE], 10, 10, self::LEASE_MS)),
+            self::claimedIds($this->store()->claim(self::each([self::LANE, self::OTHER_LANE, self::THIRD_LANE], 10), 10, self::LEASE_MS)),
             'the other rows stay unfinished and due',
         );
         self::assertEqualsCanonicalizing(
@@ -400,7 +516,7 @@ abstract class DeliveryStoreContractTestCase extends TestCase
 
         self::assertSame(3, $this->store()->abandon($now - 30_000, null, 10));
 
-        self::assertSame([$young->id], self::claimedIds($this->store()->claim([self::LANE, self::OTHER_LANE, self::THIRD_LANE], 10, 10, self::LEASE_MS)));
+        self::assertSame([$young->id], self::claimedIds($this->store()->claim(self::each([self::LANE, self::OTHER_LANE, self::THIRD_LANE], 10), 10, self::LEASE_MS)));
     }
 
     public function testAnAbandonWithAnEmptyLaneListTakesNothing(): void
@@ -505,7 +621,7 @@ abstract class DeliveryStoreContractTestCase extends TestCase
             DeliveryCompletion::retry($leased, EpochMillis::now() - 1_000),
             DeliveryCompletion::dead($leased, $this->deadLetter($leased)),
         ]));
-        self::assertSame([], $this->store()->claim([self::LANE], 10, 10, 0), 'the row stays finished');
+        self::assertSame([], $this->store()->claim(self::each([self::LANE], 10), 10, 0), 'the row stays finished');
         $all = $this->deadLetterStore()->list(new DeadLetterFilter());
         self::assertCount(1, $all);
         self::assertSame('abandoned', $all[0]->errorClass, 'only the dead letter of the abandon');
@@ -527,7 +643,7 @@ abstract class DeliveryStoreContractTestCase extends TestCase
         $finished = $this->record(lane: self::OTHER_LANE, createdAt: $now - 50_000);
         $this->store()->insert([$finished]);
         $this->store()->complete([DeliveryCompletion::delivered(self::byId($this->claim([self::OTHER_LANE]), [$finished->id])[0])]);
-        $this->store()->claim([self::LANE], 1, 1, self::LEASE_MS);
+        $this->store()->claim(self::each([self::LANE], 1), 1, self::LEASE_MS);
 
         $counts = $this->store()->countUnfinished($before, [self::OTHER_LANE, self::LANE]);
 
@@ -569,7 +685,17 @@ abstract class DeliveryStoreContractTestCase extends TestCase
      */
     private function claim(?array $lanes = null): array
     {
-        return $this->store()->claim($lanes ?? [self::LANE], 10, 10, self::LEASE_MS);
+        return $this->store()->claim(self::each($lanes ?? [self::LANE], 10), 10, self::LEASE_MS);
+    }
+
+    /**
+     * @param list<string> $lanes
+     *
+     * @return array<string, int> the same row limit for each lane, in the order of the list
+     */
+    private static function each(array $lanes, int $limit): array
+    {
+        return array_fill_keys($lanes, $limit);
     }
 
     /** @param array<string, mixed> $headers */

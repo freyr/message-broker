@@ -27,7 +27,7 @@ use Throwable;
  * in TIMESTAMP(3); a comparison of a rounded stored lease with a raw
  * microsecond now() could find a lease of 0 ms not yet due.
  *
- * claim() is one statement: in autocommit mode the
+ * dueCounts() is one read statement with no lock. claim() is one statement: in autocommit mode the
  * statement is the transaction, and its commit makes the lease visible before
  * the method returns. The row locks of FOR UPDATE SKIP LOCKED last only for
  * that statement. complete() and abandon() each write in one transaction of
@@ -48,12 +48,14 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
         SQL;
 
     /**
-     * The lanes keep their position in the list (WITH ORDINALITY). For each
-     * lane a LATERAL subquery starts at the partial index
-     * idx_webhook_deliveries_due and takes at most :limit_for_each_lane due
-     * rows; the total limit then cuts the rows in the order of the lane
-     * position. The lanes come as a JSON array, so a lane can hold any
-     * character.
+     * The lanes come as one JSON array of [lane, row limit] pairs and keep
+     * their position in it (WITH ORDINALITY). For each lane a LATERAL
+     * subquery starts at the partial index idx_webhook_deliveries_due and
+     * takes at most the row limit of that lane in due rows; the total limit
+     * then cuts the rows in the order of the lane position. A lane can hold
+     * any character, and ->> gives a numeric lane as its text. The statement
+     * text is the same for each number of lanes, so a pooler and pdo_pgsql
+     * keep one prepared statement.
      *
      * The UPDATE finds the picked rows by their primary key (= ANY of an
      * array), so it reads the primary key index of each partition and not the
@@ -65,13 +67,13 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
         ),
         picked AS (
             SELECT d.id, d.created_at
-            FROM jsonb_array_elements_text(CAST(:lanes AS JSONB)) WITH ORDINALITY AS l(lane, position)
+            FROM jsonb_array_elements(CAST(:lanes AS JSONB)) WITH ORDINALITY AS l(lane_limit, position)
             CROSS JOIN LATERAL (
                 SELECT c.id, c.created_at
                 FROM webhook_deliveries c
-                WHERE c.lane = l.lane AND c.completed_at IS NULL AND c.available_at <= (SELECT now_ms FROM clock)
+                WHERE c.lane = l.lane_limit ->> 0 AND c.completed_at IS NULL AND c.available_at <= (SELECT now_ms FROM clock)
                 ORDER BY c.available_at
-                LIMIT :limit_for_each_lane
+                LIMIT CAST(l.lane_limit ->> 1 AS INTEGER)
                 FOR UPDATE SKIP LOCKED
             ) AS d
             ORDER BY l.position
@@ -82,6 +84,28 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
         WHERE w.id = ANY(ARRAY(SELECT id FROM picked)) AND w.created_at = ANY(ARRAY(SELECT created_at FROM picked))
         RETURNING
         SQL.' '.self::COLUMNS;
+
+    /**
+     * A read with no lock and no write: for each lane of the JSON array, in
+     * the order of the array, the due, unfinished rows up to :cap, counted
+     * from the partial index idx_webhook_deliveries_due (one index start for
+     * each lane). The due limit is the same database time as in CLAIM_SQL.
+     */
+    private const string DUE_COUNTS_SQL = <<<'SQL'
+        WITH clock AS (
+            SELECT CAST(now() AT TIME ZONE 'UTC' AS TIMESTAMP(3)) AS now_ms
+        )
+        SELECT l.lane, (
+            SELECT COUNT(*) FROM (
+                SELECT 1
+                FROM webhook_deliveries c
+                WHERE c.lane = l.lane AND c.completed_at IS NULL AND c.available_at <= (SELECT now_ms FROM clock)
+                LIMIT :cap
+            ) AS due
+        ) AS due_count
+        FROM jsonb_array_elements_text(CAST(:lanes AS JSONB)) WITH ORDINALITY AS l(lane, position)
+        ORDER BY l.position
+        SQL;
 
     /**
      * One statement for all outcomes. The lease check is the condition
@@ -167,12 +191,15 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
         }
     }
 
-    public function claim(array $lanes, int $limitForEachLane, int $total, int $leaseMs): array
+    public function claim(array $limitForEachLane, int $total, int $leaseMs): array
     {
+        $laneLimits = [];
+        foreach ($limitForEachLane as $lane => $limit) {
+            $laneLimits[] = [$lane, $limit];
+        }
+
         $statement = $this->pdo->prepare(self::CLAIM_SQL);
-        // A lane that is two times in the list counts one time.
-        $statement->bindValue('lanes', json_encode(array_values(array_unique($lanes)), JSON_THROW_ON_ERROR));
-        $statement->bindValue('limit_for_each_lane', $limitForEachLane, PDO::PARAM_INT);
+        $statement->bindValue('lanes', json_encode($laneLimits, JSON_THROW_ON_ERROR));
         $statement->bindValue('total', $total, PDO::PARAM_INT);
         $statement->bindValue('lease_ms', $leaseMs, PDO::PARAM_INT);
         $statement->execute();
@@ -181,6 +208,17 @@ final readonly class PostgreSqlDeliveryStore implements DeliveryStore
         $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
 
         return array_map(self::claimed(...), $rows);
+    }
+
+    public function dueCounts(array $lanes, int $cap): array
+    {
+        $statement = $this->pdo->prepare(self::DUE_COUNTS_SQL);
+        $statement->bindValue('lanes', json_encode($lanes, JSON_THROW_ON_ERROR));
+        $statement->bindValue('cap', $cap, PDO::PARAM_INT);
+        $statement->execute();
+
+        /** @var array<array-key, int> */
+        return $statement->fetchAll(PDO::FETCH_KEY_PAIR);
     }
 
     public function complete(array $outcomes): array

@@ -248,9 +248,14 @@ final class WebhookAbandonCommandTest extends TestCase
                 $this->inner->insert($records);
             }
 
-            public function claim(array $lanes, int $limitForEachLane, int $total, int $leaseMs): array
+            public function claim(array $limitForEachLane, int $total, int $leaseMs): array
             {
-                return $this->inner->claim($lanes, $limitForEachLane, $total, $leaseMs);
+                return $this->inner->claim($limitForEachLane, $total, $leaseMs);
+            }
+
+            public function dueCounts(array $lanes, int $cap): array
+            {
+                return $this->inner->dueCounts($lanes, $cap);
             }
 
             public function complete(array $outcomes): array
@@ -300,9 +305,14 @@ final class WebhookAbandonCommandTest extends TestCase
                 $this->inner->insert($records);
             }
 
-            public function claim(array $lanes, int $limitForEachLane, int $total, int $leaseMs): array
+            public function claim(array $limitForEachLane, int $total, int $leaseMs): array
             {
-                return $this->inner->claim($lanes, $limitForEachLane, $total, $leaseMs);
+                return $this->inner->claim($limitForEachLane, $total, $leaseMs);
+            }
+
+            public function dueCounts(array $lanes, int $cap): array
+            {
+                return $this->inner->dueCounts($lanes, $cap);
             }
 
             public function complete(array $outcomes): array

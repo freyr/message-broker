@@ -11,7 +11,7 @@ use Throwable;
 
 /**
  * A delivery store over an in-memory store that throws a chosen error from
- * insert(), claim() or complete(), as a database that fails. It records the
+ * insert(), claim(), dueCounts() or complete(), as a database that fails. It records the
  * arguments of each abandon() call.
  * Each insert() call is reported to $log.
  */
@@ -23,6 +23,8 @@ final class FailingDeliveryStore implements DeliveryStore
     public ?Closure $log = null;
 
     public ?Throwable $claimError = null;
+
+    public ?Throwable $dueCountsError = null;
 
     public ?Throwable $completeError = null;
 
@@ -44,13 +46,22 @@ final class FailingDeliveryStore implements DeliveryStore
         $this->inner->insert($records);
     }
 
-    public function claim(array $lanes, int $limitForEachLane, int $total, int $leaseMs): array
+    public function claim(array $limitForEachLane, int $total, int $leaseMs): array
     {
         if ($this->claimError !== null) {
             throw $this->claimError;
         }
 
-        return $this->inner->claim($lanes, $limitForEachLane, $total, $leaseMs);
+        return $this->inner->claim($limitForEachLane, $total, $leaseMs);
+    }
+
+    public function dueCounts(array $lanes, int $cap): array
+    {
+        if ($this->dueCountsError !== null) {
+            throw $this->dueCountsError;
+        }
+
+        return $this->inner->dueCounts($lanes, $cap);
     }
 
     public function complete(array $outcomes): array
