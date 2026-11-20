@@ -19,8 +19,8 @@
     },
     "testFramework": "phpunit",
     "testFrameworkOptions": "--no-progress",
-    // Provisional: the value of the CI measurement of the first pull request replaces it.
-    // Raise it as tests improve; never lower it.
-    "minMsi": 94,
-    "minCoveredMsi": 94
+    // The first pull request measured 100% (86 mutants, all killed); few mutants, so the
+    // threshold keeps a margin. Raise it as tests improve; never lower it.
+    "minMsi": 97,
+    "minCoveredMsi": 97
 }
