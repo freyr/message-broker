@@ -13,6 +13,7 @@ use Freyr\MessageBroker\Webhook\DeliveryCompletionKind;
 use Freyr\MessageBroker\Webhook\DeliveryLoop;
 use Freyr\MessageBroker\Webhook\DeliveryLoopConfig;
 use Freyr\MessageBroker\Webhook\DeliveryRecord;
+use Freyr\MessageBroker\Webhook\Rate;
 use Freyr\MessageBroker\Webhook\Subscription;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -106,8 +107,9 @@ final class WebhookRunCommandTest extends TestCase
             idleSleepMs: 7,
         )], $this->configs);
         self::assertSame([[
-            'lanes' => ['crm'],
-            'limitForEachLane' => 3,
+            'limitForEachLane' => [
+                'crm' => 3,
+            ],
             'total' => 10,
             'leaseMs' => 5_000,
         ]], $this->store->claims, 'the loop claims with the config of the command');
@@ -273,6 +275,8 @@ final class WebhookRunCommandTest extends TestCase
                 'array' => ["lane-{$position}"],
                 'bool' => $default !== true,
                 'string' => "value-{$position}",
+                // Above the batch size of the base config (default plus 1,000): the start check passes.
+                Rate::class => new Rate(10_000.0 + $position, 10_000 + $position),
                 default => self::fail("Give the test a value for the type {$type->getName()} of \${$parameter->getName()}"),
             };
         }

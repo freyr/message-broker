@@ -36,15 +36,15 @@ interface DeliveryStore
     public function insert(array $records): void;
 
     /**
-     * Claim due, unfinished rows of the given lanes: at most
-     * $limitForEachLane rows of each lane and at most $total rows in all.
-     * Set available_at of each claimed row to now + $leaseMs and commit in a
-     * transaction of the store before it returns. Concurrent claimers skip
-     * the rows of each other (for a database: FOR UPDATE SKIP LOCKED); they
-     * never wait. An empty lane list returns an empty list.
+     * Claim due, unfinished rows of the given lanes: at most the row limit
+     * of each lane, and at most $total rows in all. Set available_at of each
+     * claimed row to now + $leaseMs and commit in a transaction of the store
+     * before it returns. Concurrent claimers skip the rows of each other (for
+     * a database: FOR UPDATE SKIP LOCKED); they never wait. An empty map
+     * returns an empty list.
      *
-     * The order of $lanes is the priority when $total cuts the claim: a lane
-     * that is earlier in the list gets its rows (up to $limitForEachLane)
+     * The order of the keys is the priority when $total cuts the claim: a
+     * lane that is earlier in the map gets its rows (up to its row limit)
      * before a later lane gets one. The delivery loop gives the lanes in a
      * new random order for each claim, so no lane is always last.
      *
@@ -52,11 +52,29 @@ interface DeliveryStore
      * the store, and the comparison has millisecond precision: a row whose
      * lease is 0 ms is due again for the next claim.
      *
-     * @param list<string> $lanes the lanes to claim from, in priority order
+     * The keys are lane IDs. PHP turns a numeric key into an integer, so an
+     * implementation reads each key as a string.
+     *
+     * @param array<array-key, int> $limitForEachLane lane => the most rows of that lane (0 or more), in priority order
      *
      * @return list<ClaimedDelivery> each with the record (attempts as stored) and its lease value
      */
-    public function claim(array $lanes, int $limitForEachLane, int $total, int $leaseMs): array;
+    public function claim(array $limitForEachLane, int $total, int $leaseMs): array;
+
+    /**
+     * Count, with no change and no lock, the due, unfinished rows of each
+     * given lane, at most $cap for each lane: the rows that a claim at the
+     * same time could take. "Due" is the rule of claim(). The delivery loop
+     * calls it before the rate limiter, so that a lane with no due row asks
+     * for no permit.
+     *
+     * @param list<string> $lanes
+     * @param int $cap the most rows to count for each lane, 1 or more
+     *
+     * @return array<array-key, int> lane => due row count from 0 to $cap, for each given lane, in the order of
+     *                               $lanes (PHP turns a numeric lane name into an int key; cast it back to string)
+     */
+    public function dueCounts(array $lanes, int $cap): array;
 
     /**
      * Write the outcomes in one transaction of the store: for a delivered

@@ -34,7 +34,7 @@ interface RateLimiter
      * bucket and of their sum from the global bucket, as one atomic step.
      *
      * @param array<array-key, positive-int> $wanted the wanted count of each lane, in the order of the call
-     * @param int<0, max> $total the cap of the sum of the grants
+     * @param int $total the cap of the sum of the grants, 0 or more
      *
      * @return array<array-key, int> the grant of each lane of $wanted, from 0 to its wanted count, in the order of the call
      */

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Freyr\MessageBroker\Tests\Webhook;
 
+use Freyr\MessageBroker\Webhook\Rate;
 use Freyr\MessageBroker\Webhook\Subscription;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -18,6 +19,16 @@ final class SubscriptionTest extends TestCase
         self::assertSame('crm', $subscription->id);
         self::assertSame('https://crm.example/hook', $subscription->url);
         self::assertSame(['whsec_a', 'whsec_b'], $subscription->secrets);
+        self::assertNull($subscription->rateLimit, 'no lane limit by default');
+    }
+
+    public function testKeepsTheRateLimitOfTheLane(): void
+    {
+        $rate = new Rate(40.0, 4);
+
+        $subscription = new Subscription('crm', 'https://crm.example/hook', ['whsec_a'], $rate);
+
+        self::assertSame($rate, $subscription->rateLimit);
     }
 
     public function testAcceptsAnIdOf64Characters(): void

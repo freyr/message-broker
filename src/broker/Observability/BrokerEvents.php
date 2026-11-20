@@ -7,7 +7,9 @@ namespace Freyr\MessageBroker\Observability;
 /**
  * Optional lifecycle listener for lifecycle transitions: produce, relay,
  * dispatch, dedup-hit, retry, discard, dead-letter, replay, replay skip, abandon,
- * and the webhook deliveries (delivered, retried, dead-lettered, abandoned). Mirrors ErrorHandler's minimal,
+ * the webhook deliveries (delivered, retried, dead-lettered, abandoned), and the
+ * webhook flow control (a lane leaves circulation, is blocked or returns, a wait for permits, a lane at
+ * its limit). Mirrors ErrorHandler's minimal,
  * optional shape — the library's behavior never depends on it. For
  * metrics/tracing: derive throughput, lag, duplicate-rate, retry rate, and DLQ flow.
  */
@@ -40,6 +42,33 @@ interface BrokerEvents
     public const string WEBHOOK_DEAD_LETTERED = 'webhook.dead_lettered';
     /** An operator abandoned the old webhook deliveries of one lane (webhook:abandon); context: lane, count. */
     public const string WEBHOOK_ABANDONED = 'webhook.abandoned';
+    /**
+     * The circuit breaker took a webhook lane out of circulation for its open time; context: lane. The
+     * worker whose record() call made the trip records it, so each trip has one such event (a trip that
+     * blocks the lane records WEBHOOK_LANE_BLOCKED in its place).
+     */
+    public const string WEBHOOK_LANE_OPENED = 'webhook.lane_opened';
+    /**
+     * A webhook lane is back in circulation after its open time; context: lane. The worker whose
+     * record() call started the first window after the open time records it, so each trip has one such event.
+     */
+    public const string WEBHOOK_LANE_RETURNED = 'webhook.lane_returned';
+    /**
+     * The circuit breaker blocked a webhook lane: it stays out of circulation until an operator closes it
+     * (LaneStates::close()); context: lane. The worker whose record() call made the trip records it.
+     */
+    public const string WEBHOOK_LANE_BLOCKED = 'webhook.lane_blocked';
+    /**
+     * The rate limiter granted 0 permits to each lane of a pass and the worker sleeps; context: lanes (the
+     * lanes with due rows that got a grant of 0, in the order of the pass), sleep_ms. The event names no
+     * bucket: the port returns only the grants.
+     */
+    public const string WEBHOOK_PERMIT_WAIT = 'webhook.permit_wait';
+    /**
+     * The rate limiter granted a webhook lane fewer permits than its due rows (its due count, capped at the
+     * row limit for each lane); context: lane, wanted, granted (also 0).
+     */
+    public const string WEBHOOK_LANE_AT_LIMIT = 'webhook.lane_at_limit';
 
     /** @param array<string, mixed> $context */
     public function record(string $event, array $context = []): void;

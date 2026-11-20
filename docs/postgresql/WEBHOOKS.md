@@ -89,15 +89,25 @@ $retention = new PostgreSqlDeliveryRetention($maintenancePdo);
   UTC, cast one time to `TIMESTAMP(3)`. The same value is the due limit
   (`available_at <= now`) and the start of the lease. Thus a lease of 0 ms is
   due again at the next claim.
-- **Claim.** `claim()` is one statement. The lanes come as a JSON array with
-  their position (`jsonb_array_elements_text ... WITH ORDINALITY`). For each
-  lane, a `LATERAL` subquery reads `idx_webhook_deliveries_due` from the lane
-  start, takes at most the row limit of each lane with `FOR UPDATE SKIP
-  LOCKED`, and the total limit then cuts the rows in the order of the lane
-  positions. The `UPDATE` sets `available_at` to the lease. In autocommit
-  mode the statement is its own transaction, so the lease commits before the
-  method returns, and concurrent workers skip the rows of each other and do not
-  wait. A lane that is two times in the list counts one time.
+- **Claim.** `claim()` is one statement. The lanes and their row limits come
+  as one JSON array of `[lane, row limit]` pairs, with their position
+  (`jsonb_array_elements ... WITH ORDINALITY`). For each lane, a `LATERAL`
+  subquery reads `idx_webhook_deliveries_due` from the lane start, takes at
+  most the row limit of that lane with `FOR UPDATE SKIP LOCKED`, and the total
+  limit then cuts the rows in the order of the lane positions. The `UPDATE`
+  sets `available_at` to the lease. In autocommit mode the statement is its
+  own transaction, so the lease commits before the method returns, and
+  concurrent workers skip the rows of each other and do not wait. The
+  statement text is the same for each number of lanes, so pgbouncer and
+  pdo_pgsql keep one prepared statement. `->>` gives a numeric lane ID as its
+  text.
+- **Due counts.** `dueCounts()` is one read statement with no lock and no
+  write. For each lane of a JSON array, in the order of the array, a
+  subquery counts the due, unfinished rows on `idx_webhook_deliveries_due` (one
+  index start for each lane), with `LIMIT` of the cap, so a lane with a large
+  backlog reads at most the cap of index entries. The due limit is the
+  database time of the claim. A row that a claim of a different session locks
+  still counts until that claim commits its lease.
 - **Results.** `complete()` writes all outcomes in one `UPDATE` with the lease
   check (`completed_at IS NULL AND available_at = lease`), and then inserts
   the dead letters of the dead outcomes that passed the check, through
@@ -128,8 +138,10 @@ $retention = new PostgreSqlDeliveryRetention($maintenancePdo);
 The plan of the claim over 20 lanes, with 10,000 due rows in one lane, is a
 Nested Loop over the lane list, with an Index Scan on the partial index of
 each partition and LockRows in each loop. The `UPDATE` finds the claimed rows
-through the primary key index of each partition. A functional test checks
-that the plan has no sequential scan.
+through the primary key index of each partition. The plan of the due counts
+has the same index scans with no LockRows and no write. Functional tests check
+that both plans read the partial index of each partition and have no
+sequential scan.
 
 ## Retention
 

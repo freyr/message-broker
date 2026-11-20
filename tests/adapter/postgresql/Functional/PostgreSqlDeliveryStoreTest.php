@@ -17,6 +17,7 @@ use Freyr\MessageBroker\Webhook\DeliveryCompletion;
 use Freyr\MessageBroker\Webhook\DeliveryRecord;
 use PDO;
 use PDOException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use ReflectionClassConstant;
 use Symfony\Component\Uid\Uuid;
 
@@ -54,8 +55,8 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
         // The claim of the rival runs inside its open transaction, so it holds
         // its row locks while the second session claims.
         $rival->beginTransaction();
-        $first = (new PostgreSqlDeliveryStore($rival))->claim([self::LANE], 2, 10, self::LEASE_MS);
-        $second = $this->store->claim([self::LANE], 10, 10, self::LEASE_MS);
+        $first = (new PostgreSqlDeliveryStore($rival))->claim(self::each([self::LANE], 2), 10, self::LEASE_MS);
+        $second = $this->store->claim(self::each([self::LANE], 10), 10, self::LEASE_MS);
         $rival->commit();
         self::$pdo->exec('RESET lock_timeout');
 
@@ -63,14 +64,14 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
         self::assertCount(2, $second, 'the second session skips the locked rows and does not wait');
         self::assertSame([], array_intersect(self::claimedIds($first), self::claimedIds($second)));
         self::assertEqualsCanonicalizing(self::ids($rows), [...self::claimedIds($first), ...self::claimedIds($second)]);
-        self::assertSame([], $this->store->claim([self::LANE], 10, 10, self::LEASE_MS), 'both leases hold');
+        self::assertSame([], $this->store->claim(self::each([self::LANE], 10), 10, self::LEASE_MS), 'both leases hold');
     }
 
     public function testAClaimOverTwentyLanesWithOneLaneOfTenThousandDueRowsReturnsRowsOfEachLane(): void
     {
         $lanes = $this->insertTwentyLanesWithOneBacklog();
 
-        $claimed = $this->store->claim($lanes, 10, 200, self::LEASE_MS);
+        $claimed = $this->store->claim(self::each($lanes, 10), 200, self::LEASE_MS);
 
         $expected = array_fill_keys($lanes, 2);
         $expected['busy'] = 10;
@@ -78,11 +79,19 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
         self::assertSame($expected, self::countByLane($claimed));
     }
 
-    public function testThePlanOfTheClaimReadsThePartialIndexOfEachPartitionForEachLaneAndNoTableScan(): void
+    /** @return iterable<string, array{string}> */
+    public static function laneStatements(): iterable
+    {
+        yield 'claim' => ['CLAIM_SQL'];
+        yield 'due counts' => ['DUE_COUNTS_SQL'];
+    }
+
+    #[DataProvider('laneStatements')]
+    public function testThePlanReadsThePartialIndexOfEachPartitionForEachLaneAndNoTableScan(string $statement): void
     {
         $lanes = $this->insertTwentyLanesWithOneBacklog();
 
-        $plan = $this->explainClaim($lanes, 10, 200);
+        $plan = $this->explain($statement, $lanes);
 
         $nodes = self::nodes($plan);
         self::assertSame([], array_values(array_filter($nodes, static fn (array $n): bool => $n['Node Type'] === 'Seq Scan')), 'no sequential scan');
@@ -102,15 +111,49 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
         self::assertContains('Function Scan', array_column($nodes, 'Node Type'), 'the loop over the lane list');
     }
 
-    public function testALaneTwiceInTheListCountsOneTimeAlsoForTheTotal(): void
+    public function testThePlanOfTheDueCountsTakesNoRowLock(): void
     {
-        $ours = [$this->record(), $this->record()];
-        $other = $this->record(lane: 'store_other');
-        $this->store->insert([...$ours, $other]);
+        $lanes = $this->insertTwentyLanesWithOneBacklog();
 
-        $claimed = $this->store->claim([self::LANE, self::LANE, 'store_other'], 2, 3, self::LEASE_MS);
+        $nodes = self::nodes($this->explain('DUE_COUNTS_SQL', $lanes));
 
-        self::assertEqualsCanonicalizing([...self::ids($ours), $other->id], self::claimedIds($claimed));
+        self::assertNotContains('LockRows', array_column($nodes, 'Node Type'));
+        self::assertNotContains('ModifyTable', array_column($nodes, 'Node Type'));
+    }
+
+    public function testTheDueCountsOverTwentyLanesCapTheBusyLane(): void
+    {
+        $lanes = $this->insertTwentyLanesWithOneBacklog();
+
+        $counts = $this->store->dueCounts($lanes, 25);
+
+        $expected = array_fill_keys($lanes, 2);
+        $expected['busy'] = 25;
+        self::assertSame($expected, $counts, 'each lane in the order of the list');
+    }
+
+    public function testTheDueCountsDoNotWaitForTheRowsThatADifferentSessionLocksAndCountThem(): void
+    {
+        $this->store->insert([$this->record(), $this->record(), $this->record()]);
+        $rival = self::newConnection();
+        self::$pdo->exec("SET lock_timeout = '2s'");
+
+        // The rival holds the row locks of its claim in an open transaction;
+        // its leases are not visible yet, so the rows are still due here.
+        $rival->beginTransaction();
+        (new PostgreSqlDeliveryStore($rival))->claim([
+            self::LANE => 2,
+        ], 2, self::LEASE_MS);
+        $counts = $this->store->dueCounts([self::LANE], 10);
+        $rival->commit();
+        self::$pdo->exec('RESET lock_timeout');
+
+        self::assertSame([
+            self::LANE => 3,
+        ], $counts, 'a read with no lock');
+        self::assertSame([
+            self::LANE => 1,
+        ], $this->store->dueCounts([self::LANE], 10), 'after the commit of the rival only one row is due');
     }
 
     public function testCompleteReturnsAListOfTheChangedRowsInTheOrderOfTheOutcomes(): void
@@ -119,10 +162,10 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
         $first = $this->record();
         $second = $this->record();
         $this->store->insert([$late]);
-        $old = $this->store->claim([self::LANE], 10, 10, 0)[0];
+        $old = $this->store->claim(self::each([self::LANE], 10), 10, 0)[0];
         $this->claimOne();
         $this->store->insert([$first, $second]);
-        [$a, $b] = self::byId($this->store->claim([self::LANE], 10, 10, self::LEASE_MS), [$first->id, $second->id]);
+        [$a, $b] = self::byId($this->store->claim(self::each([self::LANE], 10), 10, self::LEASE_MS), [$first->id, $second->id]);
 
         $changed = $this->store->complete([
             DeliveryCompletion::delivered($old),
@@ -139,7 +182,7 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
         $row = $this->record(lane: $lane);
         $this->store->insert([$row]);
 
-        $claimed = $this->store->claim([$lane], 10, 10, self::LEASE_MS);
+        $claimed = $this->store->claim(self::each([$lane], 10), 10, self::LEASE_MS);
 
         self::assertSame([$row->id], self::claimedIds($claimed));
         self::assertSame($lane, $claimed[0]->delivery->lane);
@@ -150,7 +193,7 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
         $row = $this->record();
         $this->store->insert([$row]);
 
-        $claimed = $this->store->claim([self::LANE], 10, 10, self::LEASE_MS);
+        $claimed = $this->store->claim(self::each([self::LANE], 10), 10, self::LEASE_MS);
 
         self::assertSame($claimed[0]->lease, self::fetchInt(
             "SELECT CAST(EXTRACT(EPOCH FROM available_at) * 1000 AS BIGINT) FROM webhook_deliveries WHERE id = '{$row->id}'",
@@ -248,7 +291,7 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
     {
         $row = $this->record();
         $this->store->insert([$row]);
-        $old = $this->store->claim([self::LANE], 10, 10, 0)[0];
+        $old = $this->store->claim(self::each([self::LANE], 10), 10, 0)[0];
         $current = $this->claimOne();
 
         $changed = $this->store->complete([
@@ -291,7 +334,7 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
         $delivered = $this->record();
         $dead = $this->record();
         $this->store->insert([$delivered, $dead]);
-        [$a, $b] = self::byId($this->store->claim([self::LANE], 10, 10, self::LEASE_MS), [$delivered->id, $dead->id]);
+        [$a, $b] = self::byId($this->store->claim(self::each([self::LANE], 10), 10, self::LEASE_MS), [$delivered->id, $dead->id]);
         $good = $this->deadLetter($b);
         $broken = new DeadLetter(
             id: 'not-a-uuid', // the id column is UUID: the insert fails
@@ -338,7 +381,7 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
     {
         $messageId = self::newId();
         $this->store->insert([$this->record(messageId: $messageId), $this->record(lane: 'store_other', messageId: $messageId)]);
-        $claimed = $this->store->claim([self::LANE, 'store_other'], 10, 10, self::LEASE_MS);
+        $claimed = $this->store->claim(self::each([self::LANE, 'store_other'], 10), 10, self::LEASE_MS);
 
         $this->store->complete(array_map(
             fn (ClaimedDelivery $c): DeliveryCompletion => DeliveryCompletion::dead($c, $this->deadLetter($c)),
@@ -382,7 +425,7 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
 
         // The claim of the rival runs inside its open transaction, so it holds the row lock.
         $rival->beginTransaction();
-        (new PostgreSqlDeliveryStore($rival))->claim([self::LANE], 10, 10, self::LEASE_MS);
+        (new PostgreSqlDeliveryStore($rival))->claim(self::each([self::LANE], 10), 10, self::LEASE_MS);
         $first = $this->store->abandon(EpochMillis::now(), null, 10);
         $rival->commit();
         self::$pdo->exec('RESET lock_timeout');
@@ -482,19 +525,24 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
     }
 
     /**
+     * @param string $constant CLAIM_SQL (a row limit of 10 for each lane and a total of 200) or DUE_COUNTS_SQL (a cap of 25)
      * @param list<string> $lanes
      *
-     * @return array<string, mixed> the plan of the claim statement, as EXPLAIN (FORMAT JSON) gives it
+     * @return array<string, mixed> the plan of the statement, as EXPLAIN (FORMAT JSON) gives it
      */
-    private function explainClaim(array $lanes, int $limitForEachLane, int $total): array
+    private function explain(string $constant, array $lanes): array
     {
-        $sql = (new ReflectionClassConstant(PostgreSqlDeliveryStore::class, 'CLAIM_SQL'))->getValue();
+        $sql = (new ReflectionClassConstant(PostgreSqlDeliveryStore::class, $constant))->getValue();
         self::assertIsString($sql);
         $statement = self::$pdo->prepare('EXPLAIN (FORMAT JSON) '.$sql);
-        $statement->bindValue('lanes', json_encode($lanes, JSON_THROW_ON_ERROR));
-        $statement->bindValue('limit_for_each_lane', $limitForEachLane, PDO::PARAM_INT);
-        $statement->bindValue('total', $total, PDO::PARAM_INT);
-        $statement->bindValue('lease_ms', self::LEASE_MS, PDO::PARAM_INT);
+        if ($constant === 'CLAIM_SQL') {
+            $statement->bindValue('lanes', json_encode(array_map(static fn (string $lane): array => [$lane, 10], $lanes), JSON_THROW_ON_ERROR));
+            $statement->bindValue('total', 200, PDO::PARAM_INT);
+            $statement->bindValue('lease_ms', self::LEASE_MS, PDO::PARAM_INT);
+        } else {
+            $statement->bindValue('lanes', json_encode($lanes, JSON_THROW_ON_ERROR));
+            $statement->bindValue('cap', 25, PDO::PARAM_INT);
+        }
         $statement->execute();
         $json = $statement->fetchColumn();
         self::assertIsString($json);
@@ -535,9 +583,19 @@ final class PostgreSqlDeliveryStoreTest extends FunctionalTestCase
         return $statement->fetchAll(PDO::FETCH_COLUMN);
     }
 
+    /**
+     * @param list<string> $lanes
+     *
+     * @return array<string, int> the same row limit for each lane, in the order of the list
+     */
+    private static function each(array $lanes, int $limit): array
+    {
+        return array_fill_keys($lanes, $limit);
+    }
+
     private function claimOne(): ClaimedDelivery
     {
-        $claimed = $this->store->claim([self::LANE], 10, 10, self::LEASE_MS);
+        $claimed = $this->store->claim(self::each([self::LANE], 10), 10, self::LEASE_MS);
         self::assertCount(1, $claimed);
 
         return $claimed[0];

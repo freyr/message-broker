@@ -25,7 +25,7 @@ ports and extends the contract test cases of the test kit (see
 | `ErrorHandler` | Receive each handled failure with its context. | Your own class |
 | `DeadLetter\DeadLetterSink` | Make a dead letter durable at the destination of a consumer (`store()`), the table or a queue of the transport. `DeadLetterStore` extends it. `DeliveryProcessor` takes a sink as `deadLetters`. | `PostgreSqlDeadLetterStore` (PostgreSQL adapter); `AmqpDeadLetterSink` (AMQP adapter); `InMemoryDeadLetterStore` (test kit) |
 | `Webhook\SubscriptionProvider` | Give the webhook subscriptions: by message name (`forMessage()`), by lane (`find()`), and all lanes (`lanes()`). See [WEBHOOKS.md](WEBHOOKS.md). | Your own class; `InMemorySubscriptionProvider` (test kit) |
-| `Webhook\DeliveryStore` | Insert delivery rows. Claim due rows of many lanes with a lease (`claim()`), write the results with the lease check and the dead letters (`complete()`), abandon old rows by date (`abandon()`), and count them (`countUnfinished()`). | `PostgreSqlDeliveryStore` (PostgreSQL adapter); `InMemoryDeliveryStore` (test kit) |
+| `Webhook\DeliveryStore` | Insert delivery rows. Count the due rows of each lane (`dueCounts()`). Claim due rows of many lanes with a row limit for each lane and a lease (`claim()`), write the results with the lease check and the dead letters (`complete()`), abandon old rows by date (`abandon()`), and count them (`countUnfinished()`). | `PostgreSqlDeliveryStore` (PostgreSQL adapter); `InMemoryDeliveryStore` (test kit) |
 | `Webhook\DeliverySender` | Send a batch of deliveries, each with its subscription, and return one result for each (`send()`). State the longest time of one call (`maxSendMs()`). | `FakeDeliverySender` (test kit) |
 | `Webhook\DeliveryRetryPolicy` | Decide between a retry at a time and a dead letter after a failed or refused result. | `DefaultDeliveryRetryPolicy` (core); your own policy |
 | `Webhook\DeliveryRetention` | Create the upcoming partitions of `webhook_deliveries` and drop the expired ones that hold no unfinished row. | `PostgreSqlDeliveryRetention` (PostgreSQL adapter) |
@@ -128,12 +128,20 @@ abandoned_at IS NULL`).
 - `insert(array $records): void` writes the rows on the connection of the
   caller, so they commit or roll back with the transaction of the
   application. It opens no transaction. An empty list writes nothing.
-- `claim(array $lanes, int $limitForEachLane, int $total, int $leaseMs):
-  array` claims due, unfinished rows of the lanes: at most `$limitForEachLane`
-  of each lane and at most `$total` in all. It sets `available_at` to now plus
+- `claim(array $limitForEachLane, int $total, int $leaseMs): array` claims
+  due, unfinished rows of the lanes of the map (lane => row limit): at most the
+  row limit of each lane and at most `$total` in all. The order of the keys is
+  the priority when `$total` cuts the claim. It sets `available_at` to now plus
   the lease and commits before it returns. Each `ClaimedDelivery` has the
   record and its lease value (the new `available_at`). Concurrent claimers
-  skip the rows of each other. An empty lane list returns an empty list.
+  skip the rows of each other. An empty map returns an empty list. PHP turns a
+  numeric lane ID into an `int` key, so an implementation reads each key as a
+  string.
+- `dueCounts(array $lanes, int $cap): array` counts, with no change and no
+  lock, the due, unfinished rows of each given lane, at most `$cap` for each
+  lane: lane => count (also 0), in the order of `$lanes`. The delivery loop
+  calls it before the rate limiter, with the row limit for each lane as the
+  cap.
 - `complete(array $outcomes): array` writes the `DeliveryCompletion` values in
   one transaction: delivered (final state), retry (attempts and
   `available_at`) and dead (the dead letter and the final state). The lease

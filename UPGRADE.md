@@ -1,5 +1,53 @@
 # Upgrade guide
 
+## From 0.13.x to 0.14.0
+
+The webhook delivery loop calls the flow control ports: a rate limit for each
+lane and a global rate limit, and a circuit breaker for each lane. With the
+defaults (`NoRateLimit`, `NoCircuitBreaker`) the loop claims and sends as
+before. The release changes no schema. All packages move to `^0.14` together.
+
+- **BREAKING (only for a `DeliveryStore` of your own):**
+  `Webhook\DeliveryStore::claim()` takes a map from each lane to its row
+  limit, in priority order:
+  `claim(array $limitForEachLane, int $total, int $leaseMs)` in place of
+  `claim(array $lanes, int $limitForEachLane, int $total, int $leaseMs)`. The
+  order of the keys is the priority when `$total` cuts the claim. PHP turns a
+  numeric lane ID into an `int` key, so read each key as a string. A call
+  `claim($lanes, $limit, $total, $leaseMs)` becomes
+  `claim(array_fill_keys($lanes, $limit), $total, $leaseMs)`.
+- **BREAKING (only for a `DeliveryStore` of your own):** implement the new
+  method `dueCounts(array $lanes, int $cap): array`: the due, unfinished rows
+  of each given lane, at most `$cap`, also 0, in the order of `$lanes`, with
+  no change and no lock. `DeliveryStoreContractTestCase` states both
+  contracts. `PostgreSqlDeliveryStore` and `InMemoryDeliveryStore` implement
+  them.
+- **BREAKING (only for tests that read the test kit):**
+  `Testing\InMemoryDeliveryStore::$claims` records `limitForEachLane` as a
+  map (lane => row limit) in place of the keys `lanes` (a list) and
+  `limitForEachLane` (an int); each entry is now
+  `['limitForEachLane' => [...], 'total' => ..., 'leaseMs' => ...]`. The new
+  `$dueCountCalls` records the arguments of each `dueCounts()` call
+  (`lanes`, `cap`).
+- `DeliveryLoopConfig` has three new optional values: `permitWaitMs` (default
+  50), `globalRate` and `defaultLaneRate` (`?Rate`, default `null`). A null
+  global rate means no global bucket. When `globalRate` is set, `run()`
+  refuses a batch size larger than its burst capacity. A config with none of
+  them works as before.
+- `DeliveryLoop` has two new optional constructor parameters, after
+  `events`: `rateLimiter` (default `NoRateLimit`) and `circuitBreaker`
+  (default `NoCircuitBreaker`). The loop reads the slow limit from
+  `CircuitBreaker::policy()`.
+- `Webhook\Subscription` has the new optional fourth parameter
+  `?Rate $rateLimit = null`: the rate of the lane of the subscription. The
+  rate of a lane is the subscription value, then `defaultLaneRate`, then no
+  lane limit.
+- With a rate limiter, the loop reads `dueCounts()` each pass (one read
+  statement) and calls `find()` for each lane at the lane refresh interval.
+- New events: `webhook.lane_opened`, `webhook.lane_blocked`,
+  `webhook.lane_returned`, `webhook.permit_wait` and `webhook.lane_at_limit`
+  (see `docs/core/WEBHOOKS.md`, "Events").
+
 ## From 0.12.x to 0.13.0
 
 A webhook delivery has no time limit now: a row waits until it is delivered,

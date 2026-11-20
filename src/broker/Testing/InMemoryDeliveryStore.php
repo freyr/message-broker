@@ -15,13 +15,13 @@ use LogicException;
 /**
  * In-memory delivery store that implements the contract of
  * {@see DeliveryStore}: the claim with a lease (available_at = now + lease),
- * the row limit for each lane and the total, the lease check of complete(),
- * the abandon of old rows and their count. The dead letters of complete() and abandon()
- * go to an
+ * the row limit for each lane and the total, the due counts, the lease check
+ * of complete(), the abandon of old rows and their count. The dead letters of
+ * complete() and abandon() go to an
  * {@see InMemoryDeadLetterStore} through store(), which keeps one open row
  * for each pair of message ID and source.
  *
- * Rows are keyed by id. The claim takes the lanes in the order of the list,
+ * Rows are keyed by id. The claim takes the lanes in the order of the keys,
  * and the rows of a lane by available_at (a new row: created_at), then in the
  * order of the insert. The time comes from symfony/clock through
  * {@see EpochMillis}.
@@ -34,8 +34,11 @@ final class InMemoryDeliveryStore implements DeliveryStore, TransactionParticipa
 {
     public int $claimCalls = 0;
 
-    /** @var list<array{lanes: list<string>, limitForEachLane: int, total: int, leaseMs: int}> the arguments of each claim() */
+    /** @var list<array{limitForEachLane: array<array-key, int>, total: int, leaseMs: int}> the arguments of each claim() */
     public array $claims = [];
+
+    /** @var list<array{lanes: list<string>, cap: int}> the arguments of each dueCounts() */
+    public array $dueCountCalls = [];
 
     /** @var (callable(int): void)|null called at the start of each claim() with the call number */
     public $onClaim;
@@ -61,24 +64,19 @@ final class InMemoryDeliveryStore implements DeliveryStore, TransactionParticipa
         }
     }
 
-    public function claim(array $lanes, int $limitForEachLane, int $total, int $leaseMs): array
+    public function claim(array $limitForEachLane, int $total, int $leaseMs): array
     {
         ++$this->claimCalls;
-        $this->claims[] = compact('lanes', 'limitForEachLane', 'total', 'leaseMs');
+        $this->claims[] = compact('limitForEachLane', 'total', 'leaseMs');
         if ($this->onClaim !== null) {
             ($this->onClaim)($this->claimCalls);
         }
 
         $now = EpochMillis::now();
         $claimed = [];
-        foreach (array_unique($lanes) as $lane) {
-            $due = array_filter(
-                $this->rows,
-                fn (DeliveryRecord $row): bool => $row->lane === $lane && $this->isDue($row, $now),
-            );
-            // usort keeps the order of equal elements: the insert order breaks a tie.
-            usort($due, static fn (DeliveryRecord $a, DeliveryRecord $b): int => self::dueAt($a) <=> self::dueAt($b));
-            foreach (array_slice($due, 0, $limitForEachLane) as $row) {
+        foreach ($limitForEachLane as $lane => $limit) {
+            $due = $this->due((string) $lane, $now);
+            foreach (array_slice($due, 0, $limit) as $row) {
                 if (count($claimed) >= $total) {
                     break 2;
                 }
@@ -87,6 +85,18 @@ final class InMemoryDeliveryStore implements DeliveryStore, TransactionParticipa
         }
 
         return $claimed;
+    }
+
+    public function dueCounts(array $lanes, int $cap): array
+    {
+        $this->dueCountCalls[] = compact('lanes', 'cap');
+        $now = EpochMillis::now();
+        $counts = [];
+        foreach ($lanes as $lane) {
+            $counts[$lane] = min($cap, count($this->due($lane, $now)));
+        }
+
+        return $counts;
     }
 
     public function complete(array $outcomes): array
@@ -186,6 +196,19 @@ final class InMemoryDeliveryStore implements DeliveryStore, TransactionParticipa
     {
         /** @var array{array<string, DeliveryRecord>, array<string, DeliveryCompletionKind>} $snapshot */
         [$this->rows, $this->finished] = $snapshot;
+    }
+
+    /** @return list<DeliveryRecord> the due, unfinished rows of the lane, in claim order */
+    private function due(string $lane, int $now): array
+    {
+        $due = array_values(array_filter(
+            $this->rows,
+            fn (DeliveryRecord $row): bool => $row->lane === $lane && $this->isDue($row, $now),
+        ));
+        // usort keeps the order of equal elements: the insert order breaks a tie.
+        usort($due, static fn (DeliveryRecord $a, DeliveryRecord $b): int => self::dueAt($a) <=> self::dueAt($b));
+
+        return $due;
     }
 
     private function isDue(DeliveryRecord $row, int $now): bool
