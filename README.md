@@ -14,8 +14,8 @@ It runs over **AMQP (RabbitMQ)** so you adopt it within your existing infrastruc
 
 ## Packages
 
-The library has four packages. **Today, one Composer package
-(`freyr/message-broker`) holds all four.** Separate Composer packages and
+The library has five packages. **Today, one Composer package
+(`freyr/message-broker`) holds all five.** Separate Composer packages and
 separate repositories are planned. Each package has its own folder of
 documents, so that the documents move with the code.
 
@@ -25,6 +25,7 @@ documents, so that the documents move with the code.
 | PostgreSQL adapter (`freyr/message-broker-postgresql`) | `src/adapter/postgresql/` | The outbox, deduplication and dead-letter stores, the transaction, the schema installer and the outbox retention. | [docs/postgresql/](docs/postgresql/) |
 | AMQP adapter (`freyr/message-broker-amqp`) | `src/adapter/amqp/` | The AMQP publisher and consumer, the wait-queue retry and the config classes. | [docs/amqp/](docs/amqp/) |
 | HTTP adapter (`freyr/message-broker-http`) | `src/adapter/http/` | The webhook sender: signed parallel `POST` requests (Standard Webhooks) with Symfony HttpClient, the response classifier and the private network check. | [docs/http/](docs/http/) |
+| Redis adapter (`freyr/message-broker-redis`) | `src/adapter/redis/` | The rate limit store of the webhook lanes: atomic Lua scripts with a phpredis, Relay or Predis client. | [docs/redis/](docs/redis/) |
 
 The manifest and the README of each future package are in `packages/<name>/`.
 
@@ -34,7 +35,7 @@ The manifest and the README of each future package are in `packages/<name>/`.
 composer require freyr/message-broker
 ```
 
-This installs the code of all four packages. It replaces `freyr/message-broker-postgresql`, `freyr/message-broker-amqp` and `freyr/message-broker-http`.
+This installs the code of all five packages. It replaces `freyr/message-broker-postgresql`, `freyr/message-broker-amqp`, `freyr/message-broker-http` and `freyr/message-broker-redis`.
 
 Requires PHP 8.4 or 8.5 (tested in CI on both), `ext-pdo_pgsql`, and PostgreSQL 14+. Install the pieces you use:
 
@@ -42,6 +43,7 @@ Requires PHP 8.4 or 8.5 (tested in CI on both), `ext-pdo_pgsql`, and PostgreSQL 
 |---|---|
 | AMQP transport | `composer require php-amqplib/php-amqplib` |
 | HTTP webhook sender | `composer require symfony/http-client symfony/http-foundation` |
+| Redis rate limit store | `ext-redis` or `composer require predis/predis`, and Redis 7.0+ or Valkey 7.2+ |
 | Graceful shutdown | `ext-pcntl` (relay/consumer SIGTERM handling) |
 
 ## Quickstart
@@ -94,6 +96,10 @@ HTTP adapter (`docs/http/`):
 - [HTTP sender](docs/http/SENDER.md) — the request, the configuration, the results, the timeouts, the DNS allowance and its known limit, the connections
 - [Signature](docs/http/SIGNATURE.md) — the `webhook-` headers, the secret, the verification by a receiver
 - [Network rules](docs/http/NETWORK.md) — the private network rule, the proxy rule, the `https` rule, no redirects
+
+Redis adapter (`docs/redis/`):
+
+- [Redis rate limit store](docs/redis/RATE_LIMIT.md) — the client bridges, the key prefix and the hash tag, the server versions, `maxmemory-policy`, the script cache
 
 ## License
 
