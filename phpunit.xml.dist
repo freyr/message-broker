@@ -44,6 +44,8 @@
     </source>
 
     <php>
+        <!-- All suites with coverage (Infection) pass the default 128M of PHP. -->
+        <ini name="memory_limit" value="512M"/>
         <env name="APP_ENV" value="test"/>
     </php>
 </phpunit>
