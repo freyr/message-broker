@@ -682,26 +682,27 @@ final class DeliveryLoopTest extends TestCase
 
     public function testOpenLanesAreNotInTheDueCountsTheAcquireOrTheClaim(): void
     {
-        $this->subscribe('crm');
-        $this->subscribe('erp');
-        $this->insert('crm');
-        $this->insert('erp');
+        $lanes = ['crm', 'erp', 'bi'];
+        foreach ($lanes as $lane) {
+            $this->subscribe($lane);
+            $this->insert($lane);
+        }
+        $order = (new Randomizer(new Mt19937(7)))->shuffleArray($lanes);
         $breaker = new InMemoryCircuitBreaker();
-        $breaker->record([new LaneCounts('erp', 10, 10)]);
+        // The first lane of the pass is open: the lanes left keep their order as a list.
+        $breaker->record([new LaneCounts($order[0], 10, 10)]);
         $limiter = new StubRateLimiter();
 
-        self::assertSame(1, $this->loop(rateLimiter: $limiter, circuitBreaker: $breaker)->deliverOnce());
+        self::assertSame(2, $this->loop(randomizer: new Randomizer(new Mt19937(7)), rateLimiter: $limiter, circuitBreaker: $breaker)->deliverOnce());
 
+        $inCirculation = array_slice($order, 1);
         self::assertSame([[
-            'lanes' => ['crm'],
+            'lanes' => $inCirculation,
             'cap' => 25,
         ]], $this->store->dueCountCalls);
-        self::assertSame([
-            'crm' => 1,
-        ], $limiter->acquires[0]['wanted']);
-        self::assertSame([
-            'crm' => 1,
-        ], $this->store->claims[0]['limitForEachLane']);
+        self::assertTrue(array_is_list($this->store->dueCountCalls[0]['lanes']));
+        self::assertSame(array_fill_keys($inCirculation, 1), $limiter->acquires[0]['wanted']);
+        self::assertSame(array_fill_keys($inCirculation, 1), $this->store->claims[0]['limitForEachLane']);
         self::assertSame(1, $breaker->openLanesCalls);
     }
 
@@ -856,6 +857,7 @@ final class DeliveryLoopTest extends TestCase
         $this->insert('erp');
         $limiter = new StubRateLimiter(static fn (array $wanted): array => array_map(static fn (): int => 0, $wanted));
         $config = new DeliveryLoopConfig(idleSleepMs: 1, permitWaitMs: 40);
+        $start = (int) $this->clock->now()->format('Uu');
 
         $passed = $this->loop($config, randomizer: new Randomizer(new Mt19937(7)), rateLimiter: $limiter)->deliverOnce();
 
@@ -864,7 +866,11 @@ final class DeliveryLoopTest extends TestCase
         self::assertSame(0, $this->store->claimCalls);
         self::assertSame([], $this->sender->calls);
         self::assertSame([], $limiter->givenBack);
-        self::assertSame($this->now + 40, EpochMillis::now(), 'the loop sleeps the permit wait through the clock');
+        self::assertSame(
+            $start + 40_000,
+            (int) $this->clock->now()->format('Uu'),
+            'the loop sleeps exactly the permit wait through the clock, in microseconds',
+        );
         self::assertSame([[
             'lanes' => $order,
             'sleep_ms' => 40,

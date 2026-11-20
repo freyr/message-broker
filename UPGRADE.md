@@ -22,6 +22,13 @@ before. The release changes no schema. All packages move to `^0.14` together.
   no change and no lock. `DeliveryStoreContractTestCase` states both
   contracts. `PostgreSqlDeliveryStore` and `InMemoryDeliveryStore` implement
   them.
+- **BREAKING (only for tests that read the test kit):**
+  `Testing\InMemoryDeliveryStore::$claims` records `limitForEachLane` as a
+  map (lane => row limit) in place of the keys `lanes` (a list) and
+  `limitForEachLane` (an int); each entry is now
+  `['limitForEachLane' => [...], 'total' => ..., 'leaseMs' => ...]`. The new
+  `$dueCountCalls` records the arguments of each `dueCounts()` call
+  (`lanes`, `cap`).
 - `DeliveryLoopConfig` has three new optional values: `permitWaitMs` (default
   50), `globalRate` and `defaultLaneRate` (`?Rate`, default `null`). A null
   global rate means no global bucket. When `globalRate` is set, `run()`
