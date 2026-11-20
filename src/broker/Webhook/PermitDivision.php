@@ -39,8 +39,7 @@ final readonly class PermitDivision
      * PHP keeps a numeric lane ID as an integer key; the result has the keys
      * of $available, in the same order.
      *
-     * @param array<array-key, int<0, max>> $available the availability of each lane, in the order of the call
-     * @param int<0, max> $grant
+     * @param array<array-key, int> $available the availability of each lane, in the order of the call
      *
      * @return array<array-key, int> the grant of each lane
      */

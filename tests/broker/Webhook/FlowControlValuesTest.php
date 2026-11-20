@@ -8,7 +8,6 @@ use Freyr\MessageBroker\Webhook\LaneCounts;
 use Freyr\MessageBroker\Webhook\LaneState;
 use Freyr\MessageBroker\Webhook\LaneTransitions;
 use Freyr\MessageBroker\Webhook\NoCircuitBreaker;
-use Freyr\MessageBroker\Webhook\NoRateLimit;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -74,16 +73,6 @@ final class FlowControlValuesTest extends TestCase
         self::assertSame(9, $state->failures);
         self::assertSame(601_000, $state->openUntil);
         self::assertSame(3, $state->openedCount);
-    }
-
-    public function testNoRateLimitGrantsEachWantedPermit(): void
-    {
-        $limiter = new NoRateLimit();
-
-        self::assertSame(1, $limiter->acquire(1));
-        self::assertSame(100_000, $limiter->acquire(100_000));
-        $limiter->giveBack(5);
-        self::assertSame(7, $limiter->acquire(7));
     }
 
     public function testNoCircuitBreakerHasNoOpenLaneAndNoTransition(): void

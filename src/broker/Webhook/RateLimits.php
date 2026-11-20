@@ -16,7 +16,7 @@ final readonly class RateLimits
 {
     /**
      * @param Rate|null $global the rate of the global bucket; null = no global bucket
-     * @param array<string, Rate> $lanes the rate of each lane with a limit, by lane ID
+     * @param array<array-key, Rate> $lanes the rate of each lane with a limit, by lane ID
      */
     public function __construct(
         public ?Rate $global,

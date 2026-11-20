@@ -5,80 +5,121 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Testing;
 
 use Freyr\MessageBroker\Time\EpochMillis;
+use Freyr\MessageBroker\Webhook\PermitDivision;
+use Freyr\MessageBroker\Webhook\Rate;
 use Freyr\MessageBroker\Webhook\RateLimiter;
-use InvalidArgumentException;
+use Freyr\MessageBroker\Webhook\RateLimits;
 
 /**
- * In-memory token bucket that implements the contract of
- * {@see RateLimiter}: the bucket starts full, refills at the rate (permits
- * each second) up to the burst capacity, grants whole permits, and takes
- * unused permits back up to the burst capacity. The burst capacity has a
- * default of one tenth of the rate, and a minimum of 1. The time comes from
- * symfony/clock through {@see EpochMillis}.
+ * In-memory token buckets that implement the contract of {@see RateLimiter}:
+ * one global bucket and one bucket for each lane with a limit. A new bucket
+ * starts full; the rates come from each call. The refill and the division
+ * are those of {@see PermitDivision}, and the time comes from symfony/clock
+ * through {@see EpochMillis}. With a null global rate it has no global bucket.
  *
- * It records each grant and each give-back for the assertions of a test.
+ * It records each acquire and each give-back for the assertions of a test.
  */
 final class InMemoryRateLimiter implements RateLimiter
 {
-    public readonly int $burstCapacity;
-
-    /** @var list<array{wanted: int, granted: int}> each acquire() */
+    /** @var list<array{wanted: array<array-key, int>, total: int, granted: array<array-key, int>}> each acquire() */
     public array $acquires = [];
 
-    /** @var list<int> the count of each giveBack() */
+    /** @var list<array<array-key, int>> the unused counts of each giveBack() */
     public array $givenBack = [];
 
     /** @var (callable(int): void)|null called at the start of each acquire() with the call number */
     public $onAcquire;
 
-    private float $tokens;
+    /** @var array{tokens: float, at: int}|null */
+    private ?array $global = null;
 
-    private int $refilledAt;
+    /** @var array<string, array{tokens: float, at: int}> */
+    private array $lanes = [];
 
-    public function __construct(
-        private readonly int $ratePerSecond,
-        ?int $burstCapacity = null,
-    ) {
-        if ($ratePerSecond < 1) {
-            throw new InvalidArgumentException("\$ratePerSecond must be 1 or more, {$ratePerSecond} given");
-        }
-        $burstCapacity ??= max(1, intdiv($ratePerSecond, 10));
-        if ($burstCapacity < 1) {
-            throw new InvalidArgumentException("\$burstCapacity must be 1 or more, {$burstCapacity} given");
-        }
-        $this->burstCapacity = $burstCapacity;
-        $this->tokens = $burstCapacity;
-        $this->refilledAt = EpochMillis::now();
-    }
-
-    public function acquire(int $wanted): int
+    public function acquire(array $wanted, int $total, RateLimits $limits): array
     {
         if ($this->onAcquire !== null) {
             ($this->onAcquire)(count($this->acquires) + 1);
         }
-        $this->refill();
-        $granted = max(0, min($wanted, (int) floor($this->tokens)));
-        $this->tokens -= $granted;
+        $now = EpochMillis::now();
+
+        $laneTokens = [];
+        $available = [];
+        foreach ($wanted as $lane => $count) {
+            $lane = (string) $lane;
+            $rate = $limits->forLane($lane);
+            if ($rate === null) {
+                $available[$lane] = $count;
+                continue;
+            }
+            $laneTokens[$lane] = self::tokens($this->lanes[$lane] ?? null, $rate, $now);
+            $available[$lane] = min($count, (int) floor($laneTokens[$lane]));
+        }
+
+        $globalGrant = $total;
+        $globalTokens = 0.0;
+        if ($limits->global !== null) {
+            $globalTokens = self::tokens($this->global, $limits->global, $now);
+            $globalGrant = min($total, (int) floor($globalTokens));
+        }
+
+        $granted = PermitDivision::divide($available, $globalGrant);
+
+        foreach ($laneTokens as $lane => $tokens) {
+            $this->lanes[$lane] = [
+                'tokens' => $tokens - $granted[$lane],
+                'at' => $now,
+            ];
+        }
+        if ($limits->global !== null) {
+            $this->global = [
+                'tokens' => $globalTokens - array_sum($granted),
+                'at' => $now,
+            ];
+        }
+
         $this->acquires[] = [
             'wanted' => $wanted,
+            'total' => $total,
             'granted' => $granted,
         ];
 
         return $granted;
     }
 
-    public function giveBack(int $count): void
+    public function giveBack(array $unused, RateLimits $limits): void
     {
-        $this->givenBack[] = $count;
-        $this->refill();
-        $this->tokens = min($this->burstCapacity, $this->tokens + $count);
+        $this->givenBack[] = $unused;
+        $now = EpochMillis::now();
+
+        foreach ($unused as $lane => $count) {
+            $lane = (string) $lane;
+            $rate = $limits->forLane($lane);
+            if ($rate !== null) {
+                $this->lanes[$lane] = [
+                    'tokens' => min($rate->burst, self::tokens($this->lanes[$lane] ?? null, $rate, $now) + $count),
+                    'at' => $now,
+                ];
+            }
+        }
+        if ($limits->global !== null) {
+            $this->global = [
+                'tokens' => min(
+                    $limits->global->burst,
+                    self::tokens($this->global, $limits->global, $now) + array_sum($unused),
+                ),
+                'at' => $now,
+            ];
+        }
     }
 
-    private function refill(): void
+    /** @param array{tokens: float, at: int}|null $bucket null = a new bucket, which starts full */
+    private static function tokens(?array $bucket, Rate $rate, int $now): float
     {
-        $now = EpochMillis::now();
-        $elapsedMs = max(0, $now - $this->refilledAt);
-        $this->tokens = min($this->burstCapacity, $this->tokens + $elapsedMs * $this->ratePerSecond / 1_000);
-        $this->refilledAt = $now;
+        if ($bucket === null) {
+            return $rate->burst;
+        }
+
+        return PermitDivision::refill($bucket['tokens'], $bucket['at'], $now, $rate);
     }
 }

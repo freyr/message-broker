@@ -5,13 +5,14 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Tests\Testing;
 
 use Freyr\MessageBroker\Testing\InMemoryRateLimiter;
-use InvalidArgumentException;
+use Freyr\MessageBroker\Webhook\Rate;
+use Freyr\MessageBroker\Webhook\RateLimits;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\Clock;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Clock\NativeClock;
 
-/** The rules of the in-memory rate limiter that need the time: the refill and the default burst capacity. */
+/** The rules of the in-memory rate limiter outside the contract: the exact refill, the records and the call hook. */
 final class InMemoryRateLimiterTest extends TestCase
 {
     private MockClock $clock;
@@ -27,89 +28,95 @@ final class InMemoryRateLimiterTest extends TestCase
         Clock::set(new NativeClock());
     }
 
-    public function testTheBucketRefillsAtTheRate(): void
-    {
-        $limiter = new InMemoryRateLimiter(100, 50);
-        $limiter->acquire(50);
-
-        $this->clock->sleep(0.1);
-
-        self::assertSame(10, $limiter->acquire(50), '100 permits each second for 100 ms');
-        self::assertSame(0, $limiter->acquire(1));
-    }
-
     public function testAPartOfAPermitStaysInTheBucket(): void
     {
-        $limiter = new InMemoryRateLimiter(10, 1);
-        $limiter->acquire(1);
+        $limiter = new InMemoryRateLimiter();
+        $limits = new RateLimits(new Rate(10, 1), [
+            'a' => new Rate(10, 1),
+        ]);
+        $wanted = [
+            'a' => 1,
+        ];
+        $limiter->acquire($wanted, 10, $limits);
 
         $this->clock->sleep(0.05);
-        self::assertSame(0, $limiter->acquire(1), 'half a permit');
+        self::assertSame([
+            'a' => 0,
+        ], $limiter->acquire($wanted, 10, $limits), 'half a permit');
         $this->clock->sleep(0.05);
-        self::assertSame(1, $limiter->acquire(1));
+        self::assertSame([
+            'a' => 1,
+        ], $limiter->acquire($wanted, 10, $limits));
     }
 
-    public function testTheRefillStopsAtTheBurstCapacity(): void
+    public function testAClockThatGoesBackRefillsNothing(): void
     {
-        $limiter = new InMemoryRateLimiter(100, 20);
-        $limiter->acquire(20);
+        $limiter = new InMemoryRateLimiter();
+        $limits = new RateLimits(new Rate(10, 5));
+        $wanted = [
+            'a' => 5,
+        ];
+        $limiter->acquire($wanted, 10, $limits);
 
-        $this->clock->sleep(60);
+        $this->clock->modify('-10 seconds');
 
-        self::assertSame(20, $limiter->acquire(1_000));
+        self::assertSame([
+            'a' => 0,
+        ], $limiter->acquire($wanted, 10, $limits));
     }
 
-    public function testTheDefaultBurstCapacityIsOneTenthOfTheRate(): void
+    public function testItRecordsEachAcquireAndEachGiveBack(): void
     {
-        self::assertSame(100, (new InMemoryRateLimiter(1_000))->burstCapacity);
-        self::assertSame(100, (new InMemoryRateLimiter(1_009))->burstCapacity);
-        self::assertSame(1, (new InMemoryRateLimiter(10))->burstCapacity);
-        self::assertSame(1, (new InMemoryRateLimiter(9))->burstCapacity, 'the minimum is 1');
-        self::assertSame(100, (new InMemoryRateLimiter(1_000))->acquire(1_000));
-    }
+        $limiter = new InMemoryRateLimiter();
+        $limits = new RateLimits(new Rate(1, 5));
 
-    public function testItRecordsEachGrantAndEachGiveBack(): void
-    {
-        $limiter = new InMemoryRateLimiter(1, 5);
-
-        $limiter->acquire(3);
-        $limiter->giveBack(1);
-        $limiter->acquire(9);
+        $limiter->acquire([
+            'a' => 3,
+        ], 10, $limits);
+        $limiter->giveBack([
+            'a' => 1,
+        ], $limits);
+        $limiter->acquire([
+            'a' => 9,
+        ], 2, $limits);
 
         self::assertSame([[
-            'wanted' => 3,
-            'granted' => 3,
+            'wanted' => [
+                'a' => 3,
+            ],
+            'total' => 10,
+            'granted' => [
+                'a' => 3,
+            ],
         ], [
-            'wanted' => 9,
-            'granted' => 3,
+            'wanted' => [
+                'a' => 9,
+            ],
+            'total' => 2,
+            'granted' => [
+                'a' => 2,
+            ],
         ]], $limiter->acquires);
-        self::assertSame([1], $limiter->givenBack);
+        self::assertSame([[
+            'a' => 1,
+        ]], $limiter->givenBack);
     }
 
     public function testOnAcquireRunsBeforeEachGrantWithTheCallNumber(): void
     {
-        $limiter = new InMemoryRateLimiter(1, 5);
+        $limiter = new InMemoryRateLimiter();
         $calls = [];
-        $limiter->onAcquire = static function (int $call) use (&$calls): void {
-            $calls[] = $call;
+        $limiter->onAcquire = static function (int $call) use (&$calls, $limiter): void {
+            $calls[] = [$call, count($limiter->acquires)];
         };
 
-        $limiter->acquire(1);
-        $limiter->acquire(1);
+        $limiter->acquire([
+            'a' => 1,
+        ], 1, new RateLimits(null));
+        $limiter->acquire([
+            'a' => 1,
+        ], 1, new RateLimits(null));
 
-        self::assertSame([1, 2], $calls);
-    }
-
-    public function testRejectsARateOrABurstCapacityBelowOne(): void
-    {
-        try {
-            new InMemoryRateLimiter(0);
-            self::fail('expected the refusal of the rate');
-        } catch (InvalidArgumentException $e) {
-            self::assertSame('$ratePerSecond must be 1 or more, 0 given', $e->getMessage());
-        }
-
-        $this->expectExceptionMessage('$burstCapacity must be 1 or more, 0 given');
-        new InMemoryRateLimiter(10, 0);
+        self::assertSame([[1, 0], [2, 1]], $calls);
     }
 }
