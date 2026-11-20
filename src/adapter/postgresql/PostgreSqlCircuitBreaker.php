@@ -80,7 +80,7 @@ final class PostgreSqlCircuitBreaker implements CircuitBreaker, LaneStates
             SELECT k.lane, c.now_ms, k.window_started_at, k.requests, k.failures, k.consecutive_openings,
                 i.requests AS added_requests, i.failures AS added_failures,
                 COALESCE(k.window_started_at < k.open_until, FALSE) AS returned,
-                c.now_ms - k.window_started_at > CAST(:window_ms AS INTEGER) * INTERVAL '1 millisecond' AS aged
+                c.now_ms - k.window_started_at > CAST(:window_ms AS BIGINT) * INTERVAL '1 millisecond' AS aged
             FROM locked k
             JOIN input i ON i.lane = k.lane
             CROSS JOIN clock c
@@ -91,20 +91,20 @@ final class PostgreSqlCircuitBreaker implements CircuitBreaker, LaneStates
                 CASE WHEN s.returned OR s.aged THEN s.now_ms ELSE s.window_started_at END AS window_started_at,
                 CASE WHEN s.returned OR s.aged THEN 0 ELSE s.requests END + s.added_requests AS requests,
                 CASE WHEN s.returned OR s.aged THEN 0 ELSE s.failures END + s.added_failures AS failures,
-                CASE WHEN NOT s.returned AND s.aged AND s.requests >= CAST(:minimum_requests AS INTEGER) THEN 0
+                CASE WHEN NOT s.returned AND s.aged AND s.requests >= CAST(:minimum_requests AS BIGINT) THEN 0
                     ELSE s.consecutive_openings END AS consecutive_openings
             FROM started s
         ),
         tripped AS (
             SELECT n.*,
-                n.requests >= CAST(:minimum_requests AS INTEGER)
-                    AND n.failures * 100 >= CAST(:error_rate_percent AS INTEGER) * n.requests AS trips
+                n.requests >= CAST(:minimum_requests AS BIGINT)
+                    AND CAST(n.failures AS BIGINT) * 100 >= CAST(:error_rate_percent AS BIGINT) * n.requests AS trips
             FROM counted n
         ),
         judged AS (
             SELECT p.*,
-                p.trips AND CAST(:max_openings AS INTEGER) > 0
-                    AND p.consecutive_openings >= CAST(:max_openings AS INTEGER) AS blocks
+                p.trips AND CAST(:max_openings AS BIGINT) > 0
+                    AND p.consecutive_openings >= CAST(:max_openings AS BIGINT) AS blocks
             FROM tripped p
         ),
         written AS (
@@ -113,7 +113,7 @@ final class PostgreSqlCircuitBreaker implements CircuitBreaker, LaneStates
                 requests = CASE WHEN j.trips THEN 0 ELSE j.requests END,
                 failures = CASE WHEN j.trips THEN 0 ELSE j.failures END,
                 open_until = CASE WHEN j.trips AND NOT j.blocks
-                    THEN j.now_ms + CAST(:open_ms AS INTEGER) * INTERVAL '1 millisecond' ELSE t.open_until END,
+                    THEN j.now_ms + CAST(:open_ms AS BIGINT) * INTERVAL '1 millisecond' ELSE t.open_until END,
                 blocked_at = CASE WHEN j.blocks THEN j.now_ms END,
                 opened_count = t.opened_count + CASE WHEN j.trips THEN 1 ELSE 0 END,
                 consecutive_openings = j.consecutive_openings + CASE WHEN j.trips THEN 1 ELSE 0 END
@@ -138,7 +138,7 @@ final class PostgreSqlCircuitBreaker implements CircuitBreaker, LaneStates
         ORDER BY lane COLLATE "C"
         SQL;
 
-    /** @var array<array-key, true> the lanes whose rows this store saw; a hint, a row can be gone */
+    /** @var array<array-key, bool> true for each lane whose row this store saw; a hint, a row can be gone */
     private array $known = [];
 
     public function __construct(
@@ -160,7 +160,7 @@ final class PostgreSqlCircuitBreaker implements CircuitBreaker, LaneStates
     public function record(array $counts): LaneTransitions
     {
         $lanes = array_map(static fn (LaneCounts $count): string => $count->lane, $counts);
-        $this->insert(array_values(array_filter($lanes, fn (string $lane): bool => !isset($this->known[$lane]))));
+        $this->insert(array_values(array_filter($lanes, fn (string $lane): bool => !($this->known[$lane] ?? false))));
         $transitions = $this->write($counts);
         if ($transitions === null) {
             // A different connection deleted a row after the insert.

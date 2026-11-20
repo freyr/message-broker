@@ -32,7 +32,10 @@ use PDO;
  */
 final class WebhookCircuitBreakerEndToEndTest extends FunctionalTestCase
 {
-    private const int OPEN_MS = 400;
+    private const int OPEN_MS = 1_000;
+
+    /** The passes of the open time stop this long before open_until: openLanes() in a pass reads a later database time. */
+    private const int MARGIN_MS = 200;
 
     public function testALaneWhoseEndpointAlwaysFailsGetsNoRequestDuringTheOpenTimeAndRequestsAfterIt(): void
     {
@@ -64,9 +67,11 @@ final class WebhookCircuitBreakerEndToEndTest extends FunctionalTestCase
         $attempts = self::crmAttempts();
         self::assertSame(array_fill(0, 10, 1), $attempts);
 
+        $openUntil = $breaker->all()[0]->openUntil;
+        self::assertNotNull($openUntil);
         $sender->calls = [];
         $passes = 0;
-        while ($breaker->openLanes() === ['crm']) {
+        while (self::databaseTime() < $openUntil - self::MARGIN_MS) {
             $loop->deliverOnce();
             ++$passes;
             usleep(5_000);
@@ -76,6 +81,13 @@ final class WebhookCircuitBreakerEndToEndTest extends FunctionalTestCase
         self::assertSame($attempts, self::crmAttempts(), 'the waiting rows of crm used no attempt');
         self::assertSame(10, self::fetchInt("SELECT COUNT(*) FROM webhook_deliveries WHERE lane = 'crm' AND completed_at IS NULL AND available_at <= CAST(now() AT TIME ZONE 'UTC' AS TIMESTAMP(3))"), 'and were due all the time');
 
+        // No pass in the margin: wait until the open time ended.
+        $deadline = hrtime(true) + 2_000_000_000;
+        while ($breaker->openLanes() !== [] && hrtime(true) < $deadline) {
+            usleep(5_000);
+        }
+        self::assertSame([], $breaker->openLanes(), 'the open time ended');
+
         $loop->deliverOnce();
 
         self::assertCount(1, $sender->calls, 'after the open time crm gets requests again');
@@ -84,6 +96,12 @@ final class WebhookCircuitBreakerEndToEndTest extends FunctionalTestCase
             array_map(static fn (DeliveryPair $pair): string => $pair->subscription->id, $sender->calls[0]),
         );
         self::assertSame(array_fill(0, 10, 2), self::crmAttempts());
+    }
+
+    /** The database time of the breaker, in epoch milliseconds. */
+    private static function databaseTime(): int
+    {
+        return self::fetchInt("SELECT CAST(EXTRACT(EPOCH FROM CAST(now() AT TIME ZONE 'UTC' AS TIMESTAMP(3))) * 1000 AS BIGINT)");
     }
 
     /** @return list<int> the attempts of the rows of crm */

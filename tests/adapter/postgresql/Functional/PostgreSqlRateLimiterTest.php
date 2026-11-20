@@ -148,10 +148,14 @@ final class PostgreSqlRateLimiterTest extends FunctionalTestCase
     {
         $limits = new RateLimits(new Rate(1, 10), [
             'crm' => new Rate(1, 5),
+            'erp' => new Rate(1, 5),
         ]);
         $limiter = new PostgreSqlRateLimiter(self::$pdo);
         $limiter->acquire([
             'crm' => 1,
+        ], 100, $limits);
+        $limiter->acquire([
+            'erp' => 1,
         ], 100, $limits);
         $this->createTrigger('BEFORE INSERT', 'STATEMENT', "RAISE EXCEPTION 'insert into webhook_rate_limit'");
 
@@ -159,7 +163,12 @@ final class PostgreSqlRateLimiterTest extends FunctionalTestCase
             'crm' => 1,
         ], $limiter->acquire([
             'crm' => 1,
-        ], 100, $limits), 'no INSERT statement');
+        ], 100, $limits), 'no INSERT statement: the store keeps the names of each earlier call');
+        self::assertSame([
+            'erp' => 1,
+        ], $limiter->acquire([
+            'erp' => 1,
+        ], 100, $limits));
         $limiter->giveBack([
             'crm' => 1,
         ], $limits);

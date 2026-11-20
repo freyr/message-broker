@@ -97,6 +97,25 @@ final class PostgreSqlCircuitBreakerTest extends FunctionalTestCase
         self::assertSame(['crm'], $breaker->openLanes());
     }
 
+    public function testAnOpenTimeAndAWindowAboveTheRangeOfA32BitIntegerWork(): void
+    {
+        $thirtyDays = 30 * 86_400_000;
+        $breaker = new PostgreSqlCircuitBreaker(self::$pdo, new CircuitBreakerPolicy(windowMs: $thirtyDays, openMs: $thirtyDays));
+
+        self::assertEquals(new LaneTransitions(['crm'], []), $breaker->record([new LaneCounts('crm', 10, 10)]));
+
+        [$state] = $breaker->all();
+        self::assertSame($state->windowStartedAt + $thirtyDays, $state->openUntil);
+        self::assertSame(['crm'], $breaker->openLanes());
+    }
+
+    public function testAMinimumAndAMaximumAboveTheRangeOfA32BitIntegerWork(): void
+    {
+        $breaker = new PostgreSqlCircuitBreaker(self::$pdo, new CircuitBreakerPolicy(minimumRequests: 3_000_000_000, maxConsecutiveOpenings: 3_000_000_000));
+
+        self::assertEquals(new LaneTransitions(), $breaker->record([new LaneCounts('crm', 10, 10)]), 'below the minimum');
+    }
+
     public function testANumericLaneIdIsAStringInEachResult(): void
     {
         $breaker = $this->breaker();
@@ -111,10 +130,16 @@ final class PostgreSqlCircuitBreakerTest extends FunctionalTestCase
     {
         $breaker = $this->breaker();
         $breaker->record([new LaneCounts('crm', 1, 0)]);
+        $breaker->record([new LaneCounts('erp', 1, 0)]);
         $this->createTrigger('BEFORE INSERT', 'STATEMENT', "RAISE EXCEPTION 'insert into webhook_lanes'");
 
         $breaker->record([new LaneCounts('crm', 1, 0)]);
-        self::assertSame(2, $breaker->all()[0]->requests);
+        $breaker->record([new LaneCounts('erp', 1, 0)]);
+        self::assertSame(
+            [2, 2],
+            array_map(static fn (LaneState $state): int => $state->requests, $breaker->all()),
+            'no INSERT statement: the store keeps the lanes of each earlier call',
+        );
 
         $this->expectException(PDOException::class);
         $this->expectExceptionMessage('insert into webhook_lanes');

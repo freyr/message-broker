@@ -73,7 +73,7 @@ final class PostgreSqlRateLimiter implements RateLimiter
         WHERE t.name = v.name
         SQL;
 
-    /** @var array<array-key, true> the names whose rows this store saw; a hint, a row can be gone */
+    /** @var array<array-key, bool> true for each name whose row this store saw; a hint, a row can be gone */
     private array $known = [];
 
     public function __construct(
@@ -158,7 +158,7 @@ final class PostgreSqlRateLimiter implements RateLimiter
             return $compute([])[0];
         }
 
-        $this->insert(array_filter($rates, fn (int|string $name): bool => !isset($this->known[$name]), ARRAY_FILTER_USE_KEY));
+        $this->insert(array_filter($rates, fn (int|string $name): bool => !($this->known[$name] ?? false), ARRAY_FILTER_USE_KEY));
         $outcome = $this->exchange($rates, $compute);
         if ($outcome === null) {
             // A different connection deleted a row after the insert.
