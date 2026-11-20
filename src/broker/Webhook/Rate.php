@@ -8,10 +8,11 @@ use InvalidArgumentException;
 
 /**
  * The rate of one token bucket of the {@see RateLimiter}: the permits that it
- * refills each second, and the burst capacity, the most permits that it
- * holds. The global bucket and each lane bucket use this value. There is no
- * value for "no limit": a lane with no limit has no Rate, and a deployment
- * with no global limit has a null global Rate ({@see RateLimits}).
+ * refills each second (above 0, also below 1, for example 0.5 for 30 each
+ * minute), and the burst capacity, the most whole permits that it holds. The
+ * global bucket and each lane bucket use this value. There is no value for
+ * "no limit": a lane with no limit has no Rate, and a deployment with no
+ * global limit has a null global Rate ({@see RateLimits}).
  */
 final readonly class Rate
 {
@@ -19,17 +20,17 @@ final readonly class Rate
     public int $burst;
 
     /**
-     * @param int $perSecond the requests each second, 1 or more
-     * @param int|null $burst the burst capacity, 1 or more; null = one tenth of the rate, with a minimum of 1
+     * @param float $perSecond the requests each second, above 0 and finite
+     * @param int|null $burst the burst capacity, 1 or more; null = one tenth of the rate as a whole number, with a minimum of 1
      */
     public function __construct(
-        public int $perSecond,
+        public float $perSecond,
         ?int $burst = null,
     ) {
-        if ($perSecond < 1) {
-            throw new InvalidArgumentException("\$perSecond must be 1 or more, {$perSecond} given");
+        if (!($perSecond > 0) || is_infinite($perSecond)) {
+            throw new InvalidArgumentException("\$perSecond must be above 0 and finite, {$perSecond} given");
         }
-        $burst ??= max(1, intdiv($perSecond, 10));
+        $burst ??= max(1, (int) floor($perSecond / 10));
         if ($burst < 1) {
             throw new InvalidArgumentException("\$burst must be 1 or more, {$burst} given");
         }

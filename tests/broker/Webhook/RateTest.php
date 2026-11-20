@@ -16,47 +16,53 @@ final class RateTest extends TestCase
     {
         $rate = new Rate(50, 7);
 
-        self::assertSame(50, $rate->perSecond);
+        self::assertSame(50.0, $rate->perSecond);
         self::assertSame(7, $rate->burst);
     }
 
-    public function testAcceptsTheSmallestValues(): void
+    public function testAcceptsARateBelowOneEachSecondAndABurstOfOne(): void
     {
-        $rate = new Rate(1, 1);
+        $rate = new Rate(0.5, 1);
 
-        self::assertSame(1, $rate->perSecond);
+        self::assertSame(0.5, $rate->perSecond, '30 requests each minute');
         self::assertSame(1, $rate->burst);
+        self::assertSame(0.001, (new Rate(0.001))->perSecond);
     }
 
-    /** @return iterable<string, array{int, int}> */
+    /** @return iterable<string, array{float, int}> */
     public static function defaultBursts(): iterable
     {
         yield 'one tenth of 100' => [100, 10];
         yield 'one tenth of 109, a whole number' => [109, 10];
         yield 'one tenth of 20' => [20, 2];
+        yield 'one tenth of 19.9 is below 2' => [19.9, 1];
         yield 'one tenth of 19 is below 2' => [19, 1];
         yield 'one tenth of 10' => [10, 1];
         yield 'the minimum of 1 for 9' => [9, 1];
         yield 'the minimum of 1 for 1' => [1, 1];
+        yield 'the minimum of 1 for 0.5' => [0.5, 1];
+        yield 'the minimum of 1 for 0.01' => [0.01, 1];
     }
 
     #[DataProvider('defaultBursts')]
-    public function testTheDefaultBurstIsOneTenthOfTheRateWithAMinimumOfOne(int $perSecond, int $burst): void
+    public function testTheDefaultBurstIsOneTenthOfTheRateWithAMinimumOfOne(float $perSecond, int $burst): void
     {
         self::assertSame($burst, (new Rate($perSecond))->burst);
     }
 
-    /** @return iterable<string, array{int, int|null, string}> */
+    /** @return iterable<string, array{float, int|null, string}> */
     public static function invalidRates(): iterable
     {
-        yield 'a rate of 0' => [0, null, '$perSecond must be 1 or more, 0 given'];
-        yield 'a negative rate' => [-5, 3, '$perSecond must be 1 or more, -5 given'];
+        yield 'a rate of 0' => [0.0, null, '$perSecond must be above 0 and finite, 0 given'];
+        yield 'a negative rate' => [-0.1, 3, '$perSecond must be above 0 and finite, -0.1 given'];
+        yield 'NAN' => [NAN, null, '$perSecond must be above 0 and finite, NAN given'];
+        yield 'INF' => [INF, 3, '$perSecond must be above 0 and finite, INF given'];
         yield 'a burst of 0' => [10, 0, '$burst must be 1 or more, 0 given'];
-        yield 'a negative burst' => [10, -1, '$burst must be 1 or more, -1 given'];
+        yield 'a negative burst' => [0.5, -1, '$burst must be 1 or more, -1 given'];
     }
 
     #[DataProvider('invalidRates')]
-    public function testRejectsARateOrABurstBelowOne(int $perSecond, ?int $burst, string $message): void
+    public function testRejectsARateThatIsNotAboveZeroOrABurstBelowOne(float $perSecond, ?int $burst, string $message): void
     {
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage($message);

@@ -133,6 +133,15 @@ final class PermitDivisionTest extends TestCase
         self::assertSame(1.0, PermitDivision::refill(1.0, 1_000, 1_000, $rate), 'no time, no refill');
     }
 
+    public function testTheRefillWorksWithARateBelowOneEachSecond(): void
+    {
+        $rate = new Rate(0.5, 1);
+
+        self::assertSame(0.5, PermitDivision::refill(0.0, 1_000, 2_000, $rate), '1 s at 0.5 each second: no whole permit');
+        self::assertSame(1.0, PermitDivision::refill(0.0, 1_000, 3_000, $rate), '2 s: one permit');
+        self::assertSame(0.25, PermitDivision::refill(0.0, 1_000, 1_500, $rate));
+    }
+
     public function testTheRefillIsAtMostTheBurst(): void
     {
         $rate = new Rate(10, 5);

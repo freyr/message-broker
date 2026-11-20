@@ -24,7 +24,7 @@ use PHPUnit\Framework\TestCase;
  *    the stored time, so the hook gives the result of a wait, and no test
  *    sleeps.
  *  - The limiter reads the present time from its own source (for a database:
- *    the database time). The tests use rates of 1 or 2 permits each second,
+ *    the database time). The tests use rates of 0.5 to 2 permits each second,
  *    so the real time of one test refills less than one permit.
  *  - An implementation with no bucket (as {@see \Freyr\MessageBroker\Webhook\NoRateLimit})
  *    returns false from hasBuckets(); the cases of a bucket are then skipped.
@@ -387,6 +387,31 @@ abstract class RateLimiterContractTestCase extends TestCase
         self::assertSame([
             'a' => 4,
         ], $limiter->acquire($wanted, 100, $limits), 'never above full');
+    }
+
+    public function testARateBelowOneEachSecondRefillsOnePermitInTwoSeconds(): void
+    {
+        $this->requireBuckets();
+        $limiter = $this->createRateLimiter();
+        $limits = new RateLimits(new Rate(0.5), [
+            'a' => new Rate(0.5),
+        ]);
+        $wanted = [
+            'a' => 5,
+        ];
+        self::assertSame([
+            'a' => 1,
+        ], $limiter->acquire($wanted, 100, $limits), 'the default burst of 0.5 each second is 1');
+
+        $this->ageBuckets(1_000);
+        self::assertSame([
+            'a' => 0,
+        ], $limiter->acquire($wanted, 100, $limits), 'half a permit after 1 s');
+
+        $this->ageBuckets(1_000);
+        self::assertSame([
+            'a' => 1,
+        ], $limiter->acquire($wanted, 100, $limits), 'one permit after 2 s');
     }
 
     public function testWithNoGlobalRateTheLaneBucketsCapTheirLanesAndTheTotalCapsTheSum(): void

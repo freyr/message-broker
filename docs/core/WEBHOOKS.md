@@ -118,9 +118,11 @@ deployment share: one global bucket, and one bucket for each lane with a
 limit. A request needs a permit of both, also a retry. A bucket refills at its
 rate up to its burst capacity, and a new bucket starts full.
 
-- **`Webhook\Rate`**: the requests each second (1 or more) and the burst
-  capacity (1 or more). The burst capacity has a default of one tenth of the
-  rate, with a minimum of 1: `new Rate(1_000)` has a burst capacity of 100.
+- **`Webhook\Rate`**: the requests each second (a `float` above 0, so
+  `new Rate(0.5)` is 30 requests each minute) and the burst capacity (a whole
+  number, 1 or more). The burst capacity has a default of one tenth of the
+  rate as a whole number (rounded down), with a minimum of 1:
+  `new Rate(1_000)` has a burst capacity of 100, and `new Rate(0.5)` has 1.
   There is no value for "no limit".
 - **`Webhook\RateLimits`**: the global `Rate`, and a map from a lane to its
   `Rate`. A null global rate means no global bucket. A lane that is not in the
