@@ -87,7 +87,6 @@ final class PostgreSqlRateLimiter implements RateLimiter
             static function (array $tokens) use ($wanted, $total): array {
                 $available = [];
                 foreach ($wanted as $lane => $count) {
-                    $lane = (string) $lane;
                     $available[$lane] = array_key_exists($lane, $tokens) ? min($count, (int) floor($tokens[$lane])) : $count;
                 }
                 $grant = array_key_exists(self::GLOBAL_BUCKET, $tokens) ? min($total, (int) floor($tokens[self::GLOBAL_BUCKET])) : $total;
@@ -183,9 +182,10 @@ final class PostgreSqlRateLimiter implements RateLimiter
         try {
             $lock = $this->pdo->prepare(self::LOCK_SQL);
             $lock->execute([
-                'names' => self::json(array_map(strval(...), array_keys($rates))),
+                // A numeric name is an integer key; jsonb_array_elements_text gives its text.
+                'names' => self::json(array_keys($rates)),
             ]);
-            /** @var list<array{name: string, tokens: float|string, refilled_ms: int|string, now_ms: int|string}> $rows */
+            /** @var list<array{name: string, tokens: float, refilled_ms: int, now_ms: int}> $rows pdo_pgsql gives the native types */
             $rows = $lock->fetchAll(PDO::FETCH_ASSOC);
             if (count($rows) < count($rates)) {
                 $this->pdo->rollBack();
@@ -196,9 +196,9 @@ final class PostgreSqlRateLimiter implements RateLimiter
             $tokens = [];
             $times = [];
             foreach ($rows as $row) {
-                $storedAt = (int) $row['refilled_ms'];
-                $now = max((int) $row['now_ms'], $storedAt);
-                $tokens[$row['name']] = PermitDivision::refill((float) $row['tokens'], $storedAt, $now, $rates[$row['name']]);
+                $storedAt = $row['refilled_ms'];
+                $now = max($row['now_ms'], $storedAt);
+                $tokens[$row['name']] = PermitDivision::refill($row['tokens'], $storedAt, $now, $rates[$row['name']]);
                 $times[$row['name']] = $now;
             }
             [$result, $after] = $compute($tokens);
@@ -206,7 +206,7 @@ final class PostgreSqlRateLimiter implements RateLimiter
             $buckets = [];
             foreach ($after as $name => $bucketTokens) {
                 $buckets[] = [
-                    'name' => (string) $name,
+                    'name' => $name,
                     'tokens' => $bucketTokens,
                     'at' => $times[$name],
                 ];
@@ -235,7 +235,7 @@ final class PostgreSqlRateLimiter implements RateLimiter
         $buckets = [];
         foreach ($rates as $name => $rate) {
             $buckets[] = [
-                'name' => (string) $name,
+                'name' => $name,
                 'tokens' => $rate->burst,
             ];
         }
