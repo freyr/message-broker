@@ -309,3 +309,119 @@ separate lanes so that a slow or failing workload does not delay another one.
 **Watch row age.** A single stuck row does not stall a lane, because other
 rows overtake it. Watch the age of the oldest unpublished row
 (`published_at IS NULL`) per lane.
+
+## Webhook flow control benchmark
+
+`make bench-webhook ARGS="<store> <lanes> <workers> <rps> <burst> <lane-rps> <batch> <endpoint-ms> <seconds>"`
+(`tools/webhook-bench.php`) fills `webhook_deliveries` with a backlog for the
+full run and starts N delivery workers: `DeliveryLoop` with
+`PostgreSqlDeliveryStore`, `PostgreSqlCircuitBreaker`, the rate limit store
+(`postgresql` or `redis`) and `HttpDeliverySender` against the test HTTP
+server (`tools/webhook-test-server/server.mjs`). The server counts the
+requests. The tool prints:
+
+- The most requests in a sliding window of 10 s (step 1 s), for all lanes and
+  for any lane, with the bounds (10 × rate + burst) × 1.01.
+- For each steady window (10 s windows that start 10 s or more after the first
+  request and end 10 s or more before the last request): the requests, the
+  delivered rate and the limited grants (each lane grant below its wanted
+  count, also 0).
+- D: the longest time from the end of an `acquire()` to the first request of
+  its pass at the server.
+- The `acquire()` duration (p50, p99). For PostgreSQL, the share of the
+  samples of `pg_stat_activity` (one each 10 ms) with a session that waits
+  for a lock on `webhook_rate_limit`.
+
+`make bench-webhook-server ARGS="<rps> <delay-ms> <seconds>"` measures the
+test server alone. The values below are relative: one laptop, all services in
+Docker, the server on the same machine.
+
+**Machine.** Apple M3 Max (14 cores), 36 GB RAM, macOS 26.5. OrbStack 7.0.14
+(Docker 29.4.0) with 10 CPUs and 16 GB RAM. PostgreSQL 16 (alpine image,
+default settings), Redis 7 (alpine image), PHP 8.4, Node.js 22. Other idle
+containers ran on the same machine.
+
+**Settings of each run.** 20 lanes, a row limit of 25 for each lane (the
+default), a batch size of 100, the connections for each host of the sender
+equal to the batch size, endpoints that answer 200 after 50 ms, 60 s for each
+worker, the default circuit breaker policy (no lane opened in any run), a
+lane refresh interval (`laneRefreshMs`) of 1 hour, so no refresh in a run,
+and the defaults of `DeliveryLoopConfig` for the other values.
+
+**Validity.** The batch size alone gives a lane a grant below its wanted
+count (20 lanes × 25 wanted rows against a total of 100). So a limited grant
+does not prove that a bucket set the rate. A *bucket-cut call* does: an
+`acquire()` whose sum of grants is below min(batch size, sum of the wanted
+counts). The tool now requires a bucket-cut call in each steady window for
+both verdicts ("limit active" and "lanes limited"). The runs below were
+judged before this change, by the limited-grant rule and the bucket-cut count
+of the whole run. In each global and lane run, at most 2 calls were not cut,
+of 835 to 8,535 calls, and each steady window holds more than 200 calls. So
+each steady window of each valid run had bucket-cut calls.
+
+**The test server alone.** At 1,200 requests each second with a delay of
+50 ms for 30 s, the server logged 1,197 to 1,203 requests in each second
+(0 errors, p99 54 ms at the client). At 2,400 requests each second: 2,392 to
+2,407 (p99 54 ms).
+
+### Global rate limit
+
+RPS 1,000, burst 100, no lane limit. Three runs for each store and worker
+count. A run is valid only when the limit was active: each steady window has
+a limited grant, a bucket-cut call and 9,800 requests or more. All 18 runs
+were valid. In each run, the global bucket cut all `acquire()` calls but 1 or
+2 (for example 834 of 835), so the bucket and not the batch size set the
+rate. Bound for all lanes: 10,201 requests in 10 s.
+
+| Store | Workers | Max in 10 s, all lanes (3 runs) | Max in 10 s, any lane | Delivered rate in the steady windows | Limited grants in a steady window | D max | Acquire p50 / p99 | Lock wait share |
+|---|---|---|---|---|---|---|---|---|
+| PostgreSQL | 1 | 10,059 / 10,071 / 10,098 | 516–517 | 996.5–1,005.9 /s | 2,720–2,800 | 25.7–28.4 ms | 1.8 / 3.4–4.0 ms | 0% |
+| PostgreSQL | 2 | 10,055 / 10,090 / 10,089 | 522–524 | 994.0–1,005.5 /s | 5,360–5,560 | 28.4–32.5 ms | 2.4–2.5 / 8.0–8.4 ms | 0.77–0.80% |
+| PostgreSQL | 4 | 10,059 / 10,069 / 10,081 | 524–533 | 995.5–1,006.9 /s | 10,620–11,320 | 25.2–30.9 ms | 3.6–3.9 / 10.9–11.0 ms | 4.5–5.0% |
+| Redis | 1 | 10,058 / 10,072 / 10,097 | 516–522 | 994.4–1,006.9 /s | 2,800–2,940 | 17.7–27.4 ms | 0.13 / 0.4–0.6 ms | — |
+| Redis | 2 | 10,065 / 10,106 / 10,095 | 520–525 | 997.4–1,004.6 /s | 5,720–6,000 | 26.8–34.9 ms | 0.12 / 2.0–2.2 ms | — |
+| Redis | 4 | 10,054 / 10,083 / 10,060 | 524–526 | 998.8–1,002.9 /s | 11,800–12,480 | 19.0–24.0 ms | 0.10 / 2.3 ms | — |
+
+Each window of each run stays within the bound. The highest count, 10,106,
+is 6 requests above 10 × RPS plus the burst (10,100), inside the tolerance of
+1%. D stays below 35 ms, so the permits that a worker holds before its
+requests can move at most about 35 requests into a window.
+
+### Lane limit
+
+8 workers, a lane rate of 40 with the default burst of 4 for each of the 20
+lanes, RPS 1,000 with a burst of 100, three runs for each store. A run is
+valid only when each steady window has a bucket-cut call and a limited grant
+for each lane: all 6 runs were valid. The batch size alone gives each lane a
+limited grant, so "20 of 20 lanes" is not the proof. The proof is that the
+lane buckets cut every `acquire()` (7,525 to 8,535 calls of each run, all
+cut), and that the 20 lanes together deliver 800 requests each second
+(20 × 40), below the global 1,000. With no lane limit, one lane takes up to
+about 52 requests each second. Bound for one lane: 408 requests in 10 s.
+
+| Store | Max in 10 s, any lane (3 runs) | Max in 10 s, all lanes | Delivered rate in the steady windows | Limited grants in a steady window | D max | Acquire p50 / p99 | Lock wait share |
+|---|---|---|---|---|---|---|---|
+| PostgreSQL | 403 / 404 / 404 | 8,060–8,080 | 796.0–802.0 /s | 24,500–26,840 | 20.1–42.4 ms | 4.5–4.7 / 16.6–33.2 ms | 17.8–20.2% |
+| Redis | 403 / 402 / 402 | 8,040–8,060 | 796.0–804.0 /s | 27,580–29,000 | 17.4–17.9 ms | 0.21 / 2.2–2.3 ms | — |
+
+The lane buckets hold the 20 lanes at 800 requests each second, below the
+global rate. With 8 workers on PostgreSQL, a session waits for the lock of a
+bucket row in about one sample of five, and the acquire p99 grows to 17–33 ms.
+The limit holds; the lock wait costs time in the worker, not accuracy. The
+Redis store has no row lock and a p99 near 2 ms.
+
+### Scale
+
+PostgreSQL store, RPS 2,000 with a burst of 200, so that the limit is above
+the target of 1,000 requests each second. Three runs for each worker count.
+
+| Workers | Delivered rate in the steady windows | Max in 10 s, all lanes (bound 20,402) | Global bucket cut an acquire | D max | Acquire p50 / p99 | Lock wait share |
+|---|---|---|---|---|---|---|
+| 1 | 1,340–1,380 /s | 13,700–13,804 | 0 of about 808 calls | 21.3–27.7 ms | 1.8–1.9 / 2.8–4.1 ms | 0% |
+| 2 | 1,994.6–2,008.2 /s | 20,146–20,214 | 760–782 of 1,536–1,570 | 26.9–44.2 ms | 2.4–2.6 / 7.4–7.6 ms | 0.70–0.73% |
+| 4 | 1,987.2–2,012.2 /s | 20,174–20,220 | 2,231–2,246 of 2,976–2,996 | 25.9–31.7 ms | 3.2–3.3 / 11.1–11.8 ms | 3.3–3.7% |
+
+One worker delivers 1,340 requests each second or more for 20 lanes with
+endpoints of 50 ms; its pass time sets that rate, not the limit. Two workers
+reach the limit of 2,000. Run more workers than this for headroom, because a
+slower endpoint makes each pass longer.

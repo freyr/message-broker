@@ -1,4 +1,4 @@
-.PHONY: help build logs shell install test test-pgbouncer phpstan deptrac cs-check cs-fix infection split-rehearsal bench bench-consumer
+.PHONY: help build logs shell install test test-pgbouncer phpstan deptrac cs-check cs-fix infection split-rehearsal bench bench-consumer bench-webhook-server bench-webhook
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -64,3 +64,10 @@ bench: ## Relay throughput benchmark; ARGS="<rows> <workers> <batch> [full|db-on
 
 bench-consumer: ## Consumer throughput benchmark; ARGS="<messages> <workers> <prefetch> <handler-sleep-ms>"
 	docker compose run --rm php php tests/adapter/amqp/Scripts/amqp-consumer-bench.php $(ARGS)
+
+bench-webhook-server: ## Load check of the test HTTP server alone; ARGS="<rps> <delay-ms> <seconds>"
+	docker compose up -d --wait webhook-server
+	docker compose run --rm --no-deps webhook-server node /srv/load.mjs http://webhook-server:8080 $(ARGS)
+
+bench-webhook: ## Webhook flow control benchmark; ARGS="<postgresql|redis> <lanes> <workers> <rps> <burst> <lane-rps> <batch> <endpoint-ms> <seconds>" (lane-rps 0 = no lane limit)
+	docker compose run --rm php php tools/webhook-bench.php $(ARGS)
