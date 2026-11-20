@@ -40,9 +40,11 @@ flowchart LR
   stores. The row holds no URL and no secret. The loop reads the subscription
   of a lane at send time.
 - **Claim with a lease.** The loop claims due rows of many lanes in one call:
-  at most the batch size, and at most the row limit of each lane. The claim
-  moves `available_at` of each row forward by the lease and commits before a
-  request starts. No transaction is open during the requests.
+  at most a row limit for each lane, and at most a total (the batch size, or
+  with a rate limiter the sum of the grants; see
+  [The loop with flow control](#the-loop-with-flow-control)). The claim moves
+  `available_at` of each row forward by the lease and commits before a request
+  starts. No transaction is open during the requests.
 - **Send.** The loop gives each claimed delivery with its subscription to the
   `DeliverySender` port in one `send()` call. The sender returns one result
   for each delivery: delivered; failed, with an optional retry time from the
@@ -104,8 +106,9 @@ webhook replays apart (see
 
 The core has two ports that control the flow of webhook requests: a rate
 limiter with a global bucket and a bucket for each lane, and a circuit breaker
-for each lane. This release has the ports, their values and the test kit. The
-delivery loop does not call them yet, and no adapter implements them yet.
+for each lane. The delivery loop calls both in each pass (see
+[The loop with flow control](#the-loop-with-flow-control)). The test kit has
+an in-memory implementation of each; no adapter implements them yet.
 
 A store error of either port propagates: the flow control never fails open.
 `Webhook\NoRateLimit` has no bucket, and `Webhook\NoCircuitBreaker` opens no
@@ -213,6 +216,82 @@ timed openings in a row is blocked until an operator closes it.
 | `slowLimitMs` | `5_000` (5 s) | A delivered result with a longer request time counts as a failure. `0` turns the slow rule off. |
 | `maxConsecutiveOpenings` | `3` | The timed openings in a row before a trip blocks the lane (`blocks()`). `0` turns the block off. |
 
+### Lane rates
+
+The rate of a lane comes from your application, not from the store:
+
+1. `Subscription::$rateLimit` (a `?Rate`, default `null`), the rate of the
+   subscription of the lane;
+2. else `DeliveryLoopConfig::$defaultLaneRate`;
+3. else no lane limit: the lane takes permits from the global bucket only.
+
+The loop reads the rates at its lane refresh interval (`laneRefreshMs`): it
+calls `lanes()`, then `find(lane)` for each lane. A changed rate has effect
+within one refresh interval; for that time, two workers can use different
+rates. The global rate is `DeliveryLoopConfig::$globalRate`; `null` means no
+global bucket. Give each worker the same values.
+
+### The loop with flow control
+
+Each pass of `DeliveryLoop`:
+
+1. **Lanes.** The lanes of the last refresh, in a new random order.
+2. **Open lanes.** The lanes of `CircuitBreaker::openLanes()` leave the pass.
+   Their rows wait with their attempts and retry times; they use no attempt.
+3. **Due counts.** `DeliveryStore::dueCounts()` for the lanes in circulation,
+   with the row limit for each lane (`limitForEachLane`) as the cap. A lane
+   with 0 due rows asks for no permit. With no due row in any lane, the pass
+   ends and the worker sleeps the idle sleep.
+4. **Permits.** `RateLimiter::acquire()` with the due count of each lane, in
+   the random order of the pass, the batch size as `$total`, and the
+   `RateLimits` of the pass. Each lane whose grant is below its due count
+   gives the event `webhook.lane_at_limit`. With a sum of grants of 0, the
+   worker records `webhook.permit_wait`, sleeps `permitWaitMs` and does not
+   claim.
+5. **Claim.** For each lane with a grant above 0, at most `min(row limit,
+   grant)` rows; the sum of the grants is the total.
+6. **Give back.** `giveBack()` with the grant minus the claimed rows of each
+   lane, only for the lanes with a difference above 0. A difference occurs
+   when a different worker claimed the counted rows first.
+7. **Send, results.** As in [The model](#the-model).
+8. **Record.** One `CircuitBreaker::record()` call with the requests and the
+   failures of each lane of the batch. The loop makes the counts with
+   `CircuitBreaker::policy()`, so the slow limit is the value of the breaker.
+
+With `NoRateLimit` (the default) the loop calls neither `dueCounts()` nor
+`acquire()`: the claim takes the row limit for each lane in circulation and
+the batch size as the total, and the refresh reads no subscription. With
+`NoCircuitBreaker` (the default) no lane leaves circulation.
+
+A worker that stops between the grant and the requests loses its permits: the
+rate is then lower for a moment, never higher. A row that becomes due after
+the due count waits for the next pass.
+
+```php
+use Freyr\MessageBroker\Testing\InMemoryCircuitBreaker;
+use Freyr\MessageBroker\Testing\InMemoryRateLimiter;
+use Freyr\MessageBroker\Webhook\DeliveryLoop;
+use Freyr\MessageBroker\Webhook\DeliveryLoopConfig;
+use Freyr\MessageBroker\Webhook\Rate;
+
+$loop = new DeliveryLoop(
+    store: $deliveryStore,
+    sender: $sender,
+    subscriptions: $subscriptions,
+    config: new DeliveryLoopConfig(
+        batchSize: 100,
+        globalRate: new Rate(1_000),          // burst capacity 100: not smaller than the batch size
+        defaultLaneRate: new Rate(40),        // a subscription with its own rateLimit overrides it
+    ),
+    events: $events,
+    rateLimiter: new InMemoryRateLimiter(),   // one process only; a shared store comes with an adapter
+    circuitBreaker: new InMemoryCircuitBreaker(),
+);
+```
+
+The in-memory implementations keep their state in one process, so they limit
+one worker only. Use them for tests and for a deployment with one worker.
+
 ### The flow control ports
 
 | Port | Methods | Notes |
@@ -256,6 +335,9 @@ $maxReceiverDelayMs = 86_400_000)`:
 | `laneRefreshMs` | `30_000` (30 s) | The interval of the read of `SubscriptionProvider::lanes()`. A new subscription waits up to this time. |
 | `laneFilter` | `null` | Claim only these lanes; `null` claims all lanes. |
 | `idleSleepMs` | `200` | The sleep after a pass that delivered nothing, plus up to a quarter of it as jitter. |
+| `permitWaitMs` | `50` | The sleep after a pass whose grants were all 0, in place of the idle sleep. |
+| `globalRate` | `null` | The `Rate` of the global bucket; `null` = no global bucket. When set, the batch size must not be larger than its burst capacity. |
+| `defaultLaneRate` | `null` | The `Rate` of a lane whose subscription has no `rateLimit`; `null` = no lane limit for such a lane. |
 
 ```php
 use Freyr\MessageBroker\Webhook\DeliveryLoop;
@@ -275,9 +357,13 @@ $loop->run(new WorkerLimits(maxMessages: 10_000));
 
 ### Start check
 
-`run()` refuses to start, with an `InvalidArgumentException`, when the lease
-is not longer than `maxSendMs()` of the sender. A shorter lease lets a second
-worker claim a row while the first one still sends it.
+`run()` refuses to start, with an `InvalidArgumentException`:
+
+- when the lease is not longer than `maxSendMs()` of the sender. A shorter
+  lease lets a second worker claim a row while the first one still sends it;
+- when the global rate is set and the batch size is larger than its burst
+  capacity. One pass can then never get the permits of a full batch. With a
+  null global rate there is no such check.
 
 ### Worker limits
 
@@ -349,6 +435,20 @@ store changed. A row that the lease check skipped gives no event.
 
 An abandoned row gives no `WEBHOOK_DEAD_LETTERED`. Use the `reason_code` `gone`
 to disable a subscription in your application.
+
+The flow control events:
+
+| Constant | Name | Context | When |
+|---|---|---|---|
+| `WEBHOOK_LANE_OPENED` | `webhook.lane_opened` | `lane` | The `record()` call of this worker took the lane out of circulation for the open time. One for each trip. |
+| `WEBHOOK_LANE_BLOCKED` | `webhook.lane_blocked` | `lane` | The `record()` call of this worker blocked the lane, in place of `webhook.lane_opened`. |
+| `WEBHOOK_LANE_RETURNED` | `webhook.lane_returned` | `lane` | The `record()` call of this worker started the first window after the open time. One for each trip. |
+| `WEBHOOK_PERMIT_WAIT` | `webhook.permit_wait` | `lanes` (the lanes that got a grant of 0, in the order of the pass), `sleep_ms` | Each lane with due rows got a grant of 0; the worker sleeps `permitWaitMs`. The port returns only grants, so the event names no bucket. |
+| `WEBHOOK_LANE_AT_LIMIT` | `webhook.lane_at_limit` | `lane`, `wanted` (the due count, at most the row limit), `granted` (also 0) | The grant of the lane was below its due count: a bucket or the batch size limited it. |
+
+Alerts: a `webhook.lane_blocked` (only `LaneStates::close()` ends a block); a lane with many `webhook.lane_opened`; a
+`webhook.permit_wait` in most passes for a long time; and a lane with
+`webhook.lane_at_limit` in most passes for a long time.
 
 ## Security
 

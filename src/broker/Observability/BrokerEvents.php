@@ -55,7 +55,7 @@ interface BrokerEvents
     public const string WEBHOOK_LANE_RETURNED = 'webhook.lane_returned';
     /**
      * The circuit breaker blocked a webhook lane: it stays out of circulation until an operator closes it
-     * (webhook:lanes --close); context: lane. The worker whose record() call made the trip records it.
+     * (LaneStates::close()); context: lane. The worker whose record() call made the trip records it.
      */
     public const string WEBHOOK_LANE_BLOCKED = 'webhook.lane_blocked';
     /**
