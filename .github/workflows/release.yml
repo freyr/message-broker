@@ -131,11 +131,22 @@ jobs:
           releases="${RELEASES:-[]}"
           # The names of the released packages, for the matrix of the packagist job (an empty list skips it).
           echo "packages=$(jq -c '[.[].name]' <<< "$releases")" >> "$GITHUB_OUTPUT"
-          # The tag of each released adapter in its split repo: v{version}, or empty (no tag).
+          # The tag of each released adapter in its split repo: v{version}, or empty (no tag). A tag that the split
+          # repo already holds (a new run of a failed split job) is left out, because the action fails on an
+          # existing tag and only the release App may create v* tags.
           for name in storage-postgresql transport-amqp webhook-http ratelimit-redis; do
             version=$(jq -r --arg name "$name" '.[] | select(.name == $name) | .version' <<< "$releases")
-            echo "${name//-/_}=${version:+v${version}}" >> "$GITHUB_OUTPUT"
-            echo "${name}: ${version:+tag v${version}}${version:-no release}" >> "$GITHUB_STEP_SUMMARY"
+            tag=""
+            if [ -z "$version" ]; then
+              line="${name}: no release"
+            elif [ -n "$(git ls-remote --tags "https://github.com/freyr/message-broker-${name}.git" "refs/tags/v${version}")" ]; then
+              line="${name}: tag v${version} already in the split repo, not pushed again"
+            else
+              tag="v${version}"
+              line="${name}: tag ${tag}"
+            fi
+            echo "${name//-/_}=${tag}" >> "$GITHUB_OUTPUT"
+            echo "$line" >> "$GITHUB_STEP_SUMMARY"
           done
 
       - name: Get the release App token for the split repos

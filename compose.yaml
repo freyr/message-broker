@@ -10,7 +10,7 @@ services:
       - ${COMPOSER_HOME}:/.composer:consistent
     environment:
       # The adapters require freyr/message-broker ^0.15, and the root package is the core: Composer
-      # needs its version. Change it with REHEARSAL_VERSION of tools/split-rehearsal.sh at each minor release.
+      # needs its version. Change it with COMPOSER_ROOT_VERSION of .github/workflows/tests.yml at each minor release of the core.
       COMPOSER_ROOT_VERSION: "0.15.0"
       POSTGRES_DSN: "pgsql:host=postgres;port=5432;dbname=message_broker_test"
       POSTGRES_USER: broker

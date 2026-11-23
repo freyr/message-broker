@@ -32,28 +32,28 @@
       "name": "storage-postgresql",
       "path": "storage/postgresql",
       "tag": "storage-postgresql-v{version}",
-      "ignore": ["storage/postgresql/tests/**", "storage/postgresql/docs/**", "storage/postgresql/*.md"],
+      "ignore": ["storage/postgresql/tests/**", "storage/postgresql/docs/**", "storage/postgresql/*.md", "storage/postgresql/phpunit.xml.dist", "storage/postgresql/infection.json5"],
       "initial": "0.1.0"
     },
     {
       "name": "transport-amqp",
       "path": "transport/amqp",
       "tag": "transport-amqp-v{version}",
-      "ignore": ["transport/amqp/tests/**", "transport/amqp/docs/**", "transport/amqp/*.md"],
+      "ignore": ["transport/amqp/tests/**", "transport/amqp/docs/**", "transport/amqp/*.md", "transport/amqp/phpunit.xml.dist", "transport/amqp/infection.json5"],
       "initial": "0.1.0"
     },
     {
       "name": "webhook-http",
       "path": "webhook/http",
       "tag": "webhook-http-v{version}",
-      "ignore": ["webhook/http/tests/**", "webhook/http/docs/**", "webhook/http/*.md"],
+      "ignore": ["webhook/http/tests/**", "webhook/http/docs/**", "webhook/http/*.md", "webhook/http/phpunit.xml.dist", "webhook/http/infection.json5"],
       "initial": "0.1.0"
     },
     {
       "name": "ratelimit-redis",
       "path": "ratelimit/redis",
       "tag": "ratelimit-redis-v{version}",
-      "ignore": ["ratelimit/redis/tests/**", "ratelimit/redis/docs/**", "ratelimit/redis/*.md"],
+      "ignore": ["ratelimit/redis/tests/**", "ratelimit/redis/docs/**", "ratelimit/redis/*.md", "ratelimit/redis/phpunit.xml.dist", "ratelimit/redis/infection.json5"],
       "initial": "0.1.0"
     }
   ]

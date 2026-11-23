@@ -496,7 +496,7 @@ jobs:
 
   # The PostgreSQL contract tests and the consumer functional tests through pgbouncer in transaction mode
   # (the same settings as the pgbouncer service of compose.yaml and `make test-pgbouncer`). It keeps the
-  # statement of docs/postgresql/CONNECTION_POOLING.md true. The pooler is a service, so it starts before the steps.
+  # statement of storage/postgresql/docs/CONNECTION_POOLING.md true. The pooler is a service, so it starts before the steps.
   # The guard test runs first: when the pooler does not rotate server connections, the other steps prove nothing.
   # PHP 8.4 only: pooling does not depend on the PHP version. The timeout stops a run that hangs on a wrong
   # pooler setting (with max_prepared_statements = 0 a run hung and a server connection went out of sync).
