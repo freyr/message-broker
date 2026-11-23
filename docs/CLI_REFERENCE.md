@@ -8,7 +8,7 @@ application's `Symfony\Component\Console\Application`:
 
 ```php
 use Freyr\MessageBroker\Console\SetupSchemaCommand;
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlSchemaInstaller;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlSchemaInstaller;
 
 $application->add(new SetupSchemaCommand(new PostgreSqlSchemaInstaller($pdo)));
 ```
@@ -26,7 +26,7 @@ Creates the `outbox_messages` table (partitioned by `created_at`, with the
 first daily partitions and no default partition), `message_deduplication`,
 and `dead_letters` (or prints the DDL without executing it). A second run
 skips the partitions that are already attached. The tables and the installer
-are described in [postgresql/STORAGE.md](postgresql/STORAGE.md).
+are described in [../storage/postgresql/docs/STORAGE.md](../storage/postgresql/docs/STORAGE.md).
 
 **Constructor:** `new SetupSchemaCommand(SchemaInstaller $installer)`, for example
 `new SetupSchemaCommand(new PostgreSqlSchemaInstaller($pdo))`. The `SchemaInstaller` port
@@ -56,7 +56,7 @@ for example `new OutboxMaintainCommand(new PostgreSqlOutboxRetention($pdo))`.
 | `--dry-run` | Report what would be dropped and what would be kept; change nothing. |
 
 The partitions, the retention rules and the locks are described in
-[postgresql/RETENTION.md](postgresql/RETENTION.md).
+[../storage/postgresql/docs/RETENTION.md](../storage/postgresql/docs/RETENTION.md).
 
 An abandoned row (see `message-broker:outbox:abandon`) does not keep its
 partition. For each dropped partition that held abandoned rows, the command
@@ -189,7 +189,7 @@ A limit is checked between deliveries, never inside one: after the processor
 committed and acked the delivery, and after a wait with no delivery. A limit
 stop is a graceful stop, as SIGTERM is: the consumer logs one `info` line
 ("Worker limit reached; the worker stops"), returns its unacked deliveries with
-no delivery count (see [the return rule](amqp/CONSUMER.md)) and `run()`
+no delivery count (see [the return rule](../transport/amqp/docs/CONSUMER.md)) and `run()`
 returns. With no limit option, the consumer runs until a signal or a failure, as
 before.
 
@@ -211,7 +211,7 @@ daily partitions from today to today plus `--premake-days`, and the flow
 control tables `webhook_rate_limit` and `webhook_lanes`. A second run skips
 what exists. An application that does not use webhooks does not need
 this command. The table is described in
-[postgresql/WEBHOOKS.md](postgresql/WEBHOOKS.md).
+[../storage/postgresql/docs/WEBHOOKS.md](../storage/postgresql/docs/WEBHOOKS.md).
 
 **Constructor:** `new WebhookSetupCommand(SchemaInstaller $installer)`, with
 the installer of the webhook table, for example
@@ -517,7 +517,7 @@ cases are in [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md#importing-a-dead-letter-queue
 returns the number of imported messages. For AMQP:
 
 ```php
-use Freyr\MessageBroker\Adapter\Amqp\AmqpDeadLetterImport;
+use Freyr\MessageBroker\Transport\Amqp\AmqpDeadLetterImport;
 use Freyr\MessageBroker\Console\DlqImportCommand;
 use Freyr\MessageBroker\DeadLetter\DeadLetterBuilder;
 use Freyr\MessageBroker\DeadLetter\DeadLetterImporter;
@@ -543,7 +543,7 @@ command exits with a non-zero code.
 Prunes `message_deduplication` entries older than a given age. Keep the
 threshold longer than the time in which a duplicate can arrive. The chunked
 delete of the PostgreSQL store is described in
-[postgresql/STORAGE.md](postgresql/STORAGE.md).
+[../storage/postgresql/docs/STORAGE.md](../storage/postgresql/docs/STORAGE.md).
 
 **Constructor:** `new DedupCleanupCommand(DeduplicationStore $store)`
 

@@ -151,7 +151,7 @@ signature of `AmqpConsumer::run()`. It changes no schema.
   necessary.
 - Upgrade the process that runs `message-broker:dlq:import` before a consumer
   uses `AmqpDeadLetterSink`: an older import ignores the header
-  `x-dead-letter`. For a rollback, see `docs/amqp/DEAD_LETTERS.md`, "Upgrade
+  `x-dead-letter`. For a rollback, see `transport/amqp/docs/DEAD_LETTERS.md`, "Upgrade
   and rollback order".
 
 ## From 0.10.x to 0.11.0
@@ -480,7 +480,7 @@ $processor = new DeliveryProcessor(
   adds no count, and a failure adds 1 to the delivery in work only. It sends
   `basic.cancel`, `basic.reject` (only for the delivery in work, after a
   failure) and `basic.nack` (tag 0, `multiple`, `requeue`). See
-  [docs/amqp/CONSUMER.md](docs/amqp/CONSUMER.md), *The return rule*.
+  [transport/amqp/docs/CONSUMER.md](transport/amqp/docs/CONSUMER.md), *The return rule*.
 - A confirm timeout of the wait-queue publish ends `run()` with the exception,
   so `message-broker:consume` exits with a failure. In the earlier release it
   ended `run()` as an idle stop, with exit code 0.

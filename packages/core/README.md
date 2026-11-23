@@ -25,7 +25,7 @@ After the split, install the core and the adapters that you use:
 
 ```bash
 composer require freyr/message-broker
-composer require freyr/message-broker-postgresql freyr/message-broker-amqp
+composer require freyr/message-broker-storage-postgresql freyr/message-broker-transport-amqp
 ```
 
 Today, `composer require freyr/message-broker` installs the code of all three

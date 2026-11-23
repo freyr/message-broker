@@ -22,10 +22,10 @@ documents, so that the documents move with the code.
 | Package | Folder in this repo | What it holds | Documents |
 |---|---|---|---|
 | Core (`freyr/message-broker`) | `src/broker/` | The ports, the relay loop, the delivery processor, retry and dead letters, the wire format, the console commands and the test kit. | [docs/](docs/) |
-| PostgreSQL adapter (`freyr/message-broker-postgresql`) | `src/adapter/postgresql/` | The outbox, deduplication and dead-letter stores, the transaction, the schema installer and the outbox retention. | [docs/postgresql/](docs/postgresql/) |
-| AMQP adapter (`freyr/message-broker-amqp`) | `src/adapter/amqp/` | The AMQP publisher and consumer, the wait-queue retry and the config classes. | [docs/amqp/](docs/amqp/) |
-| HTTP adapter (`freyr/message-broker-http`) | `src/adapter/http/` | The webhook sender: signed parallel `POST` requests (Standard Webhooks) with Symfony HttpClient, the response classifier and the private network check. | [docs/http/](docs/http/) |
-| Redis adapter (`freyr/message-broker-redis`) | `src/adapter/redis/` | The rate limit store of the webhook lanes: atomic Lua scripts with a phpredis, Relay or Predis client. | [docs/redis/](docs/redis/) |
+| PostgreSQL adapter (`freyr/message-broker-storage-postgresql`) | `src/adapter/postgresql/` | The outbox, deduplication and dead-letter stores, the transaction, the schema installer and the outbox retention. | [storage/postgresql/docs/](storage/postgresql/docs/) |
+| AMQP adapter (`freyr/message-broker-transport-amqp`) | `src/adapter/amqp/` | The AMQP publisher and consumer, the wait-queue retry and the config classes. | [transport/amqp/docs/](transport/amqp/docs/) |
+| HTTP adapter (`freyr/message-broker-webhook-http`) | `src/adapter/http/` | The webhook sender: signed parallel `POST` requests (Standard Webhooks) with Symfony HttpClient, the response classifier and the private network check. | [webhook/http/docs/](webhook/http/docs/) |
+| Redis adapter (`freyr/message-broker-ratelimit-redis`) | `src/adapter/redis/` | The rate limit store of the webhook lanes: atomic Lua scripts with a phpredis, Relay or Predis client. | [ratelimit/redis/docs/](ratelimit/redis/docs/) |
 
 The manifest and the README of each future package are in `packages/<name>/`.
 
@@ -35,7 +35,7 @@ The manifest and the README of each future package are in `packages/<name>/`.
 composer require freyr/message-broker
 ```
 
-This installs the code of all five packages. It replaces `freyr/message-broker-postgresql`, `freyr/message-broker-amqp`, `freyr/message-broker-http` and `freyr/message-broker-redis`.
+This installs the code of all five packages. It replaces `freyr/message-broker-storage-postgresql`, `freyr/message-broker-transport-amqp`, `freyr/message-broker-webhook-http` and `freyr/message-broker-ratelimit-redis`.
 
 Requires PHP 8.4 or 8.5 (tested in CI on both), `ext-pdo_pgsql`, and PostgreSQL 14+. Install the pieces you use:
 
@@ -62,7 +62,7 @@ Any number of identical relay workers drain one lane in parallel; scale by
 adding workers to the lane. By default the relay marks rows published and never deletes
 them. The command `message-broker:outbox:maintain` drops daily partitions
 after the retention period (default 7 days). A partition with unpublished rows is kept, and the command exits non-zero, unless `--drop-unpublished` is set — see [docs/RELAY.md](docs/RELAY.md) and
-[docs/postgresql/RETENTION.md](docs/postgresql/RETENTION.md).
+[storage/postgresql/docs/RETENTION.md](storage/postgresql/docs/RETENTION.md).
 
 ## Published rows: mark or delete
 
@@ -70,8 +70,8 @@ The PostgreSQL outbox store has one setting for published rows,
 `PublishedRows`:
 
 ```php
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
-use Freyr\MessageBroker\Adapter\PostgreSql\PublishedRows;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlOutboxStore;
+use Freyr\MessageBroker\Storage\PostgreSql\PublishedRows;
 
 new PostgreSqlOutboxStore($pdo);                          // PublishedRows::Mark, the default
 new PostgreSqlOutboxStore($pdo, PublishedRows::Delete);   // delete each row after its publish
@@ -86,7 +86,7 @@ new PostgreSqlOutboxStore($pdo, PublishedRows::from('delete')); // from configur
 
 Set it on the store of the relay; the producer can keep the default. The
 measurements and the choice are in
-[docs/postgresql/STORAGE.md](docs/postgresql/STORAGE.md#published-rows-mark-or-delete).
+[storage/postgresql/docs/STORAGE.md](storage/postgresql/docs/STORAGE.md#published-rows-mark-or-delete).
 
 ## Documentation
 
@@ -104,26 +104,26 @@ Core (`docs/core/`):
 
 PostgreSQL adapter (`docs/postgresql/`):
 
-- [Storage](docs/postgresql/STORAGE.md) — the tables, the schema setup, the classes and their wiring
-- [Retention](docs/postgresql/RETENTION.md) — outbox partitions, `outbox:maintain`, pg_partman
-- [Connection pooling](docs/postgresql/CONNECTION_POOLING.md) — pgbouncer
-- [Webhook delivery storage](docs/postgresql/WEBHOOKS.md) — `webhook_deliveries`, the delivery store, its retention, pg_partman, the alert query
+- [Storage](storage/postgresql/docs/STORAGE.md) — the tables, the schema setup, the classes and their wiring
+- [Retention](storage/postgresql/docs/RETENTION.md) — outbox partitions, `outbox:maintain`, pg_partman
+- [Connection pooling](storage/postgresql/docs/CONNECTION_POOLING.md) — pgbouncer
+- [Webhook delivery storage](storage/postgresql/docs/WEBHOOKS.md) — `webhook_deliveries`, the delivery store, its retention, pg_partman, the alert query
 
 AMQP adapter (`docs/amqp/`):
 
-- [Transport](docs/amqp/TRANSPORT.md) — routing, config classes, the dedicated channel, the publisher, the topology
-- [Consumer](docs/amqp/CONSUMER.md) — the consumer, the TTL wait queues, the dead-letter exchange
-- [Dead letters](docs/amqp/DEAD_LETTERS.md) — the import of a dead letter queue, the read of `x-death`, the permissions
+- [Transport](transport/amqp/docs/TRANSPORT.md) — routing, config classes, the dedicated channel, the publisher, the topology
+- [Consumer](transport/amqp/docs/CONSUMER.md) — the consumer, the TTL wait queues, the dead-letter exchange
+- [Dead letters](transport/amqp/docs/DEAD_LETTERS.md) — the import of a dead letter queue, the read of `x-death`, the permissions
 
 HTTP adapter (`docs/http/`):
 
-- [HTTP sender](docs/http/SENDER.md) — the request, the configuration, the results, the timeouts, the DNS allowance and its known limit, the connections
-- [Signature](docs/http/SIGNATURE.md) — the `webhook-` headers, the secret, the verification by a receiver
-- [Network rules](docs/http/NETWORK.md) — the private network rule, the proxy rule, the `https` rule, no redirects
+- [HTTP sender](webhook/http/docs/SENDER.md) — the request, the configuration, the results, the timeouts, the DNS allowance and its known limit, the connections
+- [Signature](webhook/http/docs/SIGNATURE.md) — the `webhook-` headers, the secret, the verification by a receiver
+- [Network rules](webhook/http/docs/NETWORK.md) — the private network rule, the proxy rule, the `https` rule, no redirects
 
 Redis adapter (`docs/redis/`):
 
-- [Redis rate limit store](docs/redis/RATE_LIMIT.md) — the client bridges, the key prefix and the hash tag, the server versions, `maxmemory-policy`, the script cache
+- [Redis rate limit store](ratelimit/redis/docs/RATE_LIMIT.md) — the client bridges, the key prefix and the hash tag, the server versions, `maxmemory-policy`, the script cache
 
 ## License
 

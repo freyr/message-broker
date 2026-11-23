@@ -114,4 +114,4 @@ The fakes read time from `symfony/clock`. Use `Clock::set(new MockClock(...))` t
 
 ## Parallel test workers
 
-The trait `Freyr\MessageBroker\Testing\TestIsolation` gives `isolated(string $name)`. Use it for each queue, exchange or topic name of a test. Infection sets `TEST_TOKEN` for each worker, and the trait adds `_t<token>` to the name, so two workers never share a name. The PostgreSQL test set-up adds a database for each worker (see [postgresql/STORAGE.md](postgresql/STORAGE.md), *Test support*).
+The trait `Freyr\MessageBroker\Testing\TestIsolation` gives `isolated(string $name)`. Use it for each queue, exchange or topic name of a test. Infection sets `TEST_TOKEN` for each worker, and the trait adds `_t<token>` to the name, so two workers never share a name. The PostgreSQL test set-up adds a database for each worker (see [../storage/postgresql/docs/STORAGE.md](../storage/postgresql/docs/STORAGE.md), *Test support*).

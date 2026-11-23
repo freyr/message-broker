@@ -45,18 +45,18 @@ declare(strict_types=1);
 
 require dirname(__DIR__).'/vendor/autoload.php';
 
-use Freyr\MessageBroker\Adapter\Amqp\AmqpMessagePublisher;
-use Freyr\MessageBroker\Adapter\Amqp\AmqpPublishConfig;
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxRetention;
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlSchemaInstaller;
-use Freyr\MessageBroker\Adapter\PostgreSql\PublishedRows;
 use Freyr\MessageBroker\Outbox\OutboxPublisher;
 use Freyr\MessageBroker\Outbox\OutboxRecord;
 use Freyr\MessageBroker\Outbox\OutboxStore;
 use Freyr\MessageBroker\Outbox\Relay;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlOutboxRetention;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlOutboxStore;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlSchemaInstaller;
+use Freyr\MessageBroker\Storage\PostgreSql\PublishedRows;
 use Freyr\MessageBroker\Time\EpochMillis;
+use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
+use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 use Freyr\MessageBroker\Worker\WorkerLimits;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use Symfony\Component\Uid\Uuid;

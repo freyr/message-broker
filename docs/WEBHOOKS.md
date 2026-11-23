@@ -111,9 +111,9 @@ for each lane. The delivery loop calls both in each pass (see
 an in-memory implementation of each. The PostgreSQL adapter implements the
 three ports: `PostgreSqlRateLimiter`, and `PostgreSqlCircuitBreaker` (also
 `LaneStates`); see
-[postgresql/WEBHOOKS.md](postgresql/WEBHOOKS.md#flow-control-tables).
+[../storage/postgresql/docs/WEBHOOKS.md](../storage/postgresql/docs/WEBHOOKS.md#flow-control-tables).
 The Redis adapter implements the rate limiter in Redis: `RedisRateLimiter`;
-see [redis/RATE_LIMIT.md](redis/RATE_LIMIT.md). A deployment uses one
+see [../ratelimit/redis/docs/RATE_LIMIT.md](../ratelimit/redis/docs/RATE_LIMIT.md). A deployment uses one
 rate limit store for all its workers.
 
 A store error of either port propagates: the flow control never fails open.
@@ -388,11 +388,11 @@ The library registers no command. Add the command classes to your console
 application, as the other commands (see [CLI_REFERENCE.md](CLI_REFERENCE.md)):
 
 ```php
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlCircuitBreaker;
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryRetention;
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliverySchemaInstaller;
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryStore;
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlRateLimiter;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlCircuitBreaker;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlDeliveryRetention;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlDeliverySchemaInstaller;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlDeliveryStore;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlRateLimiter;
 use Freyr\MessageBroker\Console\WebhookAbandonCommand;
 use Freyr\MessageBroker\Console\WebhookLanesCommand;
 use Freyr\MessageBroker\Console\WebhookMaintainCommand;
@@ -470,7 +470,7 @@ Alerts: a `webhook.lane_blocked` (only `LaneStates::close()` ends a block); a la
 `message-broker:webhook:lanes` shows its state; when the endpoint works again,
 `message-broker:webhook:lanes --close=<lane>` puts the lane back into
 circulation. With the PostgreSQL adapter, a SQL alert on a blocked lane is in
-[postgresql/WEBHOOKS.md](postgresql/WEBHOOKS.md#flow-control-tables).
+[../storage/postgresql/docs/WEBHOOKS.md](../storage/postgresql/docs/WEBHOOKS.md#flow-control-tables).
 
 ## Security
 
