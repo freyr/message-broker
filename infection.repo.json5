@@ -1,0 +1,40 @@
+{
+    "$schema": "vendor/infection/infection/resources/schema.json",
+    // The development configuration of the whole code: the src/ folders of all five packages, with the
+    // tests of all suites (the root phpunit.xml.dist). Run: make infection. Each package has its own
+    // configuration with its own threshold (infection.json5 of the core and of each adapter folder).
+    "source": {
+        "directories": ["src", "storage/postgresql/src", "transport/amqp/src", "webhook/http/src", "ratelimit/redis/src"],
+        // The test kit (src/Testing, storage/postgresql/src/Testing, ratelimit/redis/src/Testing) is test code: it is not mutated.
+        // The names are relative to each source directory.
+        "excludes": ["Testing"]
+    },
+    // Parallel workers are isolated: each TEST_TOKEN gets its own database and queue names.
+    "timeout": 20,
+    "logs": {
+        "text": "var/infection/infection.log",
+        "html": "var/infection/infection.html",
+        "summary": "var/infection/summary.log"
+    },
+    "tmpDir": "var/infection/tmp",
+    "mutators": {
+        "@default": true,
+        // Equivalent mutants of the level search in PermitDivision::divide(): the list is sorted, so
+        // once the stop condition is true it stays true for each later lane. "continue" in place of
+        // "break" then skips each later lane with the same result, and ">=" in place of ">" stops at
+        // a tie (availability * lanes == remaining), which gives the same level and a rest of 0.
+        // Only the stop condition of the level search; the other ">" of divide() keep their mutants.
+        "GreaterThan": {
+            "ignoreSourceCodeByRegex": [".*\\$availability \\* \\$lanesAboveLevel > \\$remaining.*"]
+        },
+        "Break_": {
+            "ignore": ["Freyr\\MessageBroker\\Webhook\\PermitDivision::divide"]
+        }
+    },
+    "testFramework": "phpunit",
+    "testFrameworkOptions": "--no-progress",
+    // Measured 95.7% (852 mutants, 37 escaped); one point of margin for timeout variance.
+    // Raise it as tests improve; never lower it.
+    "minMsi": 96,
+    "minCoveredMsi": 96
+}

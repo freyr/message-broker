@@ -6,6 +6,11 @@ on:
   push:
     branches: [main]
 
+env:
+  # The adapters require freyr/message-broker ^0.15, and the root package is the core: Composer needs its
+  # version for the development install. Change it with compose.yaml at each minor release of the core.
+  COMPOSER_ROOT_VERSION: "0.15.0"
+
 jobs:
   # Code style does not depend on the runtime: ECS runs once, on the lowest supported PHP.
   ecs:
@@ -87,7 +92,7 @@ jobs:
           --health-timeout=3s
           --health-retries=10
 
-      # Redis of the suite redis (the Redis rate limit store).
+      # Redis of the suite ratelimit-redis (the Redis rate limit store).
       redis:
         image: redis:7-alpine
         ports:
@@ -110,7 +115,7 @@ jobs:
 
       - run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
 
-      # The test HTTP server of the suite http (tools/webhook-test-server/server.mjs: Node.js, built-in modules only;
+      # The test HTTP server of the suite webhook-http (tools/webhook-test-server/server.mjs: Node.js, built-in modules only;
       # the runner has Node.js). A service container cannot run it: services start before the checkout.
       - name: Start the webhook test server
         run: |
@@ -166,7 +171,7 @@ jobs:
           --health-timeout=3s
           --health-retries=10
 
-      # Redis of the suite redis (the Redis rate limit store).
+      # Redis of the suite ratelimit-redis (the Redis rate limit store).
       redis:
         image: redis:7-alpine
         ports:
@@ -199,12 +204,13 @@ jobs:
           php-version: '8.5'
           extensions: pdo_pgsql, sockets, mbstring, pcntl, redis
           coverage: pcov
-          ini-values: pcov.directory=src
+          # The src/ folders of all packages; the path packages in vendor/ are symlinks to them.
+          ini-values: pcov.directory=., pcov.exclude="~/vendor/~"
           tools: composer:v2
 
       - run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
 
-      # The test HTTP server of the suite http (tools/webhook-test-server/server.mjs: Node.js, built-in modules only;
+      # The test HTTP server of the suite webhook-http (tools/webhook-test-server/server.mjs: Node.js, built-in modules only;
       # the runner has Node.js). A service container cannot run it: services start before the checkout.
       - name: Start the webhook test server
         run: |
@@ -212,18 +218,19 @@ jobs:
           for _ in $(seq 1 30); do curl -sf http://localhost:8080/_health > /dev/null && exit 0; sleep 1; done
           cat "${RUNNER_TEMP}/webhook-server.log"; exit 1
 
-      # Pull request: mutate only the changed lines of src/broker/ and src/adapter/. Thresholds come from infection.json5.
+      # Pull request: mutate only the changed lines of src/ and of the src/ folder of each adapter.
+      # The whole-code configuration and its thresholds: infection.repo.json5.
       - name: Mutation tests (changed lines)
         if: github.event_name == 'pull_request'
         run: >-
-          vendor/bin/infection --threads=max --no-progress --logger-github
+          vendor/bin/infection --configuration=infection.repo.json5 --threads=max --no-progress --logger-github
           --git-diff-lines --git-diff-base=origin/${{ github.base_ref }}
           --ignore-msi-with-no-mutations
 
       # main: the full run keeps the score at or above the baseline.
       - name: Mutation tests (full)
         if: github.event_name == 'push'
-        run: vendor/bin/infection --threads=max --no-progress --logger-github=false
+        run: vendor/bin/infection --configuration=infection.repo.json5 --threads=max --no-progress --logger-github=false
 
   # Advisory: PHP 8.6 is not released yet (GA planned 2026-11-19). A failure here does not block a merge:
   # this job has continue-on-error and is not in the needs of ci-gate. In setup-php, '8.6' is the
@@ -262,7 +269,7 @@ jobs:
           --health-timeout=3s
           --health-retries=10
 
-      # Redis of the suite redis (the Redis rate limit store).
+      # Redis of the suite ratelimit-redis (the Redis rate limit store).
       redis:
         image: redis:7-alpine
         ports:
@@ -285,7 +292,7 @@ jobs:
 
       - run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
 
-      # The test HTTP server of the suite http (tools/webhook-test-server/server.mjs: Node.js, built-in modules only;
+      # The test HTTP server of the suite webhook-http (tools/webhook-test-server/server.mjs: Node.js, built-in modules only;
       # the runner has Node.js). A service container cannot run it: services start before the checkout.
       - name: Start the webhook test server
         run: |
@@ -307,17 +314,20 @@ jobs:
           REDIS_HOST: 127.0.0.1
         run: vendor/bin/phpunit
 
-  # Each future package (see packages/ and "Package manifests and split rehearsal" in CLAUDE.md) is assembled in a
-  # temporary folder, installed ALONE through Composer path repositories, and its tests run alone.
-  # The core entry does not use the services or the webhook test server; all entries have them for a simple matrix.
-  # The redis entry needs only the Redis service.
+  # One job for each package (see "Packages and split rehearsal" in CLAUDE.md) and each PHP version: the package is
+  # copied to a temporary folder, installed ALONE against the core of the checkout through Composer path
+  # repositories, and its tests run alone. On main, the PHP 8.4 entry also runs Infection with the configuration
+  # of the package. The core entry uses no service; storage-postgresql needs PostgreSQL; transport-amqp needs
+  # PostgreSQL and RabbitMQ; webhook-http needs PostgreSQL and the webhook test server; ratelimit-redis needs Redis.
+  # All entries have all services, for a simple matrix.
   split-rehearsal:
-    name: Split rehearsal (${{ matrix.package }})
+    name: Package ${{ matrix.package }} (PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        package: [core, postgresql, amqp, http, redis]
+        package: [core, storage-postgresql, transport-amqp, webhook-http, ratelimit-redis]
+        php: ['8.4', '8.5']
 
     services:
       postgres:
@@ -347,7 +357,7 @@ jobs:
           --health-timeout=3s
           --health-retries=10
 
-      # Redis of the suite redis (the Redis rate limit store).
+      # Redis of the suite ratelimit-redis (the Redis rate limit store).
       redis:
         image: redis:7-alpine
         ports:
@@ -373,15 +383,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # pcov is only needed for Infection, which runs on main.
+      # pcov is only needed for Infection, which runs on main on PHP 8.4.
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: ${{ matrix.php }}
           extensions: pdo_pgsql, sockets, mbstring, pcntl, redis
-          coverage: ${{ github.event_name == 'push' && 'pcov' || 'none' }}
+          coverage: ${{ (github.event_name == 'push' && matrix.php == '8.4') && 'pcov' || 'none' }}
           tools: composer:v2
 
-      # The test HTTP server of the suite http (tools/webhook-test-server/server.mjs: Node.js, built-in modules only;
+      # The test HTTP server of the suite webhook-http (tools/webhook-test-server/server.mjs: Node.js, built-in modules only;
       # the runner has Node.js). A service container cannot run it: services start before the checkout.
       - name: Start the webhook test server
         run: |
@@ -389,17 +399,104 @@ jobs:
           for _ in $(seq 1 30); do curl -sf http://localhost:8080/_health > /dev/null && exit 0; sleep 1; done
           cat "${RUNNER_TEMP}/webhook-server.log"; exit 1
 
-      - name: Split rehearsal
-        if: github.event_name == 'pull_request'
+      - name: Install the package alone and run its tests
+        if: github.event_name == 'pull_request' || matrix.php != '8.4'
         run: tools/split-rehearsal.sh ${{ matrix.package }}
 
-      - name: Split rehearsal (with Infection)
-        if: github.event_name == 'push'
+      - name: Install the package alone and run its tests and Infection
+        if: github.event_name == 'push' && matrix.php == '8.4'
         run: tools/split-rehearsal.sh ${{ matrix.package }} --infection
+
+  # Advisory, pull requests only: each adapter with the LOWEST core that its constraint accepts, from Packagist
+  # (tools/split-rehearsal.sh --lowest: no path repository for the core; storage-postgresql stays a path package
+  # for transport-amqp and webhook-http). A pull request can use a core method that Packagist does not have yet,
+  # so a failure does not block a merge: continue-on-error, and not in the needs of ci-gate. On main the same
+  # check runs in release.yml after the packagist job. A failure there means that the adapter needs a higher core floor.
+  lowest:
+    name: Lowest core (${{ matrix.package }}, advisory)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [storage-postgresql, transport-amqp, webhook-http, ratelimit-redis]
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: message_broker_test
+          POSTGRES_USER: broker
+          POSTGRES_PASSWORD: broker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U broker"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+      rabbitmq:
+        image: rabbitmq:4.3.1-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: guest
+          RABBITMQ_DEFAULT_PASS: guest
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd="rabbitmq-diagnostics ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+      # Redis of the suite ratelimit-redis (the Redis rate limit store).
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+    env:
+      POSTGRES_DSN: "pgsql:host=127.0.0.1;port=5432;dbname=message_broker_test"
+      POSTGRES_USER: broker
+      POSTGRES_PASSWORD: broker
+      AMQP_HOST: 127.0.0.1
+      AMQP_PORT: "5672"
+      AMQP_USER: guest
+      AMQP_PASSWORD: guest
+      AMQP_VHOST: "/"
+      WEBHOOK_SERVER_URL: "http://localhost:8080"
+      REDIS_HOST: 127.0.0.1
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_pgsql, sockets, mbstring, pcntl, redis
+          coverage: none
+          tools: composer:v2
+
+      # The test HTTP server of the suite webhook-http (tools/webhook-test-server/server.mjs: Node.js, built-in modules only;
+      # the runner has Node.js). A service container cannot run it: services start before the checkout.
+      - name: Start the webhook test server
+        run: |
+          nohup node tools/webhook-test-server/server.mjs > "${RUNNER_TEMP}/webhook-server.log" 2>&1 &
+          for _ in $(seq 1 30); do curl -sf http://localhost:8080/_health > /dev/null && exit 0; sleep 1; done
+          cat "${RUNNER_TEMP}/webhook-server.log"; exit 1
+
+      - name: Install the adapter with the lowest core from Packagist and run its tests
+        run: tools/split-rehearsal.sh ${{ matrix.package }} --lowest
 
   # The PostgreSQL contract tests and the consumer functional tests through pgbouncer in transaction mode
   # (the same settings as the pgbouncer service of compose.yaml and `make test-pgbouncer`). It keeps the
-  # statement of docs/postgresql/CONNECTION_POOLING.md true. The pooler is a service, so it starts before the steps.
+  # statement of storage/postgresql/docs/CONNECTION_POOLING.md true. The pooler is a service, so it starts before the steps.
   # The guard test runs first: when the pooler does not rotate server connections, the other steps prove nothing.
   # PHP 8.4 only: pooling does not depend on the PHP version. The timeout stops a run that hangs on a wrong
   # pooler setting (with max_prepared_statements = 0 a run hung and a server connection went out of sync).
@@ -485,28 +582,28 @@ jobs:
       - run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
 
       - name: Guard (the pooler rotates server connections)
-        run: vendor/bin/phpunit --fail-on-skipped tests/adapter/postgresql/Functional/PoolerRotationGuardTest.php
+        run: vendor/bin/phpunit --fail-on-skipped storage/postgresql/tests/Functional/PoolerRotationGuardTest.php
 
       - name: Contract tests and consumer functional tests through pgbouncer
         run: >-
           vendor/bin/phpunit
-          tests/adapter/postgresql/Functional/PostgreSqlOutboxStoreContractTest.php
-          tests/adapter/postgresql/Functional/PostgreSqlDeduplicationStoreContractTest.php
-          tests/adapter/postgresql/Functional/PostgreSqlDeadLetterStoreContractTest.php
-          tests/adapter/postgresql/Functional/PostgreSqlDeliveryStoreContractTest.php
-          tests/adapter/postgresql/Functional/PostgreSqlRateLimiterContractTest.php
-          tests/adapter/postgresql/Functional/PostgreSqlCircuitBreakerContractTest.php
-          tests/adapter/postgresql/Functional/PostgreSqlLaneStatesContractTest.php
-          tests/adapter/postgresql/Functional/PdoTransactionContractTest.php
-          tests/adapter/postgresql/Functional/WebhookEndToEndTest.php
-          tests/adapter/amqp/Functional/AmqpConsumerTest.php
-          tests/adapter/amqp/Functional/EndToEndTest.php
-          tests/adapter/amqp/Functional/ParallelConsumptionTest.php
+          storage/postgresql/tests/Functional/PostgreSqlOutboxStoreContractTest.php
+          storage/postgresql/tests/Functional/PostgreSqlDeduplicationStoreContractTest.php
+          storage/postgresql/tests/Functional/PostgreSqlDeadLetterStoreContractTest.php
+          storage/postgresql/tests/Functional/PostgreSqlDeliveryStoreContractTest.php
+          storage/postgresql/tests/Functional/PostgreSqlRateLimiterContractTest.php
+          storage/postgresql/tests/Functional/PostgreSqlCircuitBreakerContractTest.php
+          storage/postgresql/tests/Functional/PostgreSqlLaneStatesContractTest.php
+          storage/postgresql/tests/Functional/PdoTransactionContractTest.php
+          storage/postgresql/tests/Functional/WebhookEndToEndTest.php
+          transport/amqp/tests/Functional/AmqpConsumerTest.php
+          transport/amqp/tests/Functional/EndToEndTest.php
+          transport/amqp/tests/Functional/ParallelConsumptionTest.php
 
-  # The suite redis against Valkey 8 (the Redis rate limit store supports Redis 7.0 or later and Valkey 7.2 or later).
+  # The suite ratelimit-redis against Valkey 8 (the Redis rate limit store supports Redis 7.0 or later and Valkey 7.2 or later).
   # The suite needs no PostgreSQL and no RabbitMQ. The other jobs run it against Redis 7.
   valkey:
-    name: Valkey 8 (suite redis)
+    name: Valkey 8 (suite ratelimit-redis)
     runs-on: ubuntu-latest
 
     services:
@@ -532,10 +629,10 @@ jobs:
 
       - run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
 
-      - name: Run the suite redis
+      - name: Run the suite ratelimit-redis
         env:
           REDIS_HOST: 127.0.0.1
-        run: vendor/bin/phpunit --testsuite redis
+        run: vendor/bin/phpunit --testsuite ratelimit-redis
 
   ci-gate:
     name: ci-gate

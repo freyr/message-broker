@@ -1,9 +1,11 @@
-# The release App pushes the tags. The packagist job then asks packagist.org to read the repo.
+# The release App pushes the tags. The split job copies each adapter folder to its read-only split repo,
+# and the packagist job then asks packagist.org to read each released package.
 #
-# A push to main releases from the PR title (freyr/.github release action).
-# A manual run (Actions → Release → Run workflow, on main) tags the head of
-# main with any version that does not exist yet, for example the first release
-# of a line: gh workflow run release.yml --ref main -f version=0.5.0
+# A push to main releases from the PR title (freyr/.github release action, .github/release.json): the core
+# (tag v{version}) and each adapter with changed files (tag <role>-<technology>-v{version}), each with its
+# own version. A manual run (Actions → Release → Run workflow, on main) tags the head of main with a core
+# version that does not exist yet, for example the first release of a line:
+# gh workflow run release.yml --ref main -f version=0.5.0
 name: Release
 
 on:
@@ -107,13 +109,231 @@ jobs:
           gh release create "$tag" --title "$tag" --notes-file "$notes" --verify-tag
           echo "Released ${tag} at ${GITHUB_SHA} (previous tag: ${previous:-none})." >> "$GITHUB_STEP_SUMMARY"
 
-  # The only caller of packagist.org: the repo has no Packagist webhook.
-  packagist:
-    needs: [release, manual-release]
-    if: ${{ !cancelled() && (needs.release.result == 'success' || needs.manual-release.result == 'success') }}
+  # Copies each adapter folder to main of its read-only split repo (freyr/message-broker-<role>-<technology>),
+  # where Packagist reads the package. The action commits a folder only when its content differs from main of
+  # the split repo. For each adapter that the release job released, it also pushes the tag v{version} (the same
+  # version as the tag <role>-<technology>-v{version} of this repo). One job does all pushes in order, so no two
+  # pushes to a split repo race. The token of the release App is limited to the four split repos; the ruleset of
+  # the split repos lets only the release App push to main and create v* tags.
+  split:
+    needs: [release]
+    if: ${{ github.event_name == 'push' && needs.release.result == 'success' }}
     runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.releases.outputs.packages }}
+    steps:
+      - name: Read the releases
+        id: releases
+        env:
+          RELEASES: ${{ needs.release.outputs.releases }}
+        run: |
+          set -euo pipefail
+          releases="${RELEASES:-[]}"
+          # The names of the released packages, for the matrix of the packagist job (an empty list skips it).
+          echo "packages=$(jq -c '[.[].name]' <<< "$releases")" >> "$GITHUB_OUTPUT"
+          # The tag of each released adapter in its split repo: v{version}, or empty (no tag). A tag that the split
+          # repo already holds (a new run of a failed split job) is left out, because the action fails on an
+          # existing tag and only the release App may create v* tags.
+          for name in storage-postgresql transport-amqp webhook-http ratelimit-redis; do
+            version=$(jq -r --arg name "$name" '.[] | select(.name == $name) | .version' <<< "$releases")
+            tag=""
+            if [ -z "$version" ]; then
+              line="${name}: no release"
+            elif [ -n "$(git ls-remote --tags "https://github.com/freyr/message-broker-${name}.git" "refs/tags/v${version}")" ]; then
+              line="${name}: tag v${version} already in the split repo, not pushed again"
+            else
+              tag="v${version}"
+              line="${name}: tag ${tag}"
+            fi
+            echo "${name//-/_}=${tag}" >> "$GITHUB_OUTPUT"
+            echo "$line" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Get the release App token for the split repos
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: >-
+            message-broker-storage-postgresql,
+            message-broker-transport-amqp,
+            message-broker-webhook-http,
+            message-broker-ratelimit-redis
+          permission-contents: write
+
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      # The action clones https://<token>@github.com/<repo>; a GitHub App token needs the user name x-access-token.
+      - name: Split storage/postgresql
+        uses: danharrin/monorepo-split-github-action@14e42e2437f674b8987c1f50ca3689116aea1893 # v2.4.5
+        env:
+          GITHUB_TOKEN: x-access-token:${{ steps.token.outputs.token }}
+        with:
+          package_directory: storage/postgresql
+          repository_organization: freyr
+          repository_name: message-broker-storage-postgresql
+          branch: main
+          tag: ${{ steps.releases.outputs.storage_postgresql }}
+          user_name: freyr-release
+          user_email: release@freyr.invalid
+
+      - name: Split transport/amqp
+        uses: danharrin/monorepo-split-github-action@14e42e2437f674b8987c1f50ca3689116aea1893 # v2.4.5
+        env:
+          GITHUB_TOKEN: x-access-token:${{ steps.token.outputs.token }}
+        with:
+          package_directory: transport/amqp
+          repository_organization: freyr
+          repository_name: message-broker-transport-amqp
+          branch: main
+          tag: ${{ steps.releases.outputs.transport_amqp }}
+          user_name: freyr-release
+          user_email: release@freyr.invalid
+
+      - name: Split webhook/http
+        uses: danharrin/monorepo-split-github-action@14e42e2437f674b8987c1f50ca3689116aea1893 # v2.4.5
+        env:
+          GITHUB_TOKEN: x-access-token:${{ steps.token.outputs.token }}
+        with:
+          package_directory: webhook/http
+          repository_organization: freyr
+          repository_name: message-broker-webhook-http
+          branch: main
+          tag: ${{ steps.releases.outputs.webhook_http }}
+          user_name: freyr-release
+          user_email: release@freyr.invalid
+
+      - name: Split ratelimit/redis
+        uses: danharrin/monorepo-split-github-action@14e42e2437f674b8987c1f50ca3689116aea1893 # v2.4.5
+        env:
+          GITHUB_TOKEN: x-access-token:${{ steps.token.outputs.token }}
+        with:
+          package_directory: ratelimit/redis
+          repository_organization: freyr
+          repository_name: message-broker-ratelimit-redis
+          branch: main
+          tag: ${{ steps.releases.outputs.ratelimit_redis }}
+          user_name: freyr-release
+          user_email: release@freyr.invalid
+
+  # The only caller of packagist.org: the repos have no Packagist webhook. One matrix entry for each released
+  # package (a manual run: the core), so a failed call stops no other call; a new run of the failed jobs repeats
+  # it. The core is this repo; an adapter is its split repo, so this job runs after the split job. The job runs
+  # only when the release job released a package or on a manual run.
+  packagist:
+    name: Packagist (${{ matrix.package }})
+    needs: [release, manual-release, split]
+    if: >-
+      ${{ !cancelled() && (needs.manual-release.result == 'success'
+      || (needs.split.result == 'success' && needs.split.outputs.packages != '[]')) }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The fallback to the core only keeps the expression valid when the job is skipped (an empty matrix is an error).
+        package: >-
+          ${{ fromJSON((github.event_name == 'push' && needs.split.outputs.packages != '' && needs.split.outputs.packages != '[]')
+          && needs.split.outputs.packages || '["message-broker"]') }}
     steps:
       - uses: freyr/.github/actions/packagist@93b8d0f624ac287b129f2d33c838959329fdaf9d # v2.1.0
         with:
           username: ${{ vars.PACKAGIST_USERNAME }}
           api-token: ${{ secrets.PACKAGIST_API_TOKEN }}
+          repository: >-
+            ${{ matrix.package == 'message-broker' && format('{0}/{1}', github.server_url, github.repository)
+            || format('https://github.com/freyr/message-broker-{0}', matrix.package) }}
+
+  # Advisory: each adapter with the LOWEST core that its constraint accepts, now from Packagist
+  # (tools/split-rehearsal.sh --lowest). It runs after the packagist job, so a new core version is on
+  # Packagist. A failure means that the adapter needs a higher core floor: a patch release of the adapter
+  # raises it. The version that is published stays. Packagist can need a short time to show a new version.
+  lowest:
+    name: Lowest core (${{ matrix.package }}, advisory)
+    needs: [packagist]
+    if: ${{ !cancelled() && needs.packagist.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [storage-postgresql, transport-amqp, webhook-http, ratelimit-redis]
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: message_broker_test
+          POSTGRES_USER: broker
+          POSTGRES_PASSWORD: broker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U broker"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+      rabbitmq:
+        image: rabbitmq:4.3.1-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: guest
+          RABBITMQ_DEFAULT_PASS: guest
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd="rabbitmq-diagnostics ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+      # Redis of the suite ratelimit-redis (the Redis rate limit store).
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+    env:
+      POSTGRES_DSN: "pgsql:host=127.0.0.1;port=5432;dbname=message_broker_test"
+      POSTGRES_USER: broker
+      POSTGRES_PASSWORD: broker
+      AMQP_HOST: 127.0.0.1
+      AMQP_PORT: "5672"
+      AMQP_USER: guest
+      AMQP_PASSWORD: guest
+      AMQP_VHOST: "/"
+      WEBHOOK_SERVER_URL: "http://localhost:8080"
+      REDIS_HOST: 127.0.0.1
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.4'
+          extensions: pdo_pgsql, sockets, mbstring, pcntl, redis
+          coverage: none
+          tools: composer:v2
+
+      # The test HTTP server of the suite webhook-http (tools/webhook-test-server/server.mjs: Node.js, built-in modules only;
+      # the runner has Node.js). A service container cannot run it: services start before the checkout.
+      - name: Start the webhook test server
+        run: |
+          nohup node tools/webhook-test-server/server.mjs > "${RUNNER_TEMP}/webhook-server.log" 2>&1 &
+          for _ in $(seq 1 30); do curl -sf http://localhost:8080/_health > /dev/null && exit 0; sleep 1; done
+          cat "${RUNNER_TEMP}/webhook-server.log"; exit 1
+
+      - name: Install the adapter with the lowest core from Packagist and run its tests
+        run: tools/split-rehearsal.sh ${{ matrix.package }} --lowest

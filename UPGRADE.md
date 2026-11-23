@@ -1,5 +1,59 @@
 # Upgrade guide
 
+## From 0.14.x to 0.15.0
+
+The adapters are separate Composer packages. `freyr/message-broker` 0.15.0 is
+the core only: the ports, the relay, the delivery processor, the console
+commands, the webhook delivery queue and the test kit. It holds no adapter
+code and replaces no package. Each adapter has its own version (the first is
+0.1.0) and requires the core `^0.15`. The release changes no schema, no table,
+no message header and no class name; only the namespaces of the adapters and
+the package names change. There is no alias for the old namespaces.
+
+### Install
+
+Require the core and each adapter that you use:
+
+```bash
+composer require freyr/message-broker:^0.15 \
+    freyr/message-broker-storage-postgresql \
+    freyr/message-broker-transport-amqp
+```
+
+Add `freyr/message-broker-webhook-http` for the HTTP webhook sender and
+`freyr/message-broker-ratelimit-redis` for the Redis rate limit store. The
+dependencies of an adapter (`php-amqplib/php-amqplib`, `symfony/http-client`,
+`symfony/http-foundation`, `ext-pdo_pgsql`) come with its package. The Redis
+package still needs a client of your choice: `ext-redis` or `predis/predis`.
+
+### Packages and namespaces
+
+| Old package (0.14.x) | New package | Old namespace | New namespace |
+|---|---|---|---|
+| `freyr/message-broker` | `freyr/message-broker` (the core) | `Freyr\MessageBroker\` | `Freyr\MessageBroker\` (no change) |
+| `freyr/message-broker-postgresql` (replaced by `freyr/message-broker`) | `freyr/message-broker-storage-postgresql` | `Freyr\MessageBroker\Adapter\PostgreSql\` | `Freyr\MessageBroker\Storage\PostgreSql\` |
+| `freyr/message-broker-amqp` (replaced by `freyr/message-broker`) | `freyr/message-broker-transport-amqp` | `Freyr\MessageBroker\Adapter\Amqp\` | `Freyr\MessageBroker\Transport\Amqp\` |
+| `freyr/message-broker-http` (replaced by `freyr/message-broker`) | `freyr/message-broker-webhook-http` | `Freyr\MessageBroker\Adapter\Http\` | `Freyr\MessageBroker\Webhook\Http\` |
+| `freyr/message-broker-redis` (replaced by `freyr/message-broker`) | `freyr/message-broker-ratelimit-redis` | `Freyr\MessageBroker\Adapter\Redis\` | `Freyr\MessageBroker\RateLimit\Redis\` |
+
+The test set-up classes move with their package:
+`Freyr\MessageBroker\Adapter\PostgreSql\Testing\PostgreSqlTestSupport` is
+`Freyr\MessageBroker\Storage\PostgreSql\Testing\PostgreSqlTestSupport`, and
+`Freyr\MessageBroker\Adapter\Redis\Testing\RedisTestSupport` is
+`Freyr\MessageBroker\RateLimit\Redis\Testing\RedisTestSupport`.
+
+- **BREAKING:** change each `use Freyr\MessageBroker\Adapter\<Technology>\…`
+  to the new namespace of the table. A search and replace of the four
+  namespace prefixes is enough; the class names do not change.
+- **BREAKING:** a `composer require` of `freyr/message-broker` alone gives no
+  adapter now. Require the adapters by their new names.
+- The virtual packages `freyr/message-broker-storage-implementation`,
+  `freyr/message-broker-transport-implementation` and
+  `freyr/message-broker-webhook-sender-implementation` stay; the Redis package
+  provides the new `freyr/message-broker-ratelimit-implementation`.
+- A later minor release of the core (0.16.0) is breaking for the adapters
+  too: each adapter then gets a release with the new core constraint.
+
 ## From 0.13.x to 0.14.0
 
 The webhook delivery loop calls the flow control ports: a rate limit for each
@@ -46,7 +100,7 @@ before. The release changes no schema. All packages move to `^0.14` together.
   statement) and calls `find()` for each lane at the lane refresh interval.
 - New events: `webhook.lane_opened`, `webhook.lane_blocked`,
   `webhook.lane_returned`, `webhook.permit_wait` and `webhook.lane_at_limit`
-  (see `docs/core/WEBHOOKS.md`, "Events").
+  (see `docs/WEBHOOKS.md`, "Events").
 
 ## From 0.12.x to 0.13.0
 
@@ -82,7 +136,7 @@ and no other part of the library.
   [--lane=<lane>]... [--dry-run]` by hand for old rows that no rule ends: the
   rows of a lane whose endpoint is blocked, and the rows of a subscription
   that you removed. The abandoned rows go to the dead letters, so
-  `dlq:replay` can send them again (see `docs/core/CLI_REFERENCE.md`).
+  `dlq:replay` can send them again (see `docs/CLI_REFERENCE.md`).
 - `--retention-days` of `webhook:maintain` is no longer tied to a value of the
   loop. A partition that holds an unfinished row stays until the row ends;
   the command reports it and exits with code 1, as before. Keep the alert on
@@ -94,7 +148,7 @@ and no other part of the library.
 
 ## From 0.12.2 to 0.12.3
 
-This release adds the webhook delivery queue (see `docs/core/WEBHOOKS.md`). It
+This release adds the webhook delivery queue (see `docs/WEBHOOKS.md`). It
 is additive: an application that does not use webhooks needs no change and
 runs no new DDL.
 
@@ -103,7 +157,7 @@ runs no new DDL.
   `message-broker:webhook:maintain` once a day, and run workers with
   `message-broker:webhook:run`. The library registers no command: add
   `WebhookSetupCommand`, `WebhookMaintainCommand` and `WebhookRunCommand` to
-  your console application (see `docs/core/CLI_REFERENCE.md`).
+  your console application (see `docs/CLI_REFERENCE.md`).
 - Give `--retention-days` of `webhook:maintain` the value of `retentionDays` of
   the `DeliveryLoopConfig` (default `7` for both). Since 0.13.0 this value of
   the loop is removed (see above).
@@ -140,7 +194,7 @@ signature of `AmqpConsumer::run()`. It changes no schema.
   warning when a limit option is set.
 - A limit stop exits with code `0`. The container must start again after each
   exit, exit code `0` included: a Kubernetes `Deployment` does this
-  (`restartPolicy: Always`; see `docs/core/PRODUCTION.md`, "Worker limits").
+  (`restartPolicy: Always`; see `docs/PRODUCTION.md`, "Worker limits").
 - `DeliveryProcessor::process()` returns a `DeliveryOutcome` instead of `void`.
   A caller that ignores the return value needs no change.
 
@@ -151,7 +205,7 @@ signature of `AmqpConsumer::run()`. It changes no schema.
   necessary.
 - Upgrade the process that runs `message-broker:dlq:import` before a consumer
   uses `AmqpDeadLetterSink`: an older import ignores the header
-  `x-dead-letter`. For a rollback, see `docs/amqp/DEAD_LETTERS.md`, "Upgrade
+  `x-dead-letter`. For a rollback, see `transport/amqp/docs/DEAD_LETTERS.md`, "Upgrade
   and rollback order".
 
 ## From 0.10.x to 0.11.0
@@ -171,7 +225,7 @@ read the header `x-replay-target`, so it processes each replay.
   `new PdoTransaction($pdo)` with the `$pdo` of `PostgreSqlDeadLetterStore` and
   `PostgreSqlOutboxStore`. When two connections cannot be avoided, the
   transaction must wrap the connection of the dead letter store (see
-  `docs/core/DLQ_OPERATIONS.md`).
+  `docs/DLQ_OPERATIONS.md`).
 - **BREAKING:** `DeadLetterStore::markReplayed(string $id): bool`. A custom
   implementation sets the mark only when `replayed_at` is null, returns `true`
   only when it set the mark, and returns `false` with no error for an unknown
@@ -310,7 +364,7 @@ do not come back.
 ### New signatures of `DeadLetterStore`
 
 `list()`, `count()` and `purge()` take a `DeadLetter\DeadLetterFilter` in place
-of the separate filter parameters (see `docs/core/PORTS.md`):
+of the separate filter parameters (see `docs/PORTS.md`):
 
 | Old call | New call |
 | --- | --- |
@@ -416,7 +470,7 @@ abandoned_at` (a short `ACCESS EXCLUSIVE` lock; set `lock_timeout`).
 ### New methods of `OutboxStore`
 
 An implementation of `Outbox\OutboxStore` outside this library must add two
-methods (see `docs/core/PORTS.md`):
+methods (see `docs/PORTS.md`):
 
 ```php
 public function abandon(string $id): int;
@@ -480,7 +534,7 @@ $processor = new DeliveryProcessor(
   adds no count, and a failure adds 1 to the delivery in work only. It sends
   `basic.cancel`, `basic.reject` (only for the delivery in work, after a
   failure) and `basic.nack` (tag 0, `multiple`, `requeue`). See
-  [docs/amqp/CONSUMER.md](docs/amqp/CONSUMER.md), *The return rule*.
+  [transport/amqp/docs/CONSUMER.md](transport/amqp/docs/CONSUMER.md), *The return rule*.
 - A confirm timeout of the wait-queue publish ends `run()` with the exception,
   so `message-broker:consume` exits with a failure. In the earlier release it
   ended `run()` as an idle stop, with exit code 0.
@@ -492,7 +546,7 @@ $processor = new DeliveryProcessor(
 
 `ExponentialRetryPolicy` takes the optional `deadLetterOn` and `discardOn`
 lists of throwable classes (empty by default, so nothing changes when you do
-not pass them). See [docs/core/CONSUMER.md](docs/core/CONSUMER.md), *Error
+not pass them). See [docs/CONSUMER.md](docs/CONSUMER.md), *Error
 class lists*.
 
 ## From 0.6.x to 0.7.0

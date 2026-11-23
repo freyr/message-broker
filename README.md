@@ -14,37 +14,43 @@ It runs over **AMQP (RabbitMQ)** so you adopt it within your existing infrastruc
 
 ## Packages
 
-The library has five packages. **Today, one Composer package
-(`freyr/message-broker`) holds all five.** Separate Composer packages and
-separate repositories are planned. Each package has its own folder of
-documents, so that the documents move with the code.
+The library has five Composer packages, each with its own version and its own
+tag. This repo is the core package (at the root) and the development repo of
+all five. Each adapter package is one folder of this repo; a read-only repo
+with the name of the package holds a copy of the folder, and Packagist reads
+the package from it. Issues and pull requests for all five packages go to
+[freyr/message-broker](https://github.com/freyr/message-broker).
 
-| Package | Folder in this repo | What it holds | Documents |
+| Package | Folder in this repo | Namespace | What it holds |
 |---|---|---|---|
-| Core (`freyr/message-broker`) | `src/broker/` | The ports, the relay loop, the delivery processor, retry and dead letters, the wire format, the console commands and the test kit. | [docs/core/](docs/core/) |
-| PostgreSQL adapter (`freyr/message-broker-postgresql`) | `src/adapter/postgresql/` | The outbox, deduplication and dead-letter stores, the transaction, the schema installer and the outbox retention. | [docs/postgresql/](docs/postgresql/) |
-| AMQP adapter (`freyr/message-broker-amqp`) | `src/adapter/amqp/` | The AMQP publisher and consumer, the wait-queue retry and the config classes. | [docs/amqp/](docs/amqp/) |
-| HTTP adapter (`freyr/message-broker-http`) | `src/adapter/http/` | The webhook sender: signed parallel `POST` requests (Standard Webhooks) with Symfony HttpClient, the response classifier and the private network check. | [docs/http/](docs/http/) |
-| Redis adapter (`freyr/message-broker-redis`) | `src/adapter/redis/` | The rate limit store of the webhook lanes: atomic Lua scripts with a phpredis, Relay or Predis client. | [docs/redis/](docs/redis/) |
+| [`freyr/message-broker`](README.md) (the core) | `/` (`src/`, `tests/`, `docs/`) | `Freyr\MessageBroker\` | The ports, the relay loop, the delivery processor, retry and dead letters, the wire format, the console commands, the webhook delivery queue and the test kit. |
+| [`freyr/message-broker-storage-postgresql`](storage/postgresql/README.md) | `storage/postgresql/` | `Freyr\MessageBroker\Storage\PostgreSql\` | The outbox, deduplication, dead-letter and webhook delivery stores, the transaction, the schema installers, the retention, and the rate limiter and circuit breaker of the webhook lanes. |
+| [`freyr/message-broker-transport-amqp`](transport/amqp/README.md) | `transport/amqp/` | `Freyr\MessageBroker\Transport\Amqp\` | The AMQP publisher and consumer, the wait-queue retry, the dead letter sink and the config classes. |
+| [`freyr/message-broker-webhook-http`](webhook/http/README.md) | `webhook/http/` | `Freyr\MessageBroker\Webhook\Http\` | The webhook sender: signed parallel `POST` requests (Standard Webhooks) with Symfony HttpClient, the response classifier and the private network check. |
+| [`freyr/message-broker-ratelimit-redis`](ratelimit/redis/README.md) | `ratelimit/redis/` | `Freyr\MessageBroker\RateLimit\Redis\` | The rate limit store of the webhook lanes: atomic Lua scripts with a phpredis, Relay or Predis client. |
 
-The manifest and the README of each future package are in `packages/<name>/`.
+Each adapter requires one minor line of the core (`^0.15`). A minor release of
+the core is breaking, so each adapter gets a new constraint and a release
+after it. The upgrade from the one package of 0.14.x is in
+[UPGRADE.md](UPGRADE.md).
 
 ## Install
 
+Install the core and the adapters that you use:
+
 ```bash
-composer require freyr/message-broker
+composer require freyr/message-broker \
+    freyr/message-broker-storage-postgresql \
+    freyr/message-broker-transport-amqp
 ```
 
-This installs the code of all five packages. It replaces `freyr/message-broker-postgresql`, `freyr/message-broker-amqp`, `freyr/message-broker-http` and `freyr/message-broker-redis`.
+For webhooks, add `freyr/message-broker-webhook-http` and, for a Redis rate
+limit store, `freyr/message-broker-ratelimit-redis`.
 
-Requires PHP 8.4 or 8.5 (tested in CI on both), `ext-pdo_pgsql`, and PostgreSQL 14+. Install the pieces you use:
-
-| Need | Add |
-|---|---|
-| AMQP transport | `composer require php-amqplib/php-amqplib` |
-| HTTP webhook sender | `composer require symfony/http-client symfony/http-foundation` |
-| Redis rate limit store | `ext-redis` or `composer require predis/predis`, and Redis 7.0+ or Valkey 7.2+ |
-| Graceful shutdown | `ext-pcntl` (relay/consumer SIGTERM handling) |
+Requires PHP 8.4 or 8.5 (tested in CI on both). The PostgreSQL package needs
+`ext-pdo_pgsql` and PostgreSQL 14+. The Redis package needs `ext-redis` or
+`predis/predis`, and Redis 7.0+ or Valkey 7.2+. `ext-pcntl` gives the relay and
+the consumer a graceful shutdown on SIGTERM.
 
 ## Quickstart
 
@@ -61,8 +67,8 @@ lane, a named drain of that table. Lanes isolate workloads from each other.
 Any number of identical relay workers drain one lane in parallel; scale by
 adding workers to the lane. By default the relay marks rows published and never deletes
 them. The command `message-broker:outbox:maintain` drops daily partitions
-after the retention period (default 7 days). A partition with unpublished rows is kept, and the command exits non-zero, unless `--drop-unpublished` is set — see [docs/core/RELAY.md](docs/core/RELAY.md) and
-[docs/postgresql/RETENTION.md](docs/postgresql/RETENTION.md).
+after the retention period (default 7 days). A partition with unpublished rows is kept, and the command exits non-zero, unless `--drop-unpublished` is set — see [docs/RELAY.md](docs/RELAY.md) and
+[storage/postgresql/docs/RETENTION.md](storage/postgresql/docs/RETENTION.md).
 
 ## Published rows: mark or delete
 
@@ -70,8 +76,8 @@ The PostgreSQL outbox store has one setting for published rows,
 `PublishedRows`:
 
 ```php
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
-use Freyr\MessageBroker\Adapter\PostgreSql\PublishedRows;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlOutboxStore;
+use Freyr\MessageBroker\Storage\PostgreSql\PublishedRows;
 
 new PostgreSqlOutboxStore($pdo);                          // PublishedRows::Mark, the default
 new PostgreSqlOutboxStore($pdo, PublishedRows::Delete);   // delete each row after its publish
@@ -86,44 +92,44 @@ new PostgreSqlOutboxStore($pdo, PublishedRows::from('delete')); // from configur
 
 Set it on the store of the relay; the producer can keep the default. The
 measurements and the choice are in
-[docs/postgresql/STORAGE.md](docs/postgresql/STORAGE.md#published-rows-mark-or-delete).
+[storage/postgresql/docs/STORAGE.md](storage/postgresql/docs/STORAGE.md#published-rows-mark-or-delete).
 
 ## Documentation
 
-- [Quickstart](docs/QUICKSTART.md) — produce → relay → consume, end to end, and webhooks (uses all four packages)
+- [Quickstart](docs/QUICKSTART.md) — produce → relay → consume, end to end, and webhooks (uses the core and the four adapters)
 
-Core (`docs/core/`):
+Core (`docs/`):
 
-- [Relay and lanes](docs/core/RELAY.md) — lanes, the relay loop, failure handling, backoff
-- [Delivery processor and retry](docs/core/CONSUMER.md) — the exactly-once algorithm, the retry policy
-- [Ports](docs/core/PORTS.md) — the ports and the classes that implement them
-- [CLI Reference](docs/core/CLI_REFERENCE.md) — every shipped console command
-- [DLQ Operations](docs/core/DLQ_OPERATIONS.md) — inspecting, replaying, and purging dead letters
-- [Production](docs/core/PRODUCTION.md) — deployment, graceful shutdown, observability, scaling
-- [Testing](docs/core/TESTING.md) — contract test cases for adapter authors, in-memory fakes for applications
+- [Relay and lanes](docs/RELAY.md) — lanes, the relay loop, failure handling, backoff
+- [Delivery processor and retry](docs/CONSUMER.md) — the exactly-once algorithm, the retry policy
+- [Ports](docs/PORTS.md) — the ports and the classes that implement them
+- [CLI Reference](docs/CLI_REFERENCE.md) — every shipped console command
+- [DLQ Operations](docs/DLQ_OPERATIONS.md) — inspecting, replaying, and purging dead letters
+- [Production](docs/PRODUCTION.md) — deployment, graceful shutdown, observability, scaling
+- [Testing](docs/TESTING.md) — contract test cases for adapter authors, in-memory fakes for applications
 
-PostgreSQL adapter (`docs/postgresql/`):
+`freyr/message-broker-storage-postgresql` (`storage/postgresql/docs/`):
 
-- [Storage](docs/postgresql/STORAGE.md) — the tables, the schema setup, the classes and their wiring
-- [Retention](docs/postgresql/RETENTION.md) — outbox partitions, `outbox:maintain`, pg_partman
-- [Connection pooling](docs/postgresql/CONNECTION_POOLING.md) — pgbouncer
-- [Webhook delivery storage](docs/postgresql/WEBHOOKS.md) — `webhook_deliveries`, the delivery store, its retention, pg_partman, the alert query
+- [Storage](storage/postgresql/docs/STORAGE.md) — the tables, the schema setup, the classes and their wiring
+- [Retention](storage/postgresql/docs/RETENTION.md) — outbox partitions, `outbox:maintain`, pg_partman
+- [Connection pooling](storage/postgresql/docs/CONNECTION_POOLING.md) — pgbouncer
+- [Webhook delivery storage](storage/postgresql/docs/WEBHOOKS.md) — `webhook_deliveries`, the delivery store, its retention, pg_partman, the alert query
 
-AMQP adapter (`docs/amqp/`):
+`freyr/message-broker-transport-amqp` (`transport/amqp/docs/`):
 
-- [Transport](docs/amqp/TRANSPORT.md) — routing, config classes, the dedicated channel, the publisher, the topology
-- [Consumer](docs/amqp/CONSUMER.md) — the consumer, the TTL wait queues, the dead-letter exchange
-- [Dead letters](docs/amqp/DEAD_LETTERS.md) — the import of a dead letter queue, the read of `x-death`, the permissions
+- [Transport](transport/amqp/docs/TRANSPORT.md) — routing, config classes, the dedicated channel, the publisher, the topology
+- [Consumer](transport/amqp/docs/CONSUMER.md) — the consumer, the TTL wait queues, the dead-letter exchange
+- [Dead letters](transport/amqp/docs/DEAD_LETTERS.md) — the import of a dead letter queue, the read of `x-death`, the permissions
 
-HTTP adapter (`docs/http/`):
+`freyr/message-broker-webhook-http` (`webhook/http/docs/`):
 
-- [HTTP sender](docs/http/SENDER.md) — the request, the configuration, the results, the timeouts, the DNS allowance and its known limit, the connections
-- [Signature](docs/http/SIGNATURE.md) — the `webhook-` headers, the secret, the verification by a receiver
-- [Network rules](docs/http/NETWORK.md) — the private network rule, the proxy rule, the `https` rule, no redirects
+- [HTTP sender](webhook/http/docs/SENDER.md) — the request, the configuration, the results, the timeouts, the DNS allowance and its known limit, the connections
+- [Signature](webhook/http/docs/SIGNATURE.md) — the `webhook-` headers, the secret, the verification by a receiver
+- [Network rules](webhook/http/docs/NETWORK.md) — the private network rule, the proxy rule, the `https` rule, no redirects
 
-Redis adapter (`docs/redis/`):
+`freyr/message-broker-ratelimit-redis` (`ratelimit/redis/docs/`):
 
-- [Redis rate limit store](docs/redis/RATE_LIMIT.md) — the client bridges, the key prefix and the hash tag, the server versions, `maxmemory-policy`, the script cache
+- [Redis rate limit store](ratelimit/redis/docs/RATE_LIMIT.md) — the client bridges, the key prefix and the hash tag, the server versions, `maxmemory-policy`, the script cache
 
 ## License
 

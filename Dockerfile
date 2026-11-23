@@ -15,8 +15,10 @@ RUN apk add --no-cache git unzip && \
         sockets \
         zip
 
-# pcov collects line coverage for mutation testing (Infection); limited to src/.
-RUN printf 'pcov.directory=/app/src\n' > /usr/local/etc/php/conf.d/zz-pcov.ini
+# pcov collects line coverage for mutation testing (Infection): the src/ folders of the core and of the
+# adapter folders, so the whole repo without vendor/ (the path packages in vendor/ are symlinks; PHP
+# reports the real path of each file).
+RUN printf 'pcov.directory=/app\npcov.exclude="~/vendor/~"\n' > /usr/local/etc/php/conf.d/zz-pcov.ini
 
 COPY --from=composer/composer:2-bin /composer /usr/bin/composer
 

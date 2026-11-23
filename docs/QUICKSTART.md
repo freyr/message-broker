@@ -6,17 +6,30 @@ AMQP, consume it with deduplication and retry, and register the two
 long-running processes as CLI commands.
 
 It assumes a PostgreSQL database and a RabbitMQ broker reachable
-from your application. See [core/RELAY.md](core/RELAY.md) for the relay,
-[amqp/TRANSPORT.md](amqp/TRANSPORT.md) for the AMQP publisher, and
-[core/CLI_REFERENCE.md](core/CLI_REFERENCE.md) for every command's full option list.
+from your application. See [RELAY.md](RELAY.md) for the relay,
+[../transport/amqp/docs/TRANSPORT.md](../transport/amqp/docs/TRANSPORT.md) for the AMQP publisher, and
+[CLI_REFERENCE.md](CLI_REFERENCE.md) for every command's full option list.
 
-The example uses the three packages: the core (`Freyr\MessageBroker\`), the
-PostgreSQL adapter (`Freyr\MessageBroker\Adapter\PostgreSql\`) and the AMQP
-adapter (`Freyr\MessageBroker\Adapter\Amqp\`). Today one Composer package
-holds all three. The section [Send webhooks](#send-webhooks) uses the HTTP
-adapter (`Freyr\MessageBroker\Adapter\Http\`) in place of the AMQP adapter.
-The documents of each package are in `docs/core/`, `docs/postgresql/`,
-`docs/amqp/` and `docs/http/`.
+The example uses three packages: the core `freyr/message-broker`
+(`Freyr\MessageBroker\`), `freyr/message-broker-storage-postgresql`
+(`Freyr\MessageBroker\Storage\PostgreSql\`) and
+`freyr/message-broker-transport-amqp` (`Freyr\MessageBroker\Transport\Amqp\`).
+The section [Send webhooks](#send-webhooks) uses
+`freyr/message-broker-webhook-http` (`Freyr\MessageBroker\Webhook\Http\`) in
+place of the AMQP package. The documents of the core are in `docs/`; the
+documents of each adapter are in the `docs/` folder of its package.
+
+## Install
+
+```bash
+composer require freyr/message-broker \
+    freyr/message-broker-storage-postgresql \
+    freyr/message-broker-transport-amqp
+```
+
+For the section [Send webhooks](#send-webhooks), also install
+`freyr/message-broker-webhook-http`; for a Redis rate limit store of the
+webhook lanes, `freyr/message-broker-ratelimit-redis`.
 
 ## Define a message
 
@@ -55,7 +68,7 @@ encoded throws inside your transaction — nothing commits.
 
 ```php
 use Freyr\MessageBroker\Outbox\OutboxProducer;
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlOutboxStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 
 $pdo = new PDO($dsn, $user, $password, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
@@ -85,7 +98,7 @@ php bin/console message-broker:setup:schema
 
 The `body` column is `BYTEA`. `--premake-days` (default `3`) sets how many
 days of partitions
-the command creates ahead. See [core/CLI_REFERENCE.md](core/CLI_REFERENCE.md) for
+the command creates ahead. See [CLI_REFERENCE.md](CLI_REFERENCE.md) for
 `--dump-sql` and every other command's options.
 
 ## Run a relay
@@ -94,14 +107,14 @@ A relay drains one outbox lane to one transport target. Each relay worker
 claims a batch of rows with `FOR UPDATE SKIP LOCKED`, publishes the batch with
 publisher confirms, and marks the rows published. By default it never deletes rows
 (`PublishedRows::Delete` changes that; see
-[postgresql/STORAGE.md](postgresql/STORAGE.md#published-rows-mark-or-delete)). It
+[../storage/postgresql/docs/STORAGE.md](../storage/postgresql/docs/STORAGE.md#published-rows-mark-or-delete)). It
 needs a dedicated `AMQPChannel` — publisher confirms are channel-global
 state, so nothing else may publish on the same channel.
 
 ```php
 use Freyr\MessageBroker\Outbox\Relay;
-use Freyr\MessageBroker\Adapter\Amqp\AmqpMessagePublisher;
-use Freyr\MessageBroker\Adapter\Amqp\AmqpPublishConfig;
+use Freyr\MessageBroker\Transport\Amqp\AmqpMessagePublisher;
+use Freyr\MessageBroker\Transport\Amqp\AmqpPublishConfig;
 
 $relay = new Relay(
     outbox: $outbox,
@@ -117,7 +130,7 @@ $relay->run(); // blocks; SIGTERM/SIGINT to stop
 
 Run more workers on the same lane to scale throughput; each worker has its
 own database connection and its own channel. See
-[core/RELAY.md](core/RELAY.md) and [amqp/TRANSPORT.md](amqp/TRANSPORT.md) for the details.
+[RELAY.md](RELAY.md) and [../transport/amqp/docs/TRANSPORT.md](../transport/amqp/docs/TRANSPORT.md) for the details.
 
 ## Schedule the outbox maintenance
 
@@ -129,7 +142,7 @@ the upcoming partitions and drop the expired ones:
 
 ```php
 use Freyr\MessageBroker\Console\OutboxMaintainCommand;
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxRetention;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlOutboxRetention;
 
 $application->add(new OutboxMaintainCommand(new PostgreSqlOutboxRetention($pdo)));
 ```
@@ -140,8 +153,8 @@ php bin/console message-broker:outbox:maintain --retention-days=7 --premake-days
 
 An expired partition that still holds unpublished rows is kept, and the
 command exits with code 1; `--drop-unpublished` drops it with those rows. See
-[core/CLI_REFERENCE.md](core/CLI_REFERENCE.md) for the options and the exit codes, and
-[postgresql/RETENTION.md](postgresql/RETENTION.md) for the retention rules and pg_partman.
+[CLI_REFERENCE.md](CLI_REFERENCE.md) for the options and the exit codes, and
+[../storage/postgresql/docs/RETENTION.md](../storage/postgresql/docs/RETENTION.md) for the retention rules and pg_partman.
 
 ## Run a consumer
 
@@ -153,15 +166,15 @@ budget is exhausted.
 ```php
 use Freyr\MessageBroker\Consumer\CallableDispatcher;
 use Freyr\MessageBroker\Consumer\IncomingMessage;
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeadLetterStore;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlDeadLetterStore;
 use Freyr\MessageBroker\Consumer\DeliveryProcessor;
 use Freyr\MessageBroker\Retry\Backoff;
 use Freyr\MessageBroker\Retry\ExponentialRetryPolicy;
 use Freyr\MessageBroker\Serializer\JsonDeserializer;
-use Freyr\MessageBroker\Adapter\PostgreSql\PdoTransaction;
-use Freyr\MessageBroker\Adapter\Amqp\AmqpConsumer;
-use Freyr\MessageBroker\Adapter\Amqp\AmqpQueueConfig;
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeduplicationStore;
+use Freyr\MessageBroker\Storage\PostgreSql\PdoTransaction;
+use Freyr\MessageBroker\Transport\Amqp\AmqpConsumer;
+use Freyr\MessageBroker\Transport\Amqp\AmqpQueueConfig;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlDeduplicationStore;
 
 $consumer = new AmqpConsumer(
     channel: $channel,
@@ -190,8 +203,8 @@ times (five deliveries that ended with no ack) becomes a dead letter with the
 error `DeliveryLimitExceeded`, and the handler does not run again. Only a
 quorum queue gives the delivery count. Keep the value not higher than
 `x-delivery-limit` of the queue. See
-[core/CONSUMER.md](core/CONSUMER.md#delivery-limit) and
-[amqp/CONSUMER.md](amqp/CONSUMER.md#the-return-rule).
+[CONSUMER.md](CONSUMER.md#delivery-limit) and
+[../transport/amqp/docs/CONSUMER.md](../transport/amqp/docs/CONSUMER.md#the-return-rule).
 
 `name` scopes deduplication — the same message id delivered to two
 differently-named consumers is processed by both; delivered twice to the
@@ -218,14 +231,14 @@ callable a `WorkerLimits` from its options (`--limit`, `--time-limit`,
 `--memory-limit`, and `--failure-limit` for `consume`), for example
 `php bin/console message-broker:consume orders --time-limit=3600 --memory-limit=128M`. Run each command
 as the only process of its container, in a Kubernetes `Deployment` — see
-[core/PRODUCTION.md](core/PRODUCTION.md) for the crash-only deployment model
+[PRODUCTION.md](PRODUCTION.md) for the crash-only deployment model
 and why it is safe.
 
 ## Send webhooks
 
 The webhook queue sends the same messages to the HTTP endpoints of
 subscribers. It uses the core, the PostgreSQL adapter and the HTTP adapter
-(`Freyr\MessageBroker\Adapter\Http\`, needs `symfony/http-client` and
+(`Freyr\MessageBroker\Webhook\Http\`, needs `symfony/http-client` and
 `symfony/http-foundation`). It does not use the outbox, the relay or AMQP.
 
 Your application owns the subscriptions and gives them through
@@ -266,7 +279,7 @@ transaction. `WebhookProducer` writes one delivery row for each subscription
 of the message:
 
 ```php
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryStore;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlDeliveryStore;
 use Freyr\MessageBroker\Serializer\JsonWireFormat;
 use Freyr\MessageBroker\Webhook\WebhookProducer;
 
@@ -283,10 +296,10 @@ Run the delivery loop with the HTTP sender, as a command. Each worker has its
 own connection:
 
 ```php
-use Freyr\MessageBroker\Adapter\Http\HttpDeliverySender;
-use Freyr\MessageBroker\Adapter\Http\HttpSenderConfig;
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliveryRetention;
-use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlDeliverySchemaInstaller;
+use Freyr\MessageBroker\Webhook\Http\HttpDeliverySender;
+use Freyr\MessageBroker\Webhook\Http\HttpSenderConfig;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlDeliveryRetention;
+use Freyr\MessageBroker\Storage\PostgreSql\PostgreSqlDeliverySchemaInstaller;
 use Freyr\MessageBroker\Console\WebhookMaintainCommand;
 use Freyr\MessageBroker\Console\WebhookRunCommand;
 use Freyr\MessageBroker\Console\WebhookSetupCommand;
@@ -313,29 +326,29 @@ and `message-broker:webhook:maintain` once a day in a `CronJob`. Each request is
 `POST` with the message ID in `webhook-id`. A delivery that fails each attempt
 goes to `dead_letters` with the source `webhook:crm`, and `dlq:replay` sends it
 again when `ReplayService` has the delivery store (the argument `deliveries:`,
-see [core/DLQ_OPERATIONS.md](core/DLQ_OPERATIONS.md#replay-of-a-webhook-dead-letter)).
+see [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md#replay-of-a-webhook-dead-letter)).
 Keep `maxHostConnections` of the sender at the batch size of the loop
 or more. The sender refuses an endpoint in a private network by default.
 
-- [core/WEBHOOKS.md](core/WEBHOOKS.md) — the model, the ports, the delivery
+- [WEBHOOKS.md](WEBHOOKS.md) — the model, the ports, the delivery
   loop, the retry policy, the commands and the events.
-- [postgresql/WEBHOOKS.md](postgresql/WEBHOOKS.md) — the table
+- [../storage/postgresql/docs/WEBHOOKS.md](../storage/postgresql/docs/WEBHOOKS.md) — the table
   `webhook_deliveries`, the delivery store and its retention.
-- [http/SENDER.md](http/SENDER.md), [http/SIGNATURE.md](http/SIGNATURE.md) and
-  [http/NETWORK.md](http/NETWORK.md) — the HTTP sender, the signature that a
+- [../webhook/http/docs/SENDER.md](../webhook/http/docs/SENDER.md), [../webhook/http/docs/SIGNATURE.md](../webhook/http/docs/SIGNATURE.md) and
+  [../webhook/http/docs/NETWORK.md](../webhook/http/docs/NETWORK.md) — the HTTP sender, the signature that a
   receiver verifies, and the network rules.
 
 ## Next steps
 
-- [core/RELAY.md](core/RELAY.md) — lanes, the relay loop, failure handling and backoff.
-- [core/CONSUMER.md](core/CONSUMER.md) — the delivery processor and the retry policy.
-- [amqp/TRANSPORT.md](amqp/TRANSPORT.md) and [amqp/CONSUMER.md](amqp/CONSUMER.md) —
+- [RELAY.md](RELAY.md) — lanes, the relay loop, failure handling and backoff.
+- [CONSUMER.md](CONSUMER.md) — the delivery processor and the retry policy.
+- [../transport/amqp/docs/TRANSPORT.md](../transport/amqp/docs/TRANSPORT.md) and [../transport/amqp/docs/CONSUMER.md](../transport/amqp/docs/CONSUMER.md) —
   AMQP configuration in full (publisher, consumer, retry).
-- [postgresql/STORAGE.md](postgresql/STORAGE.md) — the tables, the schema setup and the PostgreSQL classes.
-- [core/CLI_REFERENCE.md](core/CLI_REFERENCE.md) — every command and option.
-- [core/DLQ_OPERATIONS.md](core/DLQ_OPERATIONS.md) — inspecting, replaying, and
+- [../storage/postgresql/docs/STORAGE.md](../storage/postgresql/docs/STORAGE.md) — the tables, the schema setup and the PostgreSQL classes.
+- [CLI_REFERENCE.md](CLI_REFERENCE.md) — every command and option.
+- [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md) — inspecting, replaying, and
   purging dead letters.
-- [core/PRODUCTION.md](core/PRODUCTION.md) — deployment, observability, and scaling;
-  [postgresql/RETENTION.md](postgresql/RETENTION.md) — outbox retention.
-- [core/WEBHOOKS.md](core/WEBHOOKS.md), [postgresql/WEBHOOKS.md](postgresql/WEBHOOKS.md)
-  and [http/SENDER.md](http/SENDER.md) — the webhook queue.
+- [PRODUCTION.md](PRODUCTION.md) — deployment, observability, and scaling;
+  [../storage/postgresql/docs/RETENTION.md](../storage/postgresql/docs/RETENTION.md) — outbox retention.
+- [WEBHOOKS.md](WEBHOOKS.md), [../storage/postgresql/docs/WEBHOOKS.md](../storage/postgresql/docs/WEBHOOKS.md)
+  and [../webhook/http/docs/SENDER.md](../webhook/http/docs/SENDER.md) — the webhook queue.

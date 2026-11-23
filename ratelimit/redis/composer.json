@@ -1,0 +1,56 @@
+{
+    "name": "freyr/message-broker-ratelimit-redis",
+    "description": "Redis rate limit store for freyr/message-broker: the token buckets of the webhook lanes in Lua scripts, with a phpredis or a Predis client",
+    "keywords": [
+        "webhooks",
+        "rate-limit",
+        "token-bucket",
+        "redis",
+        "valkey"
+    ],
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Freyr Development Team"
+        }
+    ],
+    "require": {
+        "php": ">=8.4",
+        "freyr/message-broker": "^0.15"
+    },
+    "require-dev": {
+        "ext-redis": "*",
+        "infection/infection": "^0.35.11",
+        "phpunit/phpunit": "^13.4",
+        "predis/predis": "^3.2"
+    },
+    "suggest": {
+        "ext-redis": "A \\Redis, \\RedisCluster or Relay client for PhpRedisScriptRunner",
+        "predis/predis": "A Predis client for PredisScriptRunner",
+        "phpunit/phpunit": "Required for Freyr\\MessageBroker\\RateLimit\\Redis\\Testing\\*, the Redis test set-up"
+    },
+    "provide": {
+        "freyr/message-broker-ratelimit-implementation": "1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Freyr\\MessageBroker\\RateLimit\\Redis\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Freyr\\MessageBroker\\RateLimit\\Redis\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "preferred-install": "dist",
+        "optimize-autoloader": true,
+        "allow-plugins": {
+            "infection/extension-installer": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
