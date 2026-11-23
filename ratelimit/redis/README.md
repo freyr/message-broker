@@ -1,8 +1,13 @@
 # freyr/message-broker-ratelimit-redis
 
-This package is the Redis rate limit store of the Freyr Message Broker
-library. It is not published separately yet. Today the repository
-`freyr/message-broker` holds its code in `src/adapter/redis/`.
+This package is the Redis rate limit store of the Freyr Message Broker library,
+namespace `Freyr\MessageBroker\RateLimit\Redis\`.
+
+> The repository `freyr/message-broker-ratelimit-redis` is a read-only copy of the folder
+> `ratelimit/redis/` of [freyr/message-broker](https://github.com/freyr/message-broker).
+> Development, issues and pull requests are in freyr/message-broker. A
+> release has the tag `ratelimit-redis-v<version>` in freyr/message-broker
+> and the tag `v<version>` in `freyr/message-broker-ratelimit-redis`.
 
 The adapter holds `RedisRateLimiter`, which implements the port
 `Webhook\RateLimiter` of the core in Redis. Each call is one atomic Lua
@@ -14,21 +19,18 @@ client; the package opens no connection.
 ## Requirements
 
 - PHP 8.4 or later
-- `freyr/message-broker` ^0.14 (the core)
+- `freyr/message-broker` ^0.15 (the core)
 - Redis 7.0 or later, or Valkey 7.2 or later
 - One Redis client: `ext-redis` (a `\Redis`, `\RedisCluster` or Relay
   client) or `predis/predis`
 
 ## Install
 
-After the split:
-
 ```bash
 composer require freyr/message-broker-ratelimit-redis
 ```
 
-Today, `composer require freyr/message-broker` installs this code with the
-core, and you add `ext-redis` or `predis/predis` yourself.
+Add a Redis client yourself: `ext-redis` or `predis/predis`.
 
 ## Minimal wiring
 

@@ -10,13 +10,26 @@ from your application. See [RELAY.md](RELAY.md) for the relay,
 [../transport/amqp/docs/TRANSPORT.md](../transport/amqp/docs/TRANSPORT.md) for the AMQP publisher, and
 [CLI_REFERENCE.md](CLI_REFERENCE.md) for every command's full option list.
 
-The example uses the three packages: the core (`Freyr\MessageBroker\`), the
-PostgreSQL adapter (`Freyr\MessageBroker\Storage\PostgreSql\`) and the AMQP
-adapter (`Freyr\MessageBroker\Transport\Amqp\`). Today one Composer package
-holds all three. The section [Send webhooks](#send-webhooks) uses the HTTP
-adapter (`Freyr\MessageBroker\Webhook\Http\`) in place of the AMQP adapter.
-The documents of each package are in `docs/core/`, `docs/postgresql/`,
-`docs/amqp/` and `docs/http/`.
+The example uses three packages: the core `freyr/message-broker`
+(`Freyr\MessageBroker\`), `freyr/message-broker-storage-postgresql`
+(`Freyr\MessageBroker\Storage\PostgreSql\`) and
+`freyr/message-broker-transport-amqp` (`Freyr\MessageBroker\Transport\Amqp\`).
+The section [Send webhooks](#send-webhooks) uses
+`freyr/message-broker-webhook-http` (`Freyr\MessageBroker\Webhook\Http\`) in
+place of the AMQP package. The documents of the core are in `docs/`; the
+documents of each adapter are in the `docs/` folder of its package.
+
+## Install
+
+```bash
+composer require freyr/message-broker \
+    freyr/message-broker-storage-postgresql \
+    freyr/message-broker-transport-amqp
+```
+
+For the section [Send webhooks](#send-webhooks), also install
+`freyr/message-broker-webhook-http`; for a Redis rate limit store of the
+webhook lanes, `freyr/message-broker-ratelimit-redis`.
 
 ## Define a message
 

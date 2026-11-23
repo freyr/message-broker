@@ -1,9 +1,13 @@
 # freyr/message-broker-transport-amqp
 
-This package is the AMQP (RabbitMQ) transport adapter of the Freyr Message
-Broker library. It is not published separately yet. Today the repository
-`freyr/message-broker` holds its code in `src/adapter/amqp/`, and the links
-below point to the documents in this repository.
+This package is the AMQP (RabbitMQ) transport adapter of the Freyr Message Broker library,
+namespace `Freyr\MessageBroker\Transport\Amqp\`.
+
+> The repository `freyr/message-broker-transport-amqp` is a read-only copy of the folder
+> `transport/amqp/` of [freyr/message-broker](https://github.com/freyr/message-broker).
+> Development, issues and pull requests are in freyr/message-broker. A
+> release has the tag `transport-amqp-v<version>` in freyr/message-broker
+> and the tag `v<version>` in `freyr/message-broker-transport-amqp`.
 
 The adapter holds the publisher that sends outbox rows to an exchange, the
 consumer loop that gives each delivery to the core delivery processor, the
@@ -13,7 +17,7 @@ name and gives no ordering guarantee.
 ## Requirements
 
 - PHP 8.4 or later
-- `freyr/message-broker` ^0.14 (the core)
+- `freyr/message-broker` ^0.15 (the core)
 - `php-amqplib/php-amqplib` ^3.7.2
 - `psr/log` ^3.0
 - A storage adapter for the outbox, deduplication and dead letters, for example
@@ -21,14 +25,9 @@ name and gives no ordering guarantee.
 
 ## Install
 
-After the split:
-
 ```bash
 composer require freyr/message-broker-transport-amqp
 ```
-
-Today, `composer require freyr/message-broker` installs this code with the
-core, and you add `php-amqplib/php-amqplib` yourself.
 
 ## Minimal wiring
 

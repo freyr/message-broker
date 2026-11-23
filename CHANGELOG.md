@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING:** the adapters are separate Composer packages with their own versions, and `freyr/message-broker` (0.15.0) is the core only: it holds no adapter code and no `replace`. The packages are `freyr/message-broker-storage-postgresql` (`Freyr\MessageBroker\Storage\PostgreSql\`), `freyr/message-broker-transport-amqp` (`Freyr\MessageBroker\Transport\Amqp\`), `freyr/message-broker-webhook-http` (`Freyr\MessageBroker\Webhook\Http\`) and `freyr/message-broker-ratelimit-redis` (`Freyr\MessageBroker\RateLimit\Redis\`), each at 0.1.0 with the core constraint `^0.15`; the namespaces `Freyr\MessageBroker\Adapter\*\` do not exist any more, and no alias is given. The Redis package provides `freyr/message-broker-ratelimit-implementation`. In this repo the core is at the root (`src/`, `tests/`, `docs/`) and each adapter is one folder (`storage/postgresql/`, `transport/amqp/`, `webhook/http/`, `ratelimit/redis/`), which the release workflow copies to a read-only repo with the name of the package. See `UPGRADE.md`, "From 0.14.x to 0.15.0".
+
 ### Added
 
 - `PostgreSqlOutboxStore(PDO $pdo, PublishedRows $publishedRows = PublishedRows::Mark)`: the new string enum `Adapter\PostgreSql\PublishedRows` (`mark`, `delete`) selects what the drain does with a published row. `Mark`, the default and the behavior until now, sets `published_at`; `Delete` deletes the row in the claim transaction, with the same conditions (`published_at IS NULL AND abandoned_at IS NULL`, the `created_at` range of the claim). The `OutboxStore` port permits an implementation to delete published rows as an option. `make bench-outbox-cleanup ARGS="<drain|steady> [key=value ...]"` (`tools/outbox-cleanup-bench.php`) measures the CPU of the PostgreSQL container, the WAL and the claim plans for both values. See `docs/postgresql/STORAGE.md` (*Published rows: mark or delete*).

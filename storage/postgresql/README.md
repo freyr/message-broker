@@ -1,9 +1,13 @@
 # freyr/message-broker-storage-postgresql
 
-This package is the PostgreSQL storage adapter of the Freyr Message Broker
-library. It is not published separately yet. Today the repository
-`freyr/message-broker` holds its code in `src/adapter/postgresql/`, and the
-links below point to the documents in this repository.
+This package is the PostgreSQL storage adapter of the Freyr Message Broker library,
+namespace `Freyr\MessageBroker\Storage\PostgreSql\`.
+
+> The repository `freyr/message-broker-storage-postgresql` is a read-only copy of the folder
+> `storage/postgresql/` of [freyr/message-broker](https://github.com/freyr/message-broker).
+> Development, issues and pull requests are in freyr/message-broker. A
+> release has the tag `storage-postgresql-v<version>` in freyr/message-broker
+> and the tag `v<version>` in `freyr/message-broker-storage-postgresql`.
 
 The adapter implements the storage ports of the core with plain PDO: the
 outbox store, the deduplication store, the dead-letter store, the transaction,
@@ -14,19 +18,14 @@ partitioned by day.
 
 - PHP 8.4 or later, with `ext-pdo` and `ext-pdo_pgsql`
 - PostgreSQL 14 or later
-- `freyr/message-broker` ^0.14 (the core), `symfony/clock` ^8.1,
+- `freyr/message-broker` ^0.15 (the core), `symfony/clock` ^8.1,
   `symfony/uid` ^7.4 or ^8.1
 
 ## Install
 
-After the split:
-
 ```bash
 composer require freyr/message-broker-storage-postgresql
 ```
-
-Today, `composer require freyr/message-broker` installs this code with the
-core.
 
 ## Minimal wiring
 

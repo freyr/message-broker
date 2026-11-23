@@ -1,8 +1,13 @@
 # freyr/message-broker-webhook-http
 
-This package is the HTTP webhook sender of the Freyr Message Broker library.
-It is not published separately yet. Today the repository
-`freyr/message-broker` holds its code in `src/adapter/http/`.
+This package is the HTTP webhook sender of the Freyr Message Broker library,
+namespace `Freyr\MessageBroker\Webhook\Http\`.
+
+> The repository `freyr/message-broker-webhook-http` is a read-only copy of the folder
+> `webhook/http/` of [freyr/message-broker](https://github.com/freyr/message-broker).
+> Development, issues and pull requests are in freyr/message-broker. A
+> release has the tag `webhook-http-v<version>` in freyr/message-broker
+> and the tag `v<version>` in `freyr/message-broker-webhook-http`.
 
 The adapter holds `HttpDeliverySender`, which implements the port
 `Webhook\DeliverySender` of the core with Symfony HttpClient. It sends the
@@ -13,7 +18,7 @@ destination in a private network by default.
 ## Requirements
 
 - PHP 8.4 or later
-- `freyr/message-broker` ^0.14 (the core)
+- `freyr/message-broker` ^0.15 (the core)
 - `symfony/http-client` ^8.1 and `symfony/http-foundation` ^8.1
 - `psr/log` ^3.0
 - A storage adapter for the webhook deliveries, for example
@@ -21,15 +26,9 @@ destination in a private network by default.
 
 ## Install
 
-After the split:
-
 ```bash
 composer require freyr/message-broker-webhook-http
 ```
-
-Today, `composer require freyr/message-broker` installs this code with the
-core, and you add `symfony/http-client` and `symfony/http-foundation`
-yourself.
 
 ## Minimal wiring
 

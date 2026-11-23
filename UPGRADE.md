@@ -1,5 +1,59 @@
 # Upgrade guide
 
+## From 0.14.x to 0.15.0
+
+The adapters are separate Composer packages. `freyr/message-broker` 0.15.0 is
+the core only: the ports, the relay, the delivery processor, the console
+commands, the webhook delivery queue and the test kit. It holds no adapter
+code and replaces no package. Each adapter has its own version (the first is
+0.1.0) and requires the core `^0.15`. The release changes no schema, no table,
+no message header and no class name; only the namespaces of the adapters and
+the package names change. There is no alias for the old namespaces.
+
+### Install
+
+Require the core and each adapter that you use:
+
+```bash
+composer require freyr/message-broker:^0.15 \
+    freyr/message-broker-storage-postgresql \
+    freyr/message-broker-transport-amqp
+```
+
+Add `freyr/message-broker-webhook-http` for the HTTP webhook sender and
+`freyr/message-broker-ratelimit-redis` for the Redis rate limit store. The
+dependencies of an adapter (`php-amqplib/php-amqplib`, `symfony/http-client`,
+`symfony/http-foundation`, `ext-pdo_pgsql`) come with its package. The Redis
+package still needs a client of your choice: `ext-redis` or `predis/predis`.
+
+### Packages and namespaces
+
+| Old package (0.14.x) | New package | Old namespace | New namespace |
+|---|---|---|---|
+| `freyr/message-broker` | `freyr/message-broker` (the core) | `Freyr\MessageBroker\` | `Freyr\MessageBroker\` (no change) |
+| `freyr/message-broker-postgresql` (replaced by `freyr/message-broker`) | `freyr/message-broker-storage-postgresql` | `Freyr\MessageBroker\Adapter\PostgreSql\` | `Freyr\MessageBroker\Storage\PostgreSql\` |
+| `freyr/message-broker-amqp` (replaced by `freyr/message-broker`) | `freyr/message-broker-transport-amqp` | `Freyr\MessageBroker\Adapter\Amqp\` | `Freyr\MessageBroker\Transport\Amqp\` |
+| `freyr/message-broker-http` (replaced by `freyr/message-broker`) | `freyr/message-broker-webhook-http` | `Freyr\MessageBroker\Adapter\Http\` | `Freyr\MessageBroker\Webhook\Http\` |
+| `freyr/message-broker-redis` (replaced by `freyr/message-broker`) | `freyr/message-broker-ratelimit-redis` | `Freyr\MessageBroker\Adapter\Redis\` | `Freyr\MessageBroker\RateLimit\Redis\` |
+
+The test set-up classes move with their package:
+`Freyr\MessageBroker\Adapter\PostgreSql\Testing\PostgreSqlTestSupport` is
+`Freyr\MessageBroker\Storage\PostgreSql\Testing\PostgreSqlTestSupport`, and
+`Freyr\MessageBroker\Adapter\Redis\Testing\RedisTestSupport` is
+`Freyr\MessageBroker\RateLimit\Redis\Testing\RedisTestSupport`.
+
+- **BREAKING:** change each `use Freyr\MessageBroker\Adapter\<Technology>\…`
+  to the new namespace of the table. A search and replace of the four
+  namespace prefixes is enough; the class names do not change.
+- **BREAKING:** a `composer require` of `freyr/message-broker` alone gives no
+  adapter now. Require the adapters by their new names.
+- The virtual packages `freyr/message-broker-storage-implementation`,
+  `freyr/message-broker-transport-implementation` and
+  `freyr/message-broker-webhook-sender-implementation` stay; the Redis package
+  provides the new `freyr/message-broker-ratelimit-implementation`.
+- A later minor release of the core (0.16.0) is breaking for the adapters
+  too: each adapter then gets a release with the new core constraint.
+
 ## From 0.13.x to 0.14.0
 
 The webhook delivery loop calls the flow control ports: a rate limit for each
