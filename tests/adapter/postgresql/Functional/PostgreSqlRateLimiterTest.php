@@ -294,7 +294,11 @@ final class PostgreSqlRateLimiterTest extends FunctionalTestCase
 
     public function testFourSessionsGetAtMostTheBurstPlusTheRateAndAtLeast95PercentOfTheRate(): void
     {
-        $limits = new RateLimits(new Rate(100, 10), [
+        // A global burst of 50 holds 0.5 s of refill. With a burst of 10
+        // (0.1 s), a stall of all four sessions longer than 0.1 s on a loaded
+        // runner (a parallel mutation run) filled the bucket and lost refill,
+        // so the lower bound measured the scheduler and not the limiter.
+        $limits = new RateLimits(new Rate(100, 50), [
             'a' => new Rate(20, 2),
         ]);
         $session = static function (PDO $pdo) use ($limits): array {
@@ -329,7 +333,7 @@ final class PostgreSqlRateLimiterTest extends FunctionalTestCase
         $longest = (max(array_column($calls, 1)) - min(array_column($calls, 0))) / 1_000;
         $shortest = (max(array_column($calls, 0)) - min(array_column($calls, 1))) / 1_000;
         self::assertGreaterThan(2.5, $shortest, 'the sessions ran for about 3 seconds');
-        self::assertLessThanOrEqual(10 + 100 * $longest, $sum, 'the global burst plus the global rate');
+        self::assertLessThanOrEqual(50 + 100 * $longest, $sum, 'the global burst plus the global rate');
         self::assertGreaterThanOrEqual(0.95 * 100 * $shortest, $sum, 'at least 95% of the global rate');
 
         $laneA = array_values(array_filter($calls, static fn (array $call): bool => $call[2]['a'] > 0));
