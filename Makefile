@@ -53,8 +53,8 @@ cs-check: ## Check code style with ECS
 cs-fix: ## Fix code style with ECS
 	docker compose run --rm php vendor/bin/ecs check --fix
 
-infection: ## Mutation testing with Infection and pcov (full run, all CPU cores); ARGS for extra options
-	docker compose run --rm php php -d memory_limit=1G vendor/bin/infection --threads=max $(ARGS)
+infection: ## Mutation testing of the whole code (infection.repo.json5, full run, all CPU cores); ARGS for extra options
+	docker compose run --rm php php -d memory_limit=1G vendor/bin/infection --configuration=infection.repo.json5 --threads=max $(ARGS)
 
 split-rehearsal: ## Install one package alone and run its tests; PACKAGE=core|storage-postgresql|transport-amqp|webhook-http|ratelimit-redis, ARGS=--infection or --lowest
 	docker compose run --rm php tools/split-rehearsal.sh $(PACKAGE) $(ARGS)
