@@ -10,8 +10,11 @@ work is `PostgreSqlOutboxRetention`, which implements the core port
 with no option to drop a partition that holds an unfinished row; it is in
 [WEBHOOKS.md](WEBHOOKS.md).
 
-The relay never deletes rows. It sets `published_at`, and the rows stay until
-retention drops their partition, once every row of it is published or abandoned. `outbox_messages` is partitioned by
+With the default `PublishedRows::Mark`, the relay never deletes rows. It sets `published_at`, and the rows stay until
+retention drops their partition, once every row of it is published or abandoned. With `PublishedRows::Delete`, the
+relay deletes each published row, and an expired partition holds only unpublished or abandoned rows, or none; the
+command is still needed for the partitions ahead and the drop (see
+[STORAGE.md](STORAGE.md#published-rows-mark-or-delete)). `outbox_messages` is partitioned by
 `created_at`, with one partition per UTC day (`outbox_messages_pYYYYMMDD`) and
 no default partition. An insert for a day with no partition fails, and the
 producer's transaction fails with it, so create partitions ahead of time.

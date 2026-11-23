@@ -13,9 +13,10 @@ namespace Freyr\MessageBroker\Outbox;
  * Contract for implementations:
  *  - insert() must run on the caller's connection/transaction so the outbox row
  *    commits atomically with the application's own state change.
- *  - published rows are never deleted by the drain; they keep their
- *    published_at and leave the table only through retention
- *    ({@see OutboxRetention}). An unpublished row that is not abandoned is
+ *  - a published row is never claimed again. By default the drain keeps it
+ *    with its published_at, and it leaves the table only through retention
+ *    ({@see OutboxRetention}); an implementation can offer, as an option, to
+ *    delete it in the claim transaction instead. An unpublished row that is not abandoned is
  *    never dropped by retention unless the operator opts in
  *    (drop-unpublished). An abandoned row does not keep its storage unit.
  *  - an abandoned row (see abandon()) is open but out of the drain: the
@@ -31,7 +32,8 @@ interface OutboxStore
      * abandoned (published_at IS NULL, abandoned_at IS NULL,
      * available_at <= now) inside a transaction owned
      * by this store, hand them to $publish, apply its outcome (set
-     * published_at on published rows; bump attempts and available_at on
+     * published_at on published rows, or delete them when the store is
+     * configured so; bump attempts and available_at on
      * retried rows; a row that is abandoned meanwhile is not changed), and
      * commit. Concurrent claimers skip each other's locked
      * rows — they never block. If $publish throws, the transaction rolls back
@@ -42,7 +44,7 @@ interface OutboxStore
      *
      * @param callable(non-empty-list<OutboxRecord>): ClaimOutcome $publish
      *
-     * @return int rows marked published
+     * @return int rows published (marked or deleted)
      */
     public function drainClaimed(string $lane, int $limit, callable $publish): int;
 

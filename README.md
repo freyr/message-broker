@@ -59,10 +59,34 @@ consume example.
 One outbox table holds every produced message; each row is tagged with a
 lane, a named drain of that table. Lanes isolate workloads from each other.
 Any number of identical relay workers drain one lane in parallel; scale by
-adding workers to the lane. The relay marks rows published and never deletes
+adding workers to the lane. By default the relay marks rows published and never deletes
 them. The command `message-broker:outbox:maintain` drops daily partitions
 after the retention period (default 7 days). A partition with unpublished rows is kept, and the command exits non-zero, unless `--drop-unpublished` is set — see [docs/core/RELAY.md](docs/core/RELAY.md) and
 [docs/postgresql/RETENTION.md](docs/postgresql/RETENTION.md).
+
+## Published rows: mark or delete
+
+The PostgreSQL outbox store has one setting for published rows,
+`PublishedRows`:
+
+```php
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
+use Freyr\MessageBroker\Adapter\PostgreSql\PublishedRows;
+
+new PostgreSqlOutboxStore($pdo);                          // PublishedRows::Mark, the default
+new PostgreSqlOutboxStore($pdo, PublishedRows::Delete);   // delete each row after its publish
+new PostgreSqlOutboxStore($pdo, PublishedRows::from('delete')); // from configuration
+```
+
+- `Mark` sets `published_at`, and the rows stay until their partition expires: a
+  record of each published message, and a stable claim plan under a steady load.
+- `Delete` removes each row in the claim transaction, after the broker confirm.
+  It used less PostgreSQL CPU and half the WAL when the relay drained a backlog,
+  and more CPU under a steady load.
+
+Set it on the store of the relay; the producer can keep the default. The
+measurements and the choice are in
+[docs/postgresql/STORAGE.md](docs/postgresql/STORAGE.md#published-rows-mark-or-delete).
 
 ## Documentation
 

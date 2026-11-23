@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `PostgreSqlOutboxStore(PDO $pdo, PublishedRows $publishedRows = PublishedRows::Mark)`: the new string enum `Adapter\PostgreSql\PublishedRows` (`mark`, `delete`) selects what the drain does with a published row. `Mark`, the default and the behavior until now, sets `published_at`; `Delete` deletes the row in the claim transaction, with the same conditions (`published_at IS NULL AND abandoned_at IS NULL`, the `created_at` range of the claim). The `OutboxStore` port permits an implementation to delete published rows as an option. `make bench-outbox-cleanup ARGS="<drain|steady> [key=value ...]"` (`tools/outbox-cleanup-bench.php`) measures the CPU of the PostgreSQL container, the WAL and the claim plans for both values. See `docs/postgresql/STORAGE.md` (*Published rows: mark or delete*).
+
 ### Fixed
 
 - `setup:schema --premake-days`, and `outbox:maintain --retention-days` and `--premake-days`, refuse a value with a trailing newline (exit code 2, `INVALID`). The patterns end with `\z` in place of `$`, which also matched before a final newline.

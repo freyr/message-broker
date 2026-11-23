@@ -26,9 +26,10 @@ transport implements the port with `AmqpMessagePublisher`. Any number of identic
 processes drain **one** lane in parallel. Each worker claims a batch of
 eligible rows via `FOR UPDATE SKIP LOCKED` inside a transaction owned by the
 outbox store, publishes the batch through the port (the AMQP publisher waits for publisher confirms) while it holds the
-claim, and marks the rows published (`published_at`). The relay never deletes
-rows; retention drops them by partition (see
-[../postgresql/RETENTION.md](../postgresql/RETENTION.md)). Workers never block each
+claim, and marks the rows published (`published_at`); retention drops them by partition (see
+[../postgresql/RETENTION.md](../postgresql/RETENTION.md)). The PostgreSQL store can delete the published rows in the
+claim transaction instead: `new PostgreSqlOutboxStore($pdo, PublishedRows::Delete)` (see
+[../postgresql/STORAGE.md](../postgresql/STORAGE.md#published-rows-mark-or-delete)). Workers never block each
 other — concurrent claimers skip each other's locked rows.
 
 **No ordering promise.** Rows publish in any order, across workers and past
@@ -139,7 +140,7 @@ use Freyr\MessageBroker\Adapter\Amqp\AmqpPublishConfig;
 
 // Each worker owns its own PDO connection and its own dedicated AMQPChannel.
 $worker = new Relay(
-    outbox: new PostgreSqlOutboxStore($workerPdo),
+    outbox: new PostgreSqlOutboxStore($workerPdo), // or ($workerPdo, PublishedRows::Delete)
     publisher: new AmqpMessagePublisher(
         $workerChannel,
         new AmqpPublishConfig(exchange: 'orders'),

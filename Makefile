@@ -1,4 +1,4 @@
-.PHONY: help build logs shell install test test-pgbouncer phpstan deptrac cs-check cs-fix infection split-rehearsal bench bench-consumer bench-webhook-server bench-webhook
+.PHONY: help build logs shell install test test-pgbouncer phpstan deptrac cs-check cs-fix infection split-rehearsal bench bench-consumer bench-webhook-server bench-webhook bench-outbox-cleanup
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -71,3 +71,6 @@ bench-webhook-server: ## Load check of the test HTTP server alone; ARGS="<rps> <
 
 bench-webhook: ## Webhook flow control benchmark; ARGS="<postgresql|redis> <lanes> <workers> <rps> <burst> <lane-rps> <batch> <endpoint-ms> <seconds>" (lane-rps 0 = no lane limit)
 	docker compose run --rm php php tools/webhook-bench.php $(ARGS)
+
+bench-outbox-cleanup: ## Outbox cleanup benchmark (PublishedRows::Mark and partition drop against PublishedRows::Delete); ARGS="<drain|steady> [key=value ...]"
+	docker compose run --rm php php tools/outbox-cleanup-bench.php $(ARGS)
