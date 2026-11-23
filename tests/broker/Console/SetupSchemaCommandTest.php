@@ -6,6 +6,7 @@ namespace Freyr\MessageBroker\Tests\Console;
 
 use Freyr\MessageBroker\Console\SetupSchemaCommand;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingSchemaInstaller;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -53,13 +54,22 @@ final class SetupSchemaCommandTest extends TestCase
         self::assertSame([], $installer->installCalls);
     }
 
-    public function testInvalidPremakeDaysIsRejectedBeforeAnyCall(): void
+    /** @return iterable<string, array{string}> */
+    public static function invalidPremakeDays(): iterable
+    {
+        yield 'negative' => ['-1'];
+        yield 'trailing newline' => ["2\n"];
+        yield 'not a number' => ['two'];
+    }
+
+    #[DataProvider('invalidPremakeDays')]
+    public function testInvalidPremakeDaysIsRejectedBeforeAnyCall(string $value): void
     {
         $installer = new RecordingSchemaInstaller();
         $tester = new CommandTester(new SetupSchemaCommand($installer));
 
         $status = $tester->execute([
-            '--premake-days' => '-1',
+            '--premake-days' => $value,
         ]);
 
         self::assertSame(Command::INVALID, $status);

@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `setup:schema --premake-days`, and `outbox:maintain --retention-days` and `--premake-days`, refuse a value with a trailing newline (exit code 2, `INVALID`). The patterns end with `\z` in place of `$`, which also matched before a final newline.
+
 ## [0.14.2] - 2026-11-20
 
 ### Added
