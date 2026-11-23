@@ -12,8 +12,8 @@ namespace Freyr\MessageBroker\Adapter\PostgreSql;
  *
  * Measured with `make bench-outbox-cleanup` (docs/postgresql/STORAGE.md):
  * Delete uses less PostgreSQL CPU and half the WAL while the relay drains a
- * backlog; under a steady load with autovacuum, Mark uses less CPU and keeps
- * a stable claim plan.
+ * backlog; under a steady load with autovacuum, Mark used less CPU (median of
+ * 4 runs) and kept a stable claim plan.
  */
 enum PublishedRows: string
 {

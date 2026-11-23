@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Freyr\MessageBroker\Outbox;
 
 /**
- * Capacity and retention of the outbox table. The relay never deletes rows;
- * they leave the table here, one storage unit at a time (PostgreSQL: one
- * daily partition). The PostgreSQL adapter provides the implementation.
+ * Capacity and retention of the outbox table. By default the relay marks
+ * published rows and never deletes them; they leave the table here, one
+ * storage unit at a time (PostgreSQL: one daily partition). A store that
+ * deletes published rows still needs the capacity and the drop of the
+ * expired units. The PostgreSQL adapter provides the implementation.
  */
 interface OutboxRetention
 {

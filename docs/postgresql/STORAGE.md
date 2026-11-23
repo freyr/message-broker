@@ -67,7 +67,7 @@ $outbox = new PostgreSqlOutboxStore($workerPdo, PublishedRows::from($config['out
 | What the drain writes in the claim transaction | `UPDATE ... SET published_at` | `DELETE` |
 | Published rows | Stay until `outbox:maintain` drops their daily partition. | Leave the table at once. The table holds only open rows. |
 | Record of published messages | Each published row, for the retention period. | None. |
-| Dead rows | One for each message. The update is never a HOT update, because `published_at` is in the predicate of `idx_outbox_pending`: it writes a new row version and index entries. The partition drop removes them. | One for each message. VACUUM removes them. |
+| Dead rows | One for each message. The update is never a HOT update, because `published_at` is in the predicate of `idx_outbox_pending`: it writes a new row version and index entries. VACUUM removes them, or the partition drop removes them with the partition. | One for each message. VACUUM removes them. |
 | `outbox:maintain` | Creates the partitions ahead and drops the expired ones. | The same. An expired partition holds only unpublished or abandoned rows, or none. |
 
 Only the store of the relay uses the setting. The store of the producer and
@@ -86,13 +86,14 @@ checkpointer.
 
 | Load | `Mark` | `Delete` |
 | --- | --- | --- |
-| Backlog: 1,000,000 waiting rows, 4 workers (`drain`; autovacuum off for the partition, the VACUUM and the drop measured as phases) | 15.0 µs CPU for each row, 942 MB WAL | 9.6 µs CPU for each row, 440 MB WAL |
+| Backlog: 1,000,000 waiting rows, 4 workers, 3 runs, medians (`drain rows=1000000`; autovacuum off for the partition; `Mark` with no VACUUM before the drop, `Delete` with its VACUUM; both with the drop) | 15.0 µs CPU for each row, 942 MB WAL | 9.6 µs CPU for each row, 440 MB WAL |
 | Steady: 2,000 rows/s, one row in each insert transaction, 2 workers, autovacuum on, 4 runs of 120 s (`steady`) | median 47.6 s CPU (46.6 to 53.6), 203 MB WAL | median 63.0 s CPU (51.3 to 76.7), 156 MB WAL |
 
 Under the steady load, the table of `Delete` is almost empty. After an
 autovacuum, PostgreSQL sometimes planned the claim as a bitmap scan or a
-sequential scan (in 3 of 4 runs). These scans read each dead index entry and
-do not mark it as dead, so each claim read the same entries again. `Mark`
+sequential scan (in 3 of 4 runs). A bitmap scan reads each dead index entry and
+does not mark it as dead, so each claim read the same entries again; a
+sequential scan reads each page of the partition. `Mark`
 kept the index scan in each run, because its partition holds many live rows.
 
 Keep `Mark` when you need the published rows, or when the load is steady.
@@ -162,7 +163,7 @@ $application->add(new SetupSchemaCommand(new PostgreSqlSchemaInstaller($pdo)));
 
 | Class | Implements | Constructor |
 |---|---|---|
-| `PostgreSqlOutboxStore` | `OutboxStore` | `PDO $pdo` |
+| `PostgreSqlOutboxStore` | `OutboxStore` | `PDO $pdo`, `PublishedRows $publishedRows = PublishedRows::Mark` |
 | `PostgreSqlDeduplicationStore` | `DeduplicationStore` | `PDO $pdo`, `int $deleteChunkSize = 10_000` |
 | `PostgreSqlDeadLetterStore` | `DeadLetterStore` | `PDO $pdo` |
 | `PdoTransaction` | `Transaction` | `PDO $pdo` |

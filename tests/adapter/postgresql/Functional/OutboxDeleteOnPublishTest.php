@@ -77,6 +77,55 @@ final class OutboxDeleteOnPublishTest extends FunctionalTestCase
         self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages WHERE published_at IS NOT NULL'), 'no row is marked');
     }
 
+    public function testAnAbandonWaitsForTheClaimAndThenFindsNoRow(): void
+    {
+        $this->producer->produce($message = OrderPlaced::create('o-1', 100));
+        $operator = self::newConnection();
+        $operator->exec("SET lock_timeout = '100ms'");
+        $operatorStore = new PostgreSqlOutboxStore($operator);
+
+        $error = null;
+        $this->store->drainClaimed(self::LANE, 10, static function (array $claimed) use ($operatorStore, &$error): ClaimOutcome {
+            try {
+                $operatorStore->abandon($claimed[0]->id); // the claim holds the row lock
+            } catch (\PDOException $caught) {
+                $error = $caught;
+            }
+
+            return ClaimOutcome::published(self::ids($claimed));
+        });
+
+        self::assertInstanceOf(\PDOException::class, $error, 'abandon() waits for the claim');
+        self::assertSame('55P03', $error->getCode(), 'lock_not_available: the lock timeout');
+        self::assertSame(0, $operatorStore->abandon($message->id), 'after the claim deleted the row, nothing to abandon');
+        self::assertSame(0, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'));
+    }
+
+    public function testAFailureAfterTheDeleteRollsItBack(): void
+    {
+        $this->producer->produce(OrderPlaced::create('o-1', 100));
+        $this->producer->produce(OrderPlaced::create('o-2', 200));
+        // A retry time past the timestamp range of PostgreSQL: the retry write,
+        // which runs after the delete in the same transaction, fails.
+        $outOfRange = EpochMillis::now() + 400_000 * 365 * 86_400_000;
+
+        $error = null;
+        try {
+            $this->store->drainClaimed(self::LANE, 10, static function (array $claimed) use ($outOfRange): ClaimOutcome {
+                $ids = self::ids($claimed);
+
+                return new ClaimOutcome([$ids[0]], [
+                    $ids[1] => $outOfRange,
+                ]);
+            });
+        } catch (\Throwable $caught) {
+            $error = $caught;
+        }
+
+        self::assertNotNull($error, 'the retry write fails');
+        self::assertSame(2, self::fetchInt('SELECT COUNT(*) FROM outbox_messages WHERE attempts = 0'), 'the deleted row is back, the retried row is unchanged');
+    }
+
     public function testAReplayOfAMessageThatAMarkStorePublishedLeavesTheOriginalRow(): void
     {
         $message = OrderPlaced::create('o-1', 100);
@@ -92,7 +141,18 @@ final class OutboxDeleteOnPublishTest extends FunctionalTestCase
             messageName: 'order.placed',
             body: '{}',
             headers: [],
-            createdAt: $message->createdAt + 1, // distinct primary key, in the range of the claim
+            createdAt: $message->createdAt + 1, // distinct primary key
+            availableAt: EpochMillis::now() - 1_000,
+        ));
+        // An open row created before the original: the created_at range of the
+        // claim covers the original row, so only the published_at guard keeps it.
+        $this->store->insert(new OutboxRecord(
+            id: OrderPlaced::create('o-0', 50)->id,
+            lane: self::LANE,
+            messageName: 'order.placed',
+            body: '{}',
+            headers: [],
+            createdAt: $message->createdAt - 1,
             availableAt: EpochMillis::now() - 1_000,
         ));
 
@@ -102,8 +162,8 @@ final class OutboxDeleteOnPublishTest extends FunctionalTestCase
             static fn (array $claimed): ClaimOutcome => ClaimOutcome::published(self::ids($claimed)),
         );
 
-        self::assertSame(1, $published);
-        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'), 'the replay row is deleted');
+        self::assertSame(2, $published);
+        self::assertSame(1, self::fetchInt('SELECT COUNT(*) FROM outbox_messages'), 'the replay row and the earlier row are deleted');
         self::assertSame(1, self::fetchInt("SELECT COUNT(*) FROM outbox_messages WHERE id = '{$message->id}' AND published_at IS NOT NULL"), 'the original row keeps its mark');
     }
 

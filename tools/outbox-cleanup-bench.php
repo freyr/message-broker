@@ -156,7 +156,9 @@ function store(string $mode, PDO $pdo): OutboxStore
 function snapshot(PDO $pdo): array
 {
     $stat = (string) $pdo->query("SELECT pg_read_file('/sys/fs/cgroup/cpu.stat')")->fetchColumn();
-    preg_match('/^usage_usec (\d+)/m', $stat, $match);
+    if (preg_match('/^usage_usec (\d+)/m', $stat, $match) !== 1) {
+        throw new RuntimeException('Cannot read usage_usec from /sys/fs/cgroup/cpu.stat of the PostgreSQL container');
+    }
 
     return [
         'cpu' => (int) $match[1] / 1000,
@@ -389,11 +391,12 @@ function runSteady(string $mode, array $opt): array
     }
     // Samples of the wait events of the active sessions, each 20 ms, in its own process.
     $waitFile = sys_get_temp_dir().'/outbox-cleanup-bench-waits.json';
-    $jobs[] = static function () use ($seconds, $waitFile): void {
+    $batch = (int) $opt['batch'];
+    $jobs[] = static function () use ($seconds, $waitFile, $batch): void {
         $spy = connect();
         $sample = $spy->prepare("SELECT COALESCE(wait_event_type || ':' || wait_event, 'CPU') FROM pg_stat_activity WHERE state = 'active' AND backend_type = 'client backend' AND pid <> pg_backend_pid() AND datname = current_database()");
         // The plan of the claim query (EXPLAIN, not executed), each second.
-        $explain = $spy->prepare("EXPLAIN SELECT id FROM outbox_messages WHERE lane = 'bench' AND published_at IS NULL AND abandoned_at IS NULL AND available_at <= now() AT TIME ZONE 'UTC' ORDER BY available_at LIMIT 500 FOR UPDATE SKIP LOCKED");
+        $explain = $spy->prepare("EXPLAIN SELECT id FROM outbox_messages WHERE lane = 'bench' AND published_at IS NULL AND abandoned_at IS NULL AND available_at <= now() AT TIME ZONE 'UTC' ORDER BY available_at LIMIT {$batch} FOR UPDATE SKIP LOCKED");
         $counts = [];
         $plans = [];
         $samples = 0;

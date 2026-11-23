@@ -82,7 +82,7 @@ new PostgreSqlOutboxStore($pdo, PublishedRows::from('delete')); // from configur
   record of each published message, and a stable claim plan under a steady load.
 - `Delete` removes each row in the claim transaction, after the broker confirm.
   It used less PostgreSQL CPU and half the WAL when the relay drained a backlog,
-  and more CPU under a steady load.
+  and more CPU under a steady load (median of 4 runs).
 
 Set it on the store of the relay; the producer can keep the default. The
 measurements and the choice are in
