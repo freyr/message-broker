@@ -32,6 +32,6 @@
     "testFrameworkOptions": "--no-progress",
     // Measured 95.7% (852 mutants, 37 escaped); one point of margin for timeout variance.
     // Raise it as tests improve; never lower it.
-    "minMsi": 94,
-    "minCoveredMsi": 94
+    "minMsi": 96,
+    "minCoveredMsi": 96
 }

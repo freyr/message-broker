@@ -57,7 +57,7 @@ The image builds on PHP 8.4 by default. To run on another version, rebuild with 
 
 ## Mutation testing
 
-Infection measures the quality of the tests; pcov (in the Docker image) collects the coverage. `make infection` runs the full suite on all CPU cores (about 1 minute locally); reports go to `var/infection/` (`infection.html` lists each escaped mutant). The thresholds are in `infection.json5` (`minMsi`, `minCoveredMsi`): 94% (measured 95.7%). Raise them when the tests improve; never lower them.
+Infection measures the quality of the tests; pcov (in the Docker image) collects the coverage. `make infection` runs the full suite on all CPU cores (about 1 minute locally); reports go to `var/infection/` (`infection.html` lists each escaped mutant). The thresholds are in `infection.json5` (`minMsi`, `minCoveredMsi`): 96% (measured 97.86% on `main` at 0.14.2). Raise them when the tests improve; never lower them.
 
 CI runs Infection on the changed lines of `src/broker/` and `src/adapter/` on each pull request (part of `ci-gate`), and the full suite on `main`. A pull request whose changed lines score below the threshold fails: add or tighten the tests that the escaped mutants show.
 
@@ -71,4 +71,4 @@ Parallel workers are isolated. Infection sets `TEST_TOKEN` for each worker; the 
 
 At each minor release, change `REHEARSAL_VERSION` in `tools/split-rehearsal.sh` and the `^0.x` constraints between the packages in `packages/*/composer.json` (`packages/postgresql/composer.json`, `packages/amqp/composer.json`, `packages/http/composer.json` and `packages/redis/composer.json`), and the core requirement in `packages/*/README.md`, together.
 
-Each package measures its Infection score alone, with its own tests: the thresholds in `packages/*/infection.json5` come from the measured values (core 92, postgresql 94, amqp 97, http 94, redis 97; the amqp package measures 98.0 and the redis package 100 on its first pull request, both with few mutants, so their thresholds keep a margin). Raise them when the tests improve; never lower them. The root `infection.json5` (94) stays the gate for the whole code.
+Each package measures its Infection score alone, with its own tests: the thresholds in `packages/*/infection.json5` come from the measured values (core 95, postgresql 95, amqp 97, http 94, redis 97; measured on `main` at 0.14.2: core 96.92, postgresql 96.58, http about 95, amqp and redis 100; the amqp and redis packages have few mutants, so their thresholds keep a margin). Raise them when the tests improve; never lower them. The root `infection.json5` (96) stays the gate for the whole code.

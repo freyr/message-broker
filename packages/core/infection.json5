@@ -31,6 +31,6 @@
     "testFramework": "phpunit",
     "testFrameworkOptions": "--no-progress",
     // Measured for this package alone (split rehearsal, its own tests only). Raise it as tests improve; never lower it.
-    "minMsi": 92,
-    "minCoveredMsi": 92
+    "minMsi": 95,
+    "minCoveredMsi": 95
 }
