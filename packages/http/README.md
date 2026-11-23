@@ -13,7 +13,7 @@ destination in a private network by default.
 ## Requirements
 
 - PHP 8.4 or later
-- `freyr/message-broker` ^0.12 (the core)
+- `freyr/message-broker` ^0.14 (the core)
 - `symfony/http-client` ^8.1 and `symfony/http-foundation` ^8.1
 - `psr/log` ^3.0
 - A storage adapter for the webhook deliveries, for example

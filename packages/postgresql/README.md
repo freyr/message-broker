@@ -14,7 +14,7 @@ partitioned by day.
 
 - PHP 8.4 or later, with `ext-pdo` and `ext-pdo_pgsql`
 - PostgreSQL 14 or later
-- `freyr/message-broker` ^0.12 (the core), `symfony/clock` ^8.1,
+- `freyr/message-broker` ^0.14 (the core), `symfony/clock` ^8.1,
   `symfony/uid` ^7.4 or ^8.1
 
 ## Install
