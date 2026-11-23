@@ -83,7 +83,8 @@ final class OutboxMaintainCommand extends Command
 
     private static function intOption(mixed $value, bool $allowZero = false): ?int
     {
-        $pattern = $allowZero ? '/^(0|[1-9]\d*)$/' : '/^[1-9]\d*$/';
+        // \z, not $: $ also matches before a trailing newline.
+        $pattern = $allowZero ? '/^(0|[1-9]\d*)\z/' : '/^[1-9]\d*\z/';
         if (!is_string($value) || preg_match($pattern, $value) !== 1) {
             return null;
         }

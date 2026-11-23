@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use Freyr\MessageBroker\Console\OutboxMaintainCommand;
 use Freyr\MessageBroker\Outbox\RetentionReport;
 use Freyr\MessageBroker\Tests\Fixtures\RecordingOutboxRetention;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -175,14 +176,31 @@ final class OutboxMaintainCommandTest extends TestCase
         self::assertStringContainsString('unit-a held 1 abandoned row(s); they are dropped.', $tester->getDisplay());
     }
 
-    public function testInvalidOptionsAreRejectedBeforeAnyCall(): void
+    /** @return iterable<string, array{array<string, string>}> */
+    public static function invalidOptions(): iterable
+    {
+        yield 'retention days 0' => [[
+            '--retention-days' => '0',
+        ]];
+        yield 'retention days with a trailing newline' => [[
+            '--retention-days' => "7\n",
+        ]];
+        yield 'premake days with a trailing newline' => [[
+            '--premake-days' => "2\n",
+        ]];
+        yield 'premake days negative' => [[
+            '--premake-days' => '-1',
+        ]];
+    }
+
+    /** @param array<string, string> $options */
+    #[DataProvider('invalidOptions')]
+    public function testInvalidOptionsAreRejectedBeforeAnyCall(array $options): void
     {
         $retention = new RecordingOutboxRetention();
         $tester = new CommandTester(new OutboxMaintainCommand($retention));
 
-        $status = $tester->execute([
-            '--retention-days' => '0',
-        ]);
+        $status = $tester->execute($options);
 
         self::assertSame(Command::INVALID, $status);
         self::assertSame([], $retention->ensureCalls);

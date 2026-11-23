@@ -33,7 +33,7 @@ final class SetupSchemaCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $premakeOption = $input->getOption('premake-days');
-        if (!is_string($premakeOption) || preg_match('/^\d+$/', $premakeOption) !== 1) {
+        if (!is_string($premakeOption) || preg_match('/^\d+\z/', $premakeOption) !== 1) {
             $output->writeln('<error>--premake-days must be an integer of 0 or more.</error>');
 
             return Command::INVALID;
