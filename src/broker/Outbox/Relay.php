@@ -18,8 +18,9 @@ use Throwable;
  * Outbox relay. Any number of identical worker processes drain one lane
  * concurrently: each claims a batch of unpublished, due rows via FOR UPDATE
  * SKIP LOCKED inside a store-owned transaction, publishes while holding the
- * claim, and marks the rows published on success (published rows stay for
- * partition retention; a partition with unpublished rows is never dropped by
+ * claim, and has the store mark the rows published on success (published
+ * rows stay for partition retention, or the store deletes them when it is
+ * configured so; a partition with unpublished rows is never dropped by
  * default). Workers never block each other; a crashed worker's rows are
  * instantly reclaimable (its locks die with its connection) and consumer
  * dedup absorbs the republish.

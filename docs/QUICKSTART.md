@@ -92,7 +92,9 @@ the command creates ahead. See [core/CLI_REFERENCE.md](core/CLI_REFERENCE.md) fo
 
 A relay drains one outbox lane to one transport target. Each relay worker
 claims a batch of rows with `FOR UPDATE SKIP LOCKED`, publishes the batch with
-publisher confirms, and marks the rows published. It never deletes rows. It
+publisher confirms, and marks the rows published. By default it never deletes rows
+(`PublishedRows::Delete` changes that; see
+[postgresql/STORAGE.md](postgresql/STORAGE.md#published-rows-mark-or-delete)). It
 needs a dedicated `AMQPChannel` — publisher confirms are channel-global
 state, so nothing else may publish on the same channel.
 
@@ -119,7 +121,8 @@ own database connection and its own channel. See
 
 ## Schedule the outbox maintenance
 
-Rows stay in `outbox_messages` until their daily partition expires. There is
+Published rows stay in `outbox_messages` until their daily partition expires (with the default
+`PublishedRows::Mark`). There is
 no default partition, so an insert for a day with no partition fails. Run
 `message-broker:outbox:maintain` once a day (a Kubernetes `CronJob`) to create
 the upcoming partitions and drop the expired ones:

@@ -17,11 +17,14 @@ use Throwable;
  * PostgreSQL outbox table access (plain PDO) — the default OutboxStore implementation.
  * Constructed with the application's connection on the produce side
  * (transaction joining) and with a dedicated connection inside relay processes.
+ * $publishedRows selects what the drain does with a published row: mark it
+ * (published_at, the default) or delete it ({@see PublishedRows}).
  */
 final readonly class PostgreSqlOutboxStore implements OutboxStore
 {
     public function __construct(
         private PDO $pdo,
+        private PublishedRows $publishedRows = PublishedRows::Mark,
     ) {}
 
     public function insert(OutboxRecord $record): void
@@ -82,7 +85,10 @@ final readonly class PostgreSqlOutboxStore implements OutboxStore
             $createdAt = array_map(static fn (OutboxRecord $record): int => $record->createdAt, $records);
             $range = [self::timestamp(min($createdAt)), self::timestamp(max($createdAt))];
             if ($outcome->publishedIds !== []) {
-                $this->markPublished($outcome->publishedIds, $range);
+                match ($this->publishedRows) {
+                    PublishedRows::Mark => $this->markPublished($outcome->publishedIds, $range),
+                    PublishedRows::Delete => $this->deletePublished($outcome->publishedIds, $range),
+                };
             }
             if ($outcome->retryAtMs !== []) {
                 $this->scheduleRetry($outcome->retryAtMs, $range);
@@ -177,6 +183,28 @@ final readonly class PostgreSqlOutboxStore implements OutboxStore
         );
         $statement->execute([
             'published_at' => self::timestamp(EpochMillis::now()),
+            'ids' => self::pgArray($ids),
+            'from' => $createdAtRange[0],
+            'to' => $createdAtRange[1],
+        ]);
+    }
+
+    /**
+     * PublishedRows::Delete: the published rows leave the table in the claim
+     * transaction. The guards are those of markPublished(): an older row with
+     * the same id (a replay of a message that a Mark store published) and a
+     * row that an operator abandoned meanwhile stay.
+     *
+     * @param non-empty-list<string> $ids
+     * @param array{string, string} $createdAtRange
+     */
+    private function deletePublished(array $ids, array $createdAtRange): void
+    {
+        $statement = $this->pdo->prepare(
+            'DELETE FROM outbox_messages'
+            .' WHERE id = ANY(CAST(:ids AS uuid[])) AND created_at BETWEEN :from AND :to AND published_at IS NULL AND abandoned_at IS NULL',
+        );
+        $statement->execute([
             'ids' => self::pgArray($ids),
             'from' => $createdAtRange[0],
             'to' => $createdAtRange[1],

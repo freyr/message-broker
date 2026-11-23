@@ -279,7 +279,8 @@ throughput with slow handlers, add consumer processes. Run the benchmark with
 **Scale by adding workers to a lane.** Run N identical `Relay` worker
 processes (N replicas) against one lane. Each claims a batch of eligible rows via
 `FOR UPDATE SKIP LOCKED` inside a transaction owned by the outbox store,
-publishes the batch with publisher confirms, and marks the rows published.
+publishes the batch with publisher confirms, and marks the rows published (or
+deletes them, see [Published rows: mark or delete](../postgresql/STORAGE.md#published-rows-mark-or-delete)).
 Workers never block each other, and a crashed worker's claimed rows are
 instantly reclaimable. A broker failure backs off the rows of the failed
 publish and stops the worker; a nack backs off only the nacked rows (see

@@ -29,20 +29,80 @@ primary key is `(id, created_at)`. A partial index `idx_outbox_pending` on
 `abandoned_at` marks a row that an operator abandoned with
 `message-broker:outbox:abandon` (UTC, as each timestamp of the table; `NULL`
 means not abandoned). The reason is not in the row: it goes to the log and to
-the event. The claim, `markPublished()` and `scheduleRetry()` have the
+the event. The claim, `markPublished()`, `deletePublished()` and `scheduleRetry()` have the
 condition `abandoned_at IS NULL`. The index keeps its predicate
 `published_at IS NULL`: the claim still implies it, so PostgreSQL still uses
 the index. An abandoned row stays in the index until retention drops its
 partition, so each claim of its lane reads it and skips it. Abandoned rows are
 few, because an operator makes each one by hand.
 
-The relay only sets `published_at`. Rows leave the table when
+With the default `PublishedRows::Mark`, the relay only sets `published_at`
+(see [Published rows: mark or delete](#published-rows-mark-or-delete)). Rows leave the table when
 `message-broker:outbox:maintain` drops an expired daily partition. A partition
 that still holds unpublished rows that are not abandoned is kept (and the
 command exits with code 1), unless the option `--drop-unpublished` is set. An
 abandoned row does not keep its partition. See
 [../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md) and
 [RETENTION.md](RETENTION.md).
+
+#### Published rows: mark or delete
+
+`PostgreSqlOutboxStore` takes a second, optional argument, the enum
+`PublishedRows`. It selects what the drain does with a row after a confirmed
+publish:
+
+```php
+use Freyr\MessageBroker\Adapter\PostgreSql\PostgreSqlOutboxStore;
+use Freyr\MessageBroker\Adapter\PostgreSql\PublishedRows;
+
+// The store of a relay worker that deletes published rows.
+$outbox = new PostgreSqlOutboxStore($workerPdo, PublishedRows::Delete);
+
+// From configuration: the values are 'mark' and 'delete'.
+$outbox = new PostgreSqlOutboxStore($workerPdo, PublishedRows::from($config['outbox_published_rows']));
+```
+
+| | `PublishedRows::Mark` (default) | `PublishedRows::Delete` |
+| --- | --- | --- |
+| What the drain writes in the claim transaction | `UPDATE ... SET published_at` | `DELETE` |
+| Published rows | Stay until `outbox:maintain` drops their daily partition. | Leave the table at once. The table holds only open rows. |
+| Record of published messages | Each published row, for the retention period. | None. |
+| Dead rows | One for each message. The update is never a HOT update, because `published_at` is in the predicate of `idx_outbox_pending`: it writes a new row version and index entries. VACUUM removes them, or the partition drop removes them with the partition. | One for each message. VACUUM removes them. |
+| `outbox:maintain` | Creates the partitions ahead and drops the expired ones. | The same. An expired partition holds only unpublished or abandoned rows, or none. |
+
+Only the store of the relay uses the setting. The store of the producer and
+the operator commands (`outbox:abandon`, `outbox:failing`) work the same with
+both values, so they can keep the default. One table can have relays of both
+kinds: the delete has the conditions of the mark (`published_at IS NULL AND
+abandoned_at IS NULL`), so a delete relay never removes a row that a mark relay
+published.
+
+**Which one to choose.** Measured with `make bench-outbox-cleanup` (script
+`tools/outbox-cleanup-bench.php`): PostgreSQL 16 with the default settings,
+the library `Relay` and `AmqpMessagePublisher` with confirms, batch 500,
+payload 200 bytes, all containers on one laptop. CPU is the CPU time of the
+whole PostgreSQL container, with autovacuum, the WAL writer and the
+checkpointer.
+
+| Load | `Mark` | `Delete` |
+| --- | --- | --- |
+| Backlog: 1,000,000 waiting rows, 4 workers, 3 runs, medians (`drain rows=1000000`; autovacuum off for the partition; `Mark` with no VACUUM before the drop, `Delete` with its VACUUM; both with the drop) | 15.0 µs CPU for each row, 942 MB WAL | 9.6 µs CPU for each row, 440 MB WAL |
+| Steady: 2,000 rows/s, one row in each insert transaction, 2 workers, autovacuum on, 4 runs of 120 s (`steady`) | median 47.6 s CPU (46.6 to 53.6), 203 MB WAL | median 63.0 s CPU (51.3 to 76.7), 156 MB WAL |
+
+Under the steady load, the table of `Delete` is almost empty. After an
+autovacuum, PostgreSQL sometimes planned the claim as a bitmap scan or a
+sequential scan (in 3 of 4 runs). A bitmap scan reads each dead index entry and
+does not mark it as dead, so each claim read the same entries again; a
+sequential scan reads each page of the partition. `Mark`
+kept the index scan in each run, because its partition holds many live rows.
+
+Keep `Mark` when you need the published rows, or when the load is steady.
+`Delete` fits a lane that mostly drains backlogs and needs no record of the
+published messages. With `Delete`, watch the dead rows of the current partition
+(`n_dead_tup` in `pg_stat_user_tables`) and the plan of the claim. With both
+values, a long-open transaction stops VACUUM and slows the claim. Run the
+benchmark with your own rate and payload before a change:
+`make bench-outbox-cleanup ARGS="steady rate=<rows/s> seconds=300"`.
 
 ### `message_deduplication`
 
@@ -103,7 +163,7 @@ $application->add(new SetupSchemaCommand(new PostgreSqlSchemaInstaller($pdo)));
 
 | Class | Implements | Constructor |
 |---|---|---|
-| `PostgreSqlOutboxStore` | `OutboxStore` | `PDO $pdo` |
+| `PostgreSqlOutboxStore` | `OutboxStore` | `PDO $pdo`, `PublishedRows $publishedRows = PublishedRows::Mark` |
 | `PostgreSqlDeduplicationStore` | `DeduplicationStore` | `PDO $pdo`, `int $deleteChunkSize = 10_000` |
 | `PostgreSqlDeadLetterStore` | `DeadLetterStore` | `PDO $pdo` |
 | `PdoTransaction` | `Transaction` | `PDO $pdo` |

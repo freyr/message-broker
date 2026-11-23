@@ -15,7 +15,9 @@ use Symfony\Component\Clock\Clock;
 
 /**
  * PostgreSQL implementation of OutboxRetention: partitions and retention of
- * the outbox_messages table. The relay never deletes rows; they leave the table here, one daily partition at a time.
+ * the outbox_messages table. With PublishedRows::Mark (the default) the relay never deletes rows; they leave the
+ * table here, one daily partition at a time. With PublishedRows::Delete the expired partitions hold only
+ * unpublished or abandoned rows, or none.
  *
  *  - ensureCapacity() creates one range partition per UTC day
  *    (outbox_messages_pYYYYMMDD, [day, day + 1)) from today to today + N days.

@@ -48,6 +48,10 @@ $deduplication = new PostgreSqlDeduplicationStore($pdo);
 $deadLetters = new PostgreSqlDeadLetterStore($pdo);
 ```
 
+The relay store can delete published rows instead of the `published_at` mark:
+`new PostgreSqlOutboxStore($workerPdo, PublishedRows::Delete)` (default `PublishedRows::Mark`). See
+[docs/postgresql/STORAGE.md](../../docs/postgresql/STORAGE.md#published-rows-mark-or-delete).
+
 ## Documents
 
 - [Storage](../../docs/postgresql/STORAGE.md): tables, schema setup, classes
