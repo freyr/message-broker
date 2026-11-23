@@ -1,29 +1,34 @@
-# Dependency rules between the layers of the package. See "Layout" in CLAUDE.md.
-# Run: vendor/bin/deptrac analyse
+# Dependency rules between the packages of the repo. Each layer is selected by the folder of its package.
+# See "Layout" in CLAUDE.md. Run: vendor/bin/deptrac analyse
 deptrac:
   paths:
     - ./src
+    - ./storage/postgresql/src
+    - ./transport/amqp/src
+    - ./webhook/http/src
+    - ./ratelimit/redis/src
   layers:
+    # The core is src/ at the repo root: each src/ that is not the src/ of an adapter folder.
     - name: Core
       collectors:
         - type: directory
-          value: src/broker/.*
-    - name: PostgreSql
+          value: ^(?!.*/(storage|transport|webhook|ratelimit)/[^/]+/src/).*/src/.*
+    - name: StoragePostgreSql
       collectors:
         - type: directory
-          value: src/adapter/postgresql/.*
-    - name: Amqp
+          value: /storage/postgresql/src/.*
+    - name: TransportAmqp
       collectors:
         - type: directory
-          value: src/adapter/amqp/.*
-    - name: Http
+          value: /transport/amqp/src/.*
+    - name: WebhookHttp
       collectors:
         - type: directory
-          value: src/adapter/http/.*
-    - name: Redis
+          value: /webhook/http/src/.*
+    - name: RateLimitRedis
       collectors:
         - type: directory
-          value: src/adapter/redis/.*
+          value: /ratelimit/redis/src/.*
     - name: Pdo
       collectors:
         - type: classNameRegex
@@ -44,15 +49,15 @@ deptrac:
           value: '#^(Redis|RedisCluster|RedisException|RedisClusterException|Relay\\.+|Predis\\.+)$#'
   ruleset:
     Core: []
-    PostgreSql:
+    StoragePostgreSql:
       - Core
       - Pdo
-    Amqp:
+    TransportAmqp:
       - Core
       - PhpAmqpLib
-    Http:
+    WebhookHttp:
       - Core
       - SymfonyHttpClient
-    Redis:
+    RateLimitRedis:
       - Core
       - RedisClient

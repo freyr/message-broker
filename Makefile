@@ -26,20 +26,20 @@ PGBOUNCER_RUN = docker compose run --rm -e "POSTGRES_DSN=pgsql:host=pgbouncer;po
 
 test-pgbouncer: ## Run the rotation guard, the PostgreSQL contract tests (also the flow control stores) and the consumer and webhook functional tests through pgbouncer (transaction mode)
 	docker compose up -d --wait pgbouncer
-	$(PGBOUNCER_RUN) --fail-on-skipped tests/adapter/postgresql/Functional/PoolerRotationGuardTest.php
+	$(PGBOUNCER_RUN) --fail-on-skipped storage/postgresql/tests/Functional/PoolerRotationGuardTest.php
 	$(PGBOUNCER_RUN) \
-		tests/adapter/postgresql/Functional/PostgreSqlOutboxStoreContractTest.php \
-		tests/adapter/postgresql/Functional/PostgreSqlDeduplicationStoreContractTest.php \
-		tests/adapter/postgresql/Functional/PostgreSqlDeadLetterStoreContractTest.php \
-		tests/adapter/postgresql/Functional/PostgreSqlDeliveryStoreContractTest.php \
-		tests/adapter/postgresql/Functional/PostgreSqlRateLimiterContractTest.php \
-		tests/adapter/postgresql/Functional/PostgreSqlCircuitBreakerContractTest.php \
-		tests/adapter/postgresql/Functional/PostgreSqlLaneStatesContractTest.php \
-		tests/adapter/postgresql/Functional/PdoTransactionContractTest.php \
-		tests/adapter/postgresql/Functional/WebhookEndToEndTest.php \
-		tests/adapter/amqp/Functional/AmqpConsumerTest.php \
-		tests/adapter/amqp/Functional/EndToEndTest.php \
-		tests/adapter/amqp/Functional/ParallelConsumptionTest.php
+		storage/postgresql/tests/Functional/PostgreSqlOutboxStoreContractTest.php \
+		storage/postgresql/tests/Functional/PostgreSqlDeduplicationStoreContractTest.php \
+		storage/postgresql/tests/Functional/PostgreSqlDeadLetterStoreContractTest.php \
+		storage/postgresql/tests/Functional/PostgreSqlDeliveryStoreContractTest.php \
+		storage/postgresql/tests/Functional/PostgreSqlRateLimiterContractTest.php \
+		storage/postgresql/tests/Functional/PostgreSqlCircuitBreakerContractTest.php \
+		storage/postgresql/tests/Functional/PostgreSqlLaneStatesContractTest.php \
+		storage/postgresql/tests/Functional/PdoTransactionContractTest.php \
+		storage/postgresql/tests/Functional/WebhookEndToEndTest.php \
+		transport/amqp/tests/Functional/AmqpConsumerTest.php \
+		transport/amqp/tests/Functional/EndToEndTest.php \
+		transport/amqp/tests/Functional/ParallelConsumptionTest.php
 
 phpstan: ## Run PHPStan
 	docker compose run --rm php vendor/bin/phpstan analyse --memory-limit=-1
@@ -56,14 +56,14 @@ cs-fix: ## Fix code style with ECS
 infection: ## Mutation testing with Infection and pcov (full run, all CPU cores); ARGS for extra options
 	docker compose run --rm php php -d memory_limit=1G vendor/bin/infection --threads=max $(ARGS)
 
-split-rehearsal: ## Split rehearsal of one future package; PACKAGE=core|postgresql|amqp|http|redis, ARGS=--infection
+split-rehearsal: ## Install one package alone and run its tests; PACKAGE=core|storage-postgresql|transport-amqp|webhook-http|ratelimit-redis, ARGS=--infection or --lowest
 	docker compose run --rm php tools/split-rehearsal.sh $(PACKAGE) $(ARGS)
 
 bench: ## Relay throughput benchmark; ARGS="<rows> <workers> <batch> [full|db-only|amqp-only]"
-	docker compose run --rm php php tests/adapter/amqp/Scripts/amqp-relay-bench.php $(ARGS)
+	docker compose run --rm php php transport/amqp/tests/Scripts/amqp-relay-bench.php $(ARGS)
 
 bench-consumer: ## Consumer throughput benchmark; ARGS="<messages> <workers> <prefetch> <handler-sleep-ms>"
-	docker compose run --rm php php tests/adapter/amqp/Scripts/amqp-consumer-bench.php $(ARGS)
+	docker compose run --rm php php transport/amqp/tests/Scripts/amqp-consumer-bench.php $(ARGS)
 
 bench-webhook-server: ## Load check of the test HTTP server alone; ARGS="<rps> <delay-ms> <seconds>"
 	docker compose up -d --wait webhook-server

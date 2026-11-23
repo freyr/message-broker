@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+    The development configuration of the whole repo: one suite for each package. Each package
+    has its own configuration for its tests alone: tests/phpunit.xml.dist (the core) and
+    <role>/<technology>/phpunit.xml.dist (each adapter).
+-->
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/13.4/phpunit.xsd"
          bootstrap="tests/bootstrap.php"
@@ -11,35 +16,35 @@
          executionOrder="defects"
          resolveDependencies="true">
     <testsuites>
-        <testsuite name="broker">
-            <directory>tests/broker</directory>
+        <testsuite name="core">
+            <directory>tests</directory>
         </testsuite>
-        <testsuite name="postgresql">
-            <directory>tests/adapter/postgresql</directory>
+        <testsuite name="storage-postgresql">
+            <directory>storage/postgresql/tests</directory>
         </testsuite>
-        <testsuite name="amqp">
-            <directory>tests/adapter/amqp</directory>
+        <testsuite name="transport-amqp">
+            <directory>transport/amqp/tests</directory>
         </testsuite>
-        <testsuite name="http">
-            <directory>tests/adapter/http</directory>
+        <testsuite name="webhook-http">
+            <directory>webhook/http/tests</directory>
         </testsuite>
-        <testsuite name="redis">
-            <directory>tests/adapter/redis</directory>
+        <testsuite name="ratelimit-redis">
+            <directory>ratelimit/redis/tests</directory>
         </testsuite>
     </testsuites>
 
     <source>
         <include>
-            <directory>src/broker</directory>
-            <directory>src/adapter/postgresql</directory>
-            <directory>src/adapter/amqp</directory>
-            <directory>src/adapter/http</directory>
-            <directory>src/adapter/redis</directory>
+            <directory>src</directory>
+            <directory>storage/postgresql/src</directory>
+            <directory>transport/amqp/src</directory>
+            <directory>webhook/http/src</directory>
+            <directory>ratelimit/redis/src</directory>
         </include>
         <exclude>
-            <directory>src/broker/Testing</directory>
-            <directory>src/adapter/postgresql/Testing</directory>
-            <directory>src/adapter/redis/Testing</directory>
+            <directory>src/Testing</directory>
+            <directory>storage/postgresql/src/Testing</directory>
+            <directory>ratelimit/redis/src/Testing</directory>
         </exclude>
     </source>
 

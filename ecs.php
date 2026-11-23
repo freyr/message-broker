@@ -14,11 +14,13 @@ use Symplify\CodingStandard\Fixer\Spacing\SpaceAfterCommaHereNowDocFixer;
 use Symplify\EasyCodingStandard\Config\ECSConfig;
 
 return ECSConfig::configure()
-    ->withPaths(['src', 'tests'])
+    ->withPaths(['src', 'tests', 'storage', 'transport', 'webhook', 'ratelimit'])
     ->withSkip(
         [
             '/var',
             '/vendor',
+            // An adapter folder that a developer installs alone has its own vendor folder.
+            '*/vendor/*',
             '/docker',
             '/tests/Application/var',
             GlobalNamespaceImportFixer::class,

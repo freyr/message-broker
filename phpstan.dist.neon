@@ -1,15 +1,15 @@
 parameters:
     level: max
     paths:
-        - src/broker/
-        - src/adapter/postgresql/
-        - src/adapter/amqp/
-        - src/adapter/http/
-        - src/adapter/redis/
+        - src/
+        - storage/postgresql/src/
+        - transport/amqp/src/
+        - webhook/http/src/
+        - ratelimit/redis/src/
     ignoreErrors:
         # The traits of the test kit are used by test classes, which PHPStan does not analyse.
         -
             identifier: trait.unused
             paths:
-                - src/broker/Testing/TestIsolation.php
-                - src/adapter/postgresql/Testing/PostgreSqlTestSupport.php
+                - src/Testing/TestIsolation.php
+                - storage/postgresql/src/Testing/PostgreSqlTestSupport.php

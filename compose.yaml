@@ -9,6 +9,9 @@ services:
       - .:/app
       - ${COMPOSER_HOME}:/.composer:consistent
     environment:
+      # The adapters require freyr/message-broker ^0.15, and the root package is the core: Composer
+      # needs its version. Change it with REHEARSAL_VERSION of tools/split-rehearsal.sh at each minor release.
+      COMPOSER_ROOT_VERSION: "0.15.0"
       POSTGRES_DSN: "pgsql:host=postgres;port=5432;dbname=message_broker_test"
       POSTGRES_USER: broker
       POSTGRES_PASSWORD: broker
@@ -50,7 +53,7 @@ services:
   # consecutive transactions of one client. max_prepared_statements must be above 0 (200 is
   # the default since 1.24.0): pdo_pgsql sends the prepare and the execute as separate round
   # trips, and in transaction mode each can go to a different server connection.
-  # No DB_NAME: a wildcard entry for every database. See docs/postgresql/CONNECTION_POOLING.md.
+  # No DB_NAME: a wildcard entry for every database. See storage/postgresql/docs/CONNECTION_POOLING.md.
   pgbouncer:
     image: edoburu/pgbouncer:v1.26.1-p0
     environment:
@@ -90,7 +93,7 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
 
-  # Test HTTP server of the HTTP adapter tests and the webhook benchmark: tools/webhook-test-server/server.mjs
+  # Test HTTP server of the webhook-http tests and the webhook benchmark: tools/webhook-test-server/server.mjs
   # (Node.js, built-in modules only). No host port: the php service reaches it by its service name.
   webhook-server:
     image: node:22-alpine
@@ -103,7 +106,7 @@ services:
       timeout: 3s
       retries: 15
 
-  # Redis of the Redis adapter tests (suite redis). No host port and no volume: the tests need no state between runs.
+  # Redis of the ratelimit-redis tests (suite ratelimit-redis). No host port and no volume: the tests need no state between runs.
   redis:
     image: redis:7-alpine
     healthcheck:
