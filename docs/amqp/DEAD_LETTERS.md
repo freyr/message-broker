@@ -1,7 +1,7 @@
 # AMQP dead letters
 
 The consumer writes its dead letters to the `dead_letters` table (see
-[../core/DLQ_OPERATIONS.md](../core/DLQ_OPERATIONS.md)). RabbitMQ can also move
+[../DLQ_OPERATIONS.md](../DLQ_OPERATIONS.md)). RabbitMQ can also move
 a message of a work queue to a dead letter queue by itself, with no handler
 error: a quorum work queue moves a message above its `x-delivery-limit` through
 its dead letter exchange. `AmqpDeadLetterImport` moves the messages of that
@@ -14,7 +14,7 @@ into the table too, with the handler error of each.
 ## Queue sink
 
 `AmqpDeadLetterSink` implements the core port `DeadLetter\DeadLetterSink` (see
-[../core/PORTS.md](../core/PORTS.md)). Give it to the `DeliveryProcessor` of a
+[../PORTS.md](../PORTS.md)). Give it to the `DeliveryProcessor` of a
 consumer as `deadLetters`, in place of the table store:
 
 ```php
@@ -50,7 +50,7 @@ The table stays the default sink. Each consumer has one sink.
 | --- | --- |
 | exchange, routing key | `AmqpDeadLetterConfig::$exchange`, `AmqpDeadLetterConfig::$routingKey` |
 | body | the body of the dead letter: the canonical document, or the raw bytes of a malformed message |
-| `application_headers` | the headers of the dead letter, then `x-dead-letter` (the error data, see [../core/DLQ_OPERATIONS.md](../core/DLQ_OPERATIONS.md#the-header-x-dead-letter)); the `x-dead-letter` value wins on a key collision |
+| `application_headers` | the headers of the dead letter, then `x-dead-letter` (the error data, see [../DLQ_OPERATIONS.md](../DLQ_OPERATIONS.md#the-header-x-dead-letter)); the `x-dead-letter` value wins on a key collision |
 | `message_id` property | the message ID of the dead letter |
 | `delivery_mode` | persistent |
 | `mandatory` flag | set |
@@ -166,7 +166,7 @@ $imported = $import->run(limit: 1000); // null: until the queue is empty
 `run(?int $limit = null): int` reads the queue with `basic.get` until the queue
 is empty or the limit is reached, and returns the number of imported messages.
 Register it with `message-broker:dlq:import` (see
-[../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md)) and run it from a
+[../CLI_REFERENCE.md](../CLI_REFERENCE.md)) and run it from a
 Kubernetes `CronJob`. It is not a long-running worker.
 
 For each message:
@@ -177,7 +177,7 @@ For each message:
    the queue sink has a valid header `x-dead-letter`, which has priority: the
    row gets the dead letter of the header (case 1).
 3. `DeadLetterImporter` builds the row (the cases are in
-   [../core/DLQ_OPERATIONS.md](../core/DLQ_OPERATIONS.md#importing-a-dead-letter-queue-of-the-transport))
+   [../DLQ_OPERATIONS.md](../DLQ_OPERATIONS.md#importing-a-dead-letter-queue-of-the-transport))
    and stores it.
 4. Only after the store returns, the import sends `basic.ack`.
 

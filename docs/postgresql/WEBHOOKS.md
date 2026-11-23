@@ -4,7 +4,7 @@ This document describes the PostgreSQL part of the webhook queue: the table
 `webhook_deliveries`, its index, the delivery store, the retention, the
 pg_partman configuration, the alert query, and the flow control tables with
 the rate limiter and the circuit breaker. The model of the queue, the
-ports and the delivery loop are in [../core/WEBHOOKS.md](../core/WEBHOOKS.md).
+ports and the delivery loop are in [../WEBHOOKS.md](../WEBHOOKS.md).
 The other tables are in [STORAGE.md](STORAGE.md). The outbox retention, which
 has the same rules, is in [RETENTION.md](RETENTION.md).
 
@@ -65,7 +65,7 @@ letters of the deliveries go to `dead_letters`, which
 
 The console commands `message-broker:webhook:setup` and
 `message-broker:webhook:maintain` take these classes (see
-[../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md)). Without the commands,
+[../CLI_REFERENCE.md](../CLI_REFERENCE.md)). Without the commands,
 call `install()` from your deployment, and `PostgreSqlDeliveryRetention` from a
 daily job (below).
 
@@ -176,7 +176,7 @@ permanent refusal, or an operator abandons it. The rows of a lane whose
 endpoint is blocked, and of a subscription that the application removed, end
 only by the abandon. Alert on a report with a kept partition, then end the old
 rows with `message-broker:webhook:abandon --before=<date>` (see
-[../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md)). The next run of the
+[../CLI_REFERENCE.md](../CLI_REFERENCE.md)). The next run of the
 retention drops the partition.
 
 Run the retention once a day, for example:
@@ -232,7 +232,7 @@ delays and the load, and on a report of `purge()` with a kept partition.
 ## Flow control tables
 
 The rate limiter and the circuit breaker of the core
-([../core/WEBHOOKS.md](../core/WEBHOOKS.md#flow-control)) keep their state in
+([../WEBHOOKS.md](../WEBHOOKS.md#flow-control)) keep their state in
 two small tables, with no partitions and no retention.
 `message-broker:webhook:setup` creates them. Construct each store with the
 dedicated connection of the delivery worker, which is in no transaction of the
@@ -331,7 +331,7 @@ SELECT lane, blocked_at, opened_count FROM webhook_lanes WHERE blocked_at IS NOT
 ```
 
 `message-broker:webhook:lanes` shows the same state, and `--close=<lane>` ends
-an opening or a block ([../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md#message-brokerwebhooklanes)).
+an opening or a block ([../CLI_REFERENCE.md](../CLI_REFERENCE.md#message-brokerwebhooklanes)).
 
 ### pgbouncer
 

@@ -111,9 +111,9 @@ for each lane. The delivery loop calls both in each pass (see
 an in-memory implementation of each. The PostgreSQL adapter implements the
 three ports: `PostgreSqlRateLimiter`, and `PostgreSqlCircuitBreaker` (also
 `LaneStates`); see
-[../postgresql/WEBHOOKS.md](../postgresql/WEBHOOKS.md#flow-control-tables).
+[postgresql/WEBHOOKS.md](postgresql/WEBHOOKS.md#flow-control-tables).
 The Redis adapter implements the rate limiter in Redis: `RedisRateLimiter`;
-see [../redis/RATE_LIMIT.md](../redis/RATE_LIMIT.md). A deployment uses one
+see [redis/RATE_LIMIT.md](redis/RATE_LIMIT.md). A deployment uses one
 rate limit store for all its workers.
 
 A store error of either port propagates: the flow control never fails open.
@@ -470,7 +470,7 @@ Alerts: a `webhook.lane_blocked` (only `LaneStates::close()` ends a block); a la
 `message-broker:webhook:lanes` shows its state; when the endpoint works again,
 `message-broker:webhook:lanes --close=<lane>` puts the lane back into
 circulation. With the PostgreSQL adapter, a SQL alert on a blocked lane is in
-[../postgresql/WEBHOOKS.md](../postgresql/WEBHOOKS.md#flow-control-tables).
+[postgresql/WEBHOOKS.md](postgresql/WEBHOOKS.md#flow-control-tables).
 
 ## Security
 

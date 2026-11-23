@@ -49,7 +49,7 @@ With Predis, use `new PredisScriptRunner($client)`.
 ## Documents
 
 - [Redis rate limit store](../../docs/redis/RATE_LIMIT.md): the client bridges, the key prefix and the hash tag, the server versions, `maxmemory-policy`, the script cache, the tests
-- [Webhooks](../../docs/core/WEBHOOKS.md#rate-limit): the rate limit rules of the core
+- [Webhooks](../../docs/WEBHOOKS.md#rate-limit): the rate limit rules of the core
 - [Webhook delivery storage](../../docs/postgresql/WEBHOOKS.md#flow-control-tables): the PostgreSQL store of the rate limit and the circuit breaker
 
 ## Tests

@@ -3,8 +3,8 @@
 Operational guidance for running relays and consumers in production: the
 deployment model, graceful shutdown, observability and scaling. Outbox
 retention and connection pooling are in the documents of the PostgreSQL
-adapter: [../postgresql/RETENTION.md](../postgresql/RETENTION.md) and
-[../postgresql/CONNECTION_POOLING.md](../postgresql/CONNECTION_POOLING.md).
+adapter: [postgresql/RETENTION.md](postgresql/RETENTION.md) and
+[postgresql/CONNECTION_POOLING.md](postgresql/CONNECTION_POOLING.md).
 
 ## Deployment model — crash-only on Kubernetes
 
@@ -35,7 +35,7 @@ This is safe because:
   path never dead-letters — a stuck lane retries with backoff. When a row
   passes the retention period (default 7 days) while it is still unpublished,
   retention keeps its partition, reports it, and exits with a non-zero code
-  (see [../postgresql/RETENTION.md](../postgresql/RETENTION.md)).
+  (see [postgresql/RETENTION.md](postgresql/RETENTION.md)).
   The partition grows until the relay publishes the rows. Only the opt-in
   `--drop-unpublished` drops such a row. Alert on relay backlog and on the
   exit code of the maintain command.
@@ -112,7 +112,7 @@ longer than the longest of these. The time of a `preStop` hook counts against
 the same grace period. A process that SIGKILL stops loses no message, as after
 a crash: the open transaction of a relay or a consumer rolls back, the broker
 redelivers the unacked deliveries (on a quorum queue, each with one more delivery count, see
-[The count after an uncontrolled stop](../amqp/CONSUMER.md#the-count-after-an-uncontrolled-stop)),
+[The count after an uncontrolled stop](amqp/CONSUMER.md#the-count-after-an-uncontrolled-stop)),
 and the rows that a webhook delivery worker claimed are due again when their
 lease ends. Deduplication of the consumer, or of the webhook receiver by
 `webhook-id`, absorbs the repeat.
@@ -160,7 +160,7 @@ failures. A worker whose handler fails at each delivery (for example, because a
 dependency is down) then stops and starts again with fresh connections, instead
 of running on with the same connections. A consumer limit stop is a graceful
 stop: the consumer returns its buffered deliveries with no delivery count (see
-[the return rule](../amqp/CONSUMER.md#the-return-rule)).
+[the return rule](amqp/CONSUMER.md#the-return-rule)).
 
 ## Observability
 
@@ -231,14 +231,14 @@ holds its own database connection, so the replicas of all workers together
 must fit `max_connections` of PostgreSQL; behind a transaction-mode pooler,
 they must fit `max_client_conn`, and the server pool limits the concurrent
 transactions (see
-[../postgresql/CONNECTION_POOLING.md](../postgresql/CONNECTION_POOLING.md)).
+[postgresql/CONNECTION_POOLING.md](postgresql/CONNECTION_POOLING.md)).
 A scale-down is a SIGTERM: with `ext-pcntl`, and when the current delivery
 ends inside the grace period, a consumer returns its buffered deliveries with
-no delivery count (see [the return rule](../amqp/CONSUMER.md#the-return-rule)).
+no delivery count (see [the return rule](amqp/CONSUMER.md#the-return-rule)).
 
 **There is no ordering.** Rows publish in any order, and consumers must be
 order-insensitive. AMQP routes by message name. See
-[../amqp/TRANSPORT.md](../amqp/TRANSPORT.md).
+[amqp/TRANSPORT.md](amqp/TRANSPORT.md).
 
 **Consumers: one commit per message.** Each delivery is one transaction (the
 dedup insert and your handler), one commit and one ack. The disk flush of the
@@ -280,7 +280,7 @@ throughput with slow handlers, add consumer processes. Run the benchmark with
 processes (N replicas) against one lane. Each claims a batch of eligible rows via
 `FOR UPDATE SKIP LOCKED` inside a transaction owned by the outbox store,
 publishes the batch with publisher confirms, and marks the rows published (or
-deletes them, see [Published rows: mark or delete](../postgresql/STORAGE.md#published-rows-mark-or-delete)).
+deletes them, see [Published rows: mark or delete](postgresql/STORAGE.md#published-rows-mark-or-delete)).
 Workers never block each other, and a crashed worker's claimed rows are
 instantly reclaimable. A broker failure backs off the rows of the failed
 publish and stops the worker; a nack backs off only the nacked rows (see

@@ -62,4 +62,4 @@ $consumer = new AmqpConsumer(
 - [Consumer](../../docs/amqp/CONSUMER.md): TTL wait queues, dead-letter exchange
 - [Dead letters](../../docs/amqp/DEAD_LETTERS.md): the queue sink (`AmqpDeadLetterSink`), the import of a dead letter queue, the read of `x-death`, the permissions
 - [Quickstart](../../docs/QUICKSTART.md): a complete example with all three packages
-- [Delivery processor and retry](../../docs/core/CONSUMER.md)
+- [Delivery processor and retry](../../docs/CONSUMER.md)

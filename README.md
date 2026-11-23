@@ -21,7 +21,7 @@ documents, so that the documents move with the code.
 
 | Package | Folder in this repo | What it holds | Documents |
 |---|---|---|---|
-| Core (`freyr/message-broker`) | `src/broker/` | The ports, the relay loop, the delivery processor, retry and dead letters, the wire format, the console commands and the test kit. | [docs/core/](docs/core/) |
+| Core (`freyr/message-broker`) | `src/broker/` | The ports, the relay loop, the delivery processor, retry and dead letters, the wire format, the console commands and the test kit. | [docs/](docs/) |
 | PostgreSQL adapter (`freyr/message-broker-postgresql`) | `src/adapter/postgresql/` | The outbox, deduplication and dead-letter stores, the transaction, the schema installer and the outbox retention. | [docs/postgresql/](docs/postgresql/) |
 | AMQP adapter (`freyr/message-broker-amqp`) | `src/adapter/amqp/` | The AMQP publisher and consumer, the wait-queue retry and the config classes. | [docs/amqp/](docs/amqp/) |
 | HTTP adapter (`freyr/message-broker-http`) | `src/adapter/http/` | The webhook sender: signed parallel `POST` requests (Standard Webhooks) with Symfony HttpClient, the response classifier and the private network check. | [docs/http/](docs/http/) |
@@ -61,7 +61,7 @@ lane, a named drain of that table. Lanes isolate workloads from each other.
 Any number of identical relay workers drain one lane in parallel; scale by
 adding workers to the lane. By default the relay marks rows published and never deletes
 them. The command `message-broker:outbox:maintain` drops daily partitions
-after the retention period (default 7 days). A partition with unpublished rows is kept, and the command exits non-zero, unless `--drop-unpublished` is set — see [docs/core/RELAY.md](docs/core/RELAY.md) and
+after the retention period (default 7 days). A partition with unpublished rows is kept, and the command exits non-zero, unless `--drop-unpublished` is set — see [docs/RELAY.md](docs/RELAY.md) and
 [docs/postgresql/RETENTION.md](docs/postgresql/RETENTION.md).
 
 ## Published rows: mark or delete
@@ -94,13 +94,13 @@ measurements and the choice are in
 
 Core (`docs/core/`):
 
-- [Relay and lanes](docs/core/RELAY.md) — lanes, the relay loop, failure handling, backoff
-- [Delivery processor and retry](docs/core/CONSUMER.md) — the exactly-once algorithm, the retry policy
-- [Ports](docs/core/PORTS.md) — the ports and the classes that implement them
-- [CLI Reference](docs/core/CLI_REFERENCE.md) — every shipped console command
-- [DLQ Operations](docs/core/DLQ_OPERATIONS.md) — inspecting, replaying, and purging dead letters
-- [Production](docs/core/PRODUCTION.md) — deployment, graceful shutdown, observability, scaling
-- [Testing](docs/core/TESTING.md) — contract test cases for adapter authors, in-memory fakes for applications
+- [Relay and lanes](docs/RELAY.md) — lanes, the relay loop, failure handling, backoff
+- [Delivery processor and retry](docs/CONSUMER.md) — the exactly-once algorithm, the retry policy
+- [Ports](docs/PORTS.md) — the ports and the classes that implement them
+- [CLI Reference](docs/CLI_REFERENCE.md) — every shipped console command
+- [DLQ Operations](docs/DLQ_OPERATIONS.md) — inspecting, replaying, and purging dead letters
+- [Production](docs/PRODUCTION.md) — deployment, graceful shutdown, observability, scaling
+- [Testing](docs/TESTING.md) — contract test cases for adapter authors, in-memory fakes for applications
 
 PostgreSQL adapter (`docs/postgresql/`):
 

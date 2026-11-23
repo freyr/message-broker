@@ -1,27 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+    The PHPUnit configuration of the core package alone: its own tests, its own code. The root
+    infection.json5 (the Infection configuration of the core) reads it through phpUnit.configDir.
+    The root phpunit.xml.dist is the development configuration of the whole repo.
+-->
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/13.4/phpunit.xsd"
-         bootstrap="vendor/autoload.php"
+         bootstrap="../vendor/autoload.php"
          colors="true"
          failOnRisky="true"
          failOnWarning="true"
          failOnDeprecation="true"
          beStrictAboutCoverageMetadata="false"
-         cacheDirectory=".phpunit.cache"
+         cacheDirectory="../.phpunit.cache"
          executionOrder="defects"
          resolveDependencies="true">
     <testsuites>
         <testsuite name="core">
-            <directory>tests</directory>
+            <directory>.</directory>
         </testsuite>
     </testsuites>
 
     <source>
         <include>
-            <directory>src</directory>
+            <directory>../src</directory>
         </include>
         <exclude>
-            <directory>src/Testing</directory>
+            <directory>../src/Testing</directory>
         </exclude>
     </source>
 

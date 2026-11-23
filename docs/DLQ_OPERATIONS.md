@@ -359,7 +359,7 @@ Each consumer writes its dead letters to one sink (`DeadLetter\DeadLetterSink`):
 - The `dead_letters` table (a `DeadLetterStore`, the default). The row is
   there at once.
 - A queue of the transport (for AMQP, `AmqpDeadLetterSink`, see
-  [../amqp/DEAD_LETTERS.md](../amqp/DEAD_LETTERS.md)). The message waits in the
+  [amqp/DEAD_LETTERS.md](amqp/DEAD_LETTERS.md)). The message waits in the
   dead letter queue until `message-broker:dlq:import` moves it into the table
   (case 1 below).
 
@@ -386,7 +386,7 @@ The import stores each message, then acks it. A stop between the two leaves
 the message in the queue, and the next run stores it again: one open row
 results. When the store fails, the message returns to the queue, and the
 command exits with a non-zero code. The transport part (for AMQP, the read of
-`x-death`) is in [../amqp/DEAD_LETTERS.md](../amqp/DEAD_LETTERS.md).
+`x-death`) is in [amqp/DEAD_LETTERS.md](amqp/DEAD_LETTERS.md).
 
 The import maps each message to one of three cases:
 
@@ -408,7 +408,7 @@ The import maps each message to one of three cases:
   stays unchanged and is stored as its JSON form, an object, in each row
   (the table sink and the import alike). The JSONB column keeps no key order of
   an object. For AMQP, see
-  [../amqp/DEAD_LETTERS.md](../amqp/DEAD_LETTERS.md#the-read-of-x-death).
+  [amqp/DEAD_LETTERS.md](amqp/DEAD_LETTERS.md#the-read-of-x-death).
 - A replay of an imported row follows the rules of *Replaying*: one
   transaction, the refusals, and the target `x-replay-target` = the `source` of
   the row.

@@ -3,7 +3,7 @@
 This document describes `HttpDeliverySender`, the HTTP adapter of the webhook
 queue: the request, the configuration, the results, the timeouts and the
 connections. The model of the queue, the ports and the delivery loop are in
-[../core/WEBHOOKS.md](../core/WEBHOOKS.md). The signature is in
+[../WEBHOOKS.md](../WEBHOOKS.md). The signature is in
 [SIGNATURE.md](SIGNATURE.md). The private network rule and the proxy rule are
 in [NETWORK.md](NETWORK.md).
 
@@ -108,7 +108,7 @@ delivery ID, in the order of the input.
   and into the event `webhook.dead_lettered`. Use the reason code `gone` to
   disable a subscription in your application.
 - The core limits a retry time from `Retry-After` (see the default retry
-  policy in [../core/WEBHOOKS.md](../core/WEBHOOKS.md#the-default-retry-policy)).
+  policy in [../WEBHOOKS.md](../WEBHOOKS.md#the-default-retry-policy)).
 
 `send()` does not throw for a failed request. It throws only for an error in
 its own code or configuration, and the loop then stops.

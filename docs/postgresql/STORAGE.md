@@ -9,7 +9,7 @@ partitions and the retention of the outbox are in
 queue, with its store, schema installer and retention, is in
 [WEBHOOKS.md](WEBHOOKS.md). The pooler rules are in
 [CONNECTION_POOLING.md](CONNECTION_POOLING.md). The ports are listed in
-[../core/PORTS.md](../core/PORTS.md).
+[../PORTS.md](../PORTS.md).
 
 ## Tables
 
@@ -42,7 +42,7 @@ With the default `PublishedRows::Mark`, the relay only sets `published_at`
 that still holds unpublished rows that are not abandoned is kept (and the
 command exits with code 1), unless the option `--drop-unpublished` is set. An
 abandoned row does not keep its partition. See
-[../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md) and
+[../CLI_REFERENCE.md](../CLI_REFERENCE.md) and
 [RETENTION.md](RETENTION.md).
 
 #### Published rows: mark or delete
@@ -120,7 +120,7 @@ VARCHAR(255), `message_name` VARCHAR(255), `body` BYTEA, `headers` JSONB,
 `attempts` INTEGER, `failed_at` TIMESTAMP(3), `replayed_at` TIMESTAMP(3)
 NULL and `replayable` BOOLEAN NOT NULL DEFAULT TRUE (`false` when the body is
 the raw wire bytes). The table is the same for every transport. The operator
-commands are in [../core/DLQ_OPERATIONS.md](../core/DLQ_OPERATIONS.md).
+commands are in [../DLQ_OPERATIONS.md](../DLQ_OPERATIONS.md).
 
 The partial unique index `uq_dead_letters_open` on (`message_id`, `source`)
 `WHERE replayed_at IS NULL` permits one open row for each message and work
@@ -150,7 +150,7 @@ because it skips the partitions that are already attached. `sql(int $daysAhead)`
 returns the DDL of a new database. Its partition DDL is not idempotent
 (`ATTACH`), so use it for a new database only. The console command
 `message-broker:setup:schema` calls these two methods (see
-[../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md)).
+[../CLI_REFERENCE.md](../CLI_REFERENCE.md)).
 
 ```php
 use Freyr\MessageBroker\Console\SetupSchemaCommand;
@@ -207,7 +207,7 @@ $retention = new PostgreSqlOutboxRetention($pdo);
 `deleteChunkSize`); each chunk is a short statement that the index on
 `created_at` serves, so the cleanup holds no long transaction. The command
 `message-broker:dedup:cleanup` uses it (see
-[../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md)).
+[../CLI_REFERENCE.md](../CLI_REFERENCE.md)).
 
 ## Test support
 
@@ -220,4 +220,4 @@ run when the database name does not contain `_test`, because it drops the
 tables. Infection sets `TEST_TOKEN` for each parallel worker, and the trait then
 uses the database `<name>_t<token>`, which it creates on first use. The
 transport-neutral part is the trait `TestIsolation` of the core (see
-[../core/TESTING.md](../core/TESTING.md)).
+[../TESTING.md](../TESTING.md)).

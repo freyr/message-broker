@@ -46,7 +46,7 @@ before. The release changes no schema. All packages move to `^0.14` together.
   statement) and calls `find()` for each lane at the lane refresh interval.
 - New events: `webhook.lane_opened`, `webhook.lane_blocked`,
   `webhook.lane_returned`, `webhook.permit_wait` and `webhook.lane_at_limit`
-  (see `docs/core/WEBHOOKS.md`, "Events").
+  (see `docs/WEBHOOKS.md`, "Events").
 
 ## From 0.12.x to 0.13.0
 
@@ -82,7 +82,7 @@ and no other part of the library.
   [--lane=<lane>]... [--dry-run]` by hand for old rows that no rule ends: the
   rows of a lane whose endpoint is blocked, and the rows of a subscription
   that you removed. The abandoned rows go to the dead letters, so
-  `dlq:replay` can send them again (see `docs/core/CLI_REFERENCE.md`).
+  `dlq:replay` can send them again (see `docs/CLI_REFERENCE.md`).
 - `--retention-days` of `webhook:maintain` is no longer tied to a value of the
   loop. A partition that holds an unfinished row stays until the row ends;
   the command reports it and exits with code 1, as before. Keep the alert on
@@ -94,7 +94,7 @@ and no other part of the library.
 
 ## From 0.12.2 to 0.12.3
 
-This release adds the webhook delivery queue (see `docs/core/WEBHOOKS.md`). It
+This release adds the webhook delivery queue (see `docs/WEBHOOKS.md`). It
 is additive: an application that does not use webhooks needs no change and
 runs no new DDL.
 
@@ -103,7 +103,7 @@ runs no new DDL.
   `message-broker:webhook:maintain` once a day, and run workers with
   `message-broker:webhook:run`. The library registers no command: add
   `WebhookSetupCommand`, `WebhookMaintainCommand` and `WebhookRunCommand` to
-  your console application (see `docs/core/CLI_REFERENCE.md`).
+  your console application (see `docs/CLI_REFERENCE.md`).
 - Give `--retention-days` of `webhook:maintain` the value of `retentionDays` of
   the `DeliveryLoopConfig` (default `7` for both). Since 0.13.0 this value of
   the loop is removed (see above).
@@ -140,7 +140,7 @@ signature of `AmqpConsumer::run()`. It changes no schema.
   warning when a limit option is set.
 - A limit stop exits with code `0`. The container must start again after each
   exit, exit code `0` included: a Kubernetes `Deployment` does this
-  (`restartPolicy: Always`; see `docs/core/PRODUCTION.md`, "Worker limits").
+  (`restartPolicy: Always`; see `docs/PRODUCTION.md`, "Worker limits").
 - `DeliveryProcessor::process()` returns a `DeliveryOutcome` instead of `void`.
   A caller that ignores the return value needs no change.
 
@@ -171,7 +171,7 @@ read the header `x-replay-target`, so it processes each replay.
   `new PdoTransaction($pdo)` with the `$pdo` of `PostgreSqlDeadLetterStore` and
   `PostgreSqlOutboxStore`. When two connections cannot be avoided, the
   transaction must wrap the connection of the dead letter store (see
-  `docs/core/DLQ_OPERATIONS.md`).
+  `docs/DLQ_OPERATIONS.md`).
 - **BREAKING:** `DeadLetterStore::markReplayed(string $id): bool`. A custom
   implementation sets the mark only when `replayed_at` is null, returns `true`
   only when it set the mark, and returns `false` with no error for an unknown
@@ -310,7 +310,7 @@ do not come back.
 ### New signatures of `DeadLetterStore`
 
 `list()`, `count()` and `purge()` take a `DeadLetter\DeadLetterFilter` in place
-of the separate filter parameters (see `docs/core/PORTS.md`):
+of the separate filter parameters (see `docs/PORTS.md`):
 
 | Old call | New call |
 | --- | --- |
@@ -416,7 +416,7 @@ abandoned_at` (a short `ACCESS EXCLUSIVE` lock; set `lock_timeout`).
 ### New methods of `OutboxStore`
 
 An implementation of `Outbox\OutboxStore` outside this library must add two
-methods (see `docs/core/PORTS.md`):
+methods (see `docs/PORTS.md`):
 
 ```php
 public function abandon(string $id): int;
@@ -492,7 +492,7 @@ $processor = new DeliveryProcessor(
 
 `ExponentialRetryPolicy` takes the optional `deadLetterOn` and `discardOn`
 lists of throwable classes (empty by default, so nothing changes when you do
-not pass them). See [docs/core/CONSUMER.md](docs/core/CONSUMER.md), *Error
+not pass them). See [docs/CONSUMER.md](docs/CONSUMER.md), *Error
 class lists*.
 
 ## From 0.6.x to 0.7.0

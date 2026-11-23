@@ -3,8 +3,8 @@
 `DeliveryProcessor` holds the transport-neutral exactly-once algorithm for one
 delivery. It imports no transport class. A transport loop gives it a `Delivery`
 and a `DeliveryControl`. The AMQP loop is in
-[../amqp/CONSUMER.md](../amqp/CONSUMER.md). The PostgreSQL stores that the
-processor uses are in [../postgresql/STORAGE.md](../postgresql/STORAGE.md).
+[amqp/CONSUMER.md](amqp/CONSUMER.md). The PostgreSQL stores that the
+processor uses are in [postgresql/STORAGE.md](postgresql/STORAGE.md).
 
 ## The algorithm
 
@@ -49,7 +49,7 @@ Each dead letter of the processor (the delivery limit, a malformed message, a
 `DeadLetter` decision) goes to the one sink of the consumer, the
 `DeadLetterSink` that the processor takes as `deadLetters`: the `dead_letters`
 table (a `DeadLetterStore`, the default) or a queue of the transport (for AMQP,
-`AmqpDeadLetterSink`, see [../amqp/DEAD_LETTERS.md](../amqp/DEAD_LETTERS.md)).
+`AmqpDeadLetterSink`, see [amqp/DEAD_LETTERS.md](amqp/DEAD_LETTERS.md)).
 The processor acks only after `store()` returns. A sink that throws leaves the
 delivery unacked and gives no event `message.dead_lettered`. The processor
 never rejects or nacks a delivery as a result of a handler failure.
@@ -177,7 +177,7 @@ $processor = new DeliveryProcessor(
   unacked.
 - A value below 1 throws `InvalidArgumentException` at construction.
 - A transport that gives no count (`null`) has no delivery limit. For AMQP, only
-  a quorum queue gives a count (see [../amqp/CONSUMER.md](../amqp/CONSUMER.md)).
+  a quorum queue gives a count (see [amqp/CONSUMER.md](amqp/CONSUMER.md)).
 
 ### The rule for the two limits
 
@@ -197,7 +197,7 @@ default). A lower value is recommended.
 ## Retry policy
 
 The retry delay is applied by the transport. For AMQP, it is a TTL wait queue
-(see [../amqp/CONSUMER.md](../amqp/CONSUMER.md)).
+(see [amqp/CONSUMER.md](amqp/CONSUMER.md)).
 
 ```php
 use Freyr\MessageBroker\Retry\Backoff;

@@ -48,10 +48,10 @@ $relay->run(); // blocks; SIGTERM or SIGINT stops it
 ## Documents
 
 - [Quickstart](../../docs/QUICKSTART.md): produce, relay and consume end to end
-- [Relay and lanes](../../docs/core/RELAY.md)
-- [Delivery processor and retry](../../docs/core/CONSUMER.md)
-- [Ports](../../docs/core/PORTS.md)
-- [CLI reference](../../docs/core/CLI_REFERENCE.md)
-- [DLQ operations](../../docs/core/DLQ_OPERATIONS.md)
-- [Production](../../docs/core/PRODUCTION.md)
-- [Testing](../../docs/core/TESTING.md)
+- [Relay and lanes](../../docs/RELAY.md)
+- [Delivery processor and retry](../../docs/CONSUMER.md)
+- [Ports](../../docs/PORTS.md)
+- [CLI reference](../../docs/CLI_REFERENCE.md)
+- [DLQ operations](../../docs/DLQ_OPERATIONS.md)
+- [Production](../../docs/PRODUCTION.md)
+- [Testing](../../docs/TESTING.md)

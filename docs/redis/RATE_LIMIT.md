@@ -5,7 +5,7 @@ The Redis adapter (`src/adapter/redis/`, namespace
 `freyr/message-broker-redis`) implements the `Webhook\RateLimiter` port of the
 core in Redis: `RedisRateLimiter`. The rules of the port (the two levels of
 buckets, the max-min division, the give-back) are in
-[../core/WEBHOOKS.md](../core/WEBHOOKS.md#rate-limit). The circuit breaker
+[../WEBHOOKS.md](../WEBHOOKS.md#rate-limit). The circuit breaker
 and the delivery store stay in PostgreSQL.
 
 A deployment uses one rate limit store for all its workers:

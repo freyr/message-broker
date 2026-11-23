@@ -4,7 +4,7 @@ This document describes how the PostgreSQL adapter creates and drops the
 partitions of `outbox_messages`. The table is described in
 [STORAGE.md](STORAGE.md). The command `message-broker:outbox:maintain` is
 a core console command; its options and exit codes are in
-[../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md). The class that does the
+[../CLI_REFERENCE.md](../CLI_REFERENCE.md). The class that does the
 work is `PostgreSqlOutboxRetention`, which implements the core port
 `OutboxRetention`. The retention of `webhook_deliveries` has the same rules,
 with no option to drop a partition that holds an unfinished row; it is in
@@ -20,7 +20,7 @@ no default partition. An insert for a day with no partition fails, and the
 producer's transaction fails with it, so create partitions ahead of time.
 
 Run `message-broker:outbox:maintain` once a day (a Kubernetes `CronJob`, see
-[Scheduled commands](../core/PRODUCTION.md#scheduled-commands)):
+[Scheduled commands](../PRODUCTION.md#scheduled-commands)):
 
 ```bash
 php bin/console message-broker:outbox:maintain --retention-days=7 --premake-days=3

@@ -4,7 +4,7 @@
 channel (qos, consume, wait, cancel), the signals, the idle timeout and the
 worker limits. It maps each `AMQPMessage` to a `Delivery` and gives the
 processor an `AmqpDeliveryControl` for it. The exactly-once algorithm and the
-retry policy are in [../core/CONSUMER.md](../core/CONSUMER.md). The routing and
+retry policy are in [../CONSUMER.md](../CONSUMER.md). The routing and
 the topology are in [TRANSPORT.md](TRANSPORT.md).
 
 ## Wiring
@@ -54,7 +54,7 @@ $consumer->run(new WorkerLimits(maxMessages: 10_000, maxSeconds: 3_600, maxFailu
   operation.
 
 The command `message-broker:consume` builds the `WorkerLimits` from its options
-(see [../core/CLI_REFERENCE.md](../core/CLI_REFERENCE.md)).
+(see [../CLI_REFERENCE.md](../CLI_REFERENCE.md)).
 
 ## Delivery mapping
 
@@ -73,7 +73,7 @@ name of the queue.
   after the pass has no count, and the broker counts again from zero.
 
 The delivery count drives the delivery limit of the processor (`maxDeliveries`,
-5 by default, see [../core/CONSUMER.md](../core/CONSUMER.md), *Delivery
+5 by default, see [../CONSUMER.md](../CONSUMER.md), *Delivery
 limit*).
 
 **Use a quorum queue to get the delivery limit.** A classic queue gives no
@@ -128,7 +128,7 @@ and is replayable.
 - The rule for an operator: replay the rows of the class
   `DeliveryLimitExceeded` with a filter (and, after an incident, with
   `--since`), and expect the bad message to come back alone. See
-  [../core/DLQ_OPERATIONS.md](../core/DLQ_OPERATIONS.md).
+  [../DLQ_OPERATIONS.md](../DLQ_OPERATIONS.md).
 
 ## Retry with TTL wait queues
 
@@ -137,7 +137,7 @@ Consumer-side retry uses a durable per-delay wait queue with a
 exchange (transport-native delay), rather than an in-process sleep. The queue
 is named `<work queue>.wait.<delay in ms>`. The consumer declares it at the
 first retry with that delay. The retry policy is in
-[../core/CONSUMER.md](../core/CONSUMER.md).
+[../CONSUMER.md](../CONSUMER.md).
 
 The consumer puts its channel in publisher-confirm mode at the first retry. It
 acks the original delivery only after the broker confirms the republish. A
@@ -147,7 +147,7 @@ rejected with requeue (see *The return rule*) and is redelivered with the same
 attempt.
 
 A database failure stops the consumer in the same way, and the delivery is
-redelivered (see [../core/CONSUMER.md](../core/CONSUMER.md), *Database
+redelivered (see [../CONSUMER.md](../CONSUMER.md), *Database
 failures*).
 
 ## Dead-letter exchange of the work queue

@@ -6,7 +6,7 @@ vocabulary. The classes are in the namespace
 `Freyr\MessageBroker\Adapter\Amqp\`. This document describes the routing, the
 config classes, the dedicated channel rule, the publisher and the topology.
 The consumer is in [CONSUMER.md](CONSUMER.md). The relay loop that calls the
-publisher is in [../core/RELAY.md](../core/RELAY.md).
+publisher is in [../RELAY.md](../RELAY.md).
 
 **AMQP routes by message name and gives no ordering guarantee.** Rows publish
 in any order, so consumers must be order-insensitive.
@@ -82,7 +82,7 @@ one confirm wait for the whole batch (`confirmTimeoutSec`). It returns the ids
 of the rows that the broker nacked. The relay backs off these rows only. A
 channel or connection failure, or a confirm timeout, throws; the relay then
 backs off the rows of the call and stops the worker (see
-[../core/RELAY.md](../core/RELAY.md), *Failure and crash semantics*). With
+[../RELAY.md](../RELAY.md), *Failure and crash semantics*). With
 `publisherConfirms: false`, the publisher makes no confirm wait and returns no
 nacked ids.
 

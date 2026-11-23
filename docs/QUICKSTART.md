@@ -6,9 +6,9 @@ AMQP, consume it with deduplication and retry, and register the two
 long-running processes as CLI commands.
 
 It assumes a PostgreSQL database and a RabbitMQ broker reachable
-from your application. See [core/RELAY.md](core/RELAY.md) for the relay,
+from your application. See [RELAY.md](RELAY.md) for the relay,
 [amqp/TRANSPORT.md](amqp/TRANSPORT.md) for the AMQP publisher, and
-[core/CLI_REFERENCE.md](core/CLI_REFERENCE.md) for every command's full option list.
+[CLI_REFERENCE.md](CLI_REFERENCE.md) for every command's full option list.
 
 The example uses the three packages: the core (`Freyr\MessageBroker\`), the
 PostgreSQL adapter (`Freyr\MessageBroker\Adapter\PostgreSql\`) and the AMQP
@@ -85,7 +85,7 @@ php bin/console message-broker:setup:schema
 
 The `body` column is `BYTEA`. `--premake-days` (default `3`) sets how many
 days of partitions
-the command creates ahead. See [core/CLI_REFERENCE.md](core/CLI_REFERENCE.md) for
+the command creates ahead. See [CLI_REFERENCE.md](CLI_REFERENCE.md) for
 `--dump-sql` and every other command's options.
 
 ## Run a relay
@@ -117,7 +117,7 @@ $relay->run(); // blocks; SIGTERM/SIGINT to stop
 
 Run more workers on the same lane to scale throughput; each worker has its
 own database connection and its own channel. See
-[core/RELAY.md](core/RELAY.md) and [amqp/TRANSPORT.md](amqp/TRANSPORT.md) for the details.
+[RELAY.md](RELAY.md) and [amqp/TRANSPORT.md](amqp/TRANSPORT.md) for the details.
 
 ## Schedule the outbox maintenance
 
@@ -140,7 +140,7 @@ php bin/console message-broker:outbox:maintain --retention-days=7 --premake-days
 
 An expired partition that still holds unpublished rows is kept, and the
 command exits with code 1; `--drop-unpublished` drops it with those rows. See
-[core/CLI_REFERENCE.md](core/CLI_REFERENCE.md) for the options and the exit codes, and
+[CLI_REFERENCE.md](CLI_REFERENCE.md) for the options and the exit codes, and
 [postgresql/RETENTION.md](postgresql/RETENTION.md) for the retention rules and pg_partman.
 
 ## Run a consumer
@@ -190,7 +190,7 @@ times (five deliveries that ended with no ack) becomes a dead letter with the
 error `DeliveryLimitExceeded`, and the handler does not run again. Only a
 quorum queue gives the delivery count. Keep the value not higher than
 `x-delivery-limit` of the queue. See
-[core/CONSUMER.md](core/CONSUMER.md#delivery-limit) and
+[CONSUMER.md](CONSUMER.md#delivery-limit) and
 [amqp/CONSUMER.md](amqp/CONSUMER.md#the-return-rule).
 
 `name` scopes deduplication — the same message id delivered to two
@@ -218,7 +218,7 @@ callable a `WorkerLimits` from its options (`--limit`, `--time-limit`,
 `--memory-limit`, and `--failure-limit` for `consume`), for example
 `php bin/console message-broker:consume orders --time-limit=3600 --memory-limit=128M`. Run each command
 as the only process of its container, in a Kubernetes `Deployment` — see
-[core/PRODUCTION.md](core/PRODUCTION.md) for the crash-only deployment model
+[PRODUCTION.md](PRODUCTION.md) for the crash-only deployment model
 and why it is safe.
 
 ## Send webhooks
@@ -313,11 +313,11 @@ and `message-broker:webhook:maintain` once a day in a `CronJob`. Each request is
 `POST` with the message ID in `webhook-id`. A delivery that fails each attempt
 goes to `dead_letters` with the source `webhook:crm`, and `dlq:replay` sends it
 again when `ReplayService` has the delivery store (the argument `deliveries:`,
-see [core/DLQ_OPERATIONS.md](core/DLQ_OPERATIONS.md#replay-of-a-webhook-dead-letter)).
+see [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md#replay-of-a-webhook-dead-letter)).
 Keep `maxHostConnections` of the sender at the batch size of the loop
 or more. The sender refuses an endpoint in a private network by default.
 
-- [core/WEBHOOKS.md](core/WEBHOOKS.md) — the model, the ports, the delivery
+- [WEBHOOKS.md](WEBHOOKS.md) — the model, the ports, the delivery
   loop, the retry policy, the commands and the events.
 - [postgresql/WEBHOOKS.md](postgresql/WEBHOOKS.md) — the table
   `webhook_deliveries`, the delivery store and its retention.
@@ -327,15 +327,15 @@ or more. The sender refuses an endpoint in a private network by default.
 
 ## Next steps
 
-- [core/RELAY.md](core/RELAY.md) — lanes, the relay loop, failure handling and backoff.
-- [core/CONSUMER.md](core/CONSUMER.md) — the delivery processor and the retry policy.
+- [RELAY.md](RELAY.md) — lanes, the relay loop, failure handling and backoff.
+- [CONSUMER.md](CONSUMER.md) — the delivery processor and the retry policy.
 - [amqp/TRANSPORT.md](amqp/TRANSPORT.md) and [amqp/CONSUMER.md](amqp/CONSUMER.md) —
   AMQP configuration in full (publisher, consumer, retry).
 - [postgresql/STORAGE.md](postgresql/STORAGE.md) — the tables, the schema setup and the PostgreSQL classes.
-- [core/CLI_REFERENCE.md](core/CLI_REFERENCE.md) — every command and option.
-- [core/DLQ_OPERATIONS.md](core/DLQ_OPERATIONS.md) — inspecting, replaying, and
+- [CLI_REFERENCE.md](CLI_REFERENCE.md) — every command and option.
+- [DLQ_OPERATIONS.md](DLQ_OPERATIONS.md) — inspecting, replaying, and
   purging dead letters.
-- [core/PRODUCTION.md](core/PRODUCTION.md) — deployment, observability, and scaling;
+- [PRODUCTION.md](PRODUCTION.md) — deployment, observability, and scaling;
   [postgresql/RETENTION.md](postgresql/RETENTION.md) — outbox retention.
-- [core/WEBHOOKS.md](core/WEBHOOKS.md), [postgresql/WEBHOOKS.md](postgresql/WEBHOOKS.md)
+- [WEBHOOKS.md](WEBHOOKS.md), [postgresql/WEBHOOKS.md](postgresql/WEBHOOKS.md)
   and [http/SENDER.md](http/SENDER.md) — the webhook queue.

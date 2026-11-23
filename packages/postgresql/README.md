@@ -50,7 +50,7 @@ $deadLetters = new PostgreSqlDeadLetterStore($pdo);
 
 The relay store can delete published rows instead of the `published_at` mark:
 `new PostgreSqlOutboxStore($workerPdo, PublishedRows::Delete)` (default `PublishedRows::Mark`). See
-[docs/postgresql/STORAGE.md](../../docs/postgresql/STORAGE.md#published-rows-mark-or-delete).
+[../../docs/postgresql/STORAGE.md](../../docs/postgresql/STORAGE.md#published-rows-mark-or-delete).
 
 ## Documents
 
@@ -58,4 +58,4 @@ The relay store can delete published rows instead of the `published_at` mark:
 - [Retention](../../docs/postgresql/RETENTION.md): partitions, `outbox:maintain`, pg_partman
 - [Connection pooling](../../docs/postgresql/CONNECTION_POOLING.md)
 - [Webhook delivery storage](../../docs/postgresql/WEBHOOKS.md): `webhook_deliveries`, the delivery store, retention, pg_partman, and the flow control tables with `PostgreSqlRateLimiter` and `PostgreSqlCircuitBreaker`
-- [Ports of the core](../../docs/core/PORTS.md)
+- [Ports of the core](../../docs/PORTS.md)

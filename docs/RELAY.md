@@ -4,8 +4,8 @@ The relay moves rows from the outbox to a transport. The relay loop is in the
 core class `Relay`. It sends the rows through the `OutboxPublisher` port and
 reads them through the `OutboxStore` port. This document describes the loop,
 its failure handling and its backoff. The AMQP publisher is in
-[../amqp/TRANSPORT.md](../amqp/TRANSPORT.md). The outbox table is in
-[../postgresql/STORAGE.md](../postgresql/STORAGE.md).
+[amqp/TRANSPORT.md](amqp/TRANSPORT.md). The outbox table is in
+[postgresql/STORAGE.md](postgresql/STORAGE.md).
 
 **There is no ordering guarantee.** Rows publish in any order, so consumers
 must be order-insensitive.
@@ -27,9 +27,9 @@ processes drain **one** lane in parallel. Each worker claims a batch of
 eligible rows via `FOR UPDATE SKIP LOCKED` inside a transaction owned by the
 outbox store, publishes the batch through the port (the AMQP publisher waits for publisher confirms) while it holds the
 claim, and marks the rows published (`published_at`); retention drops them by partition (see
-[../postgresql/RETENTION.md](../postgresql/RETENTION.md)). The PostgreSQL store can delete the published rows in the
+[postgresql/RETENTION.md](postgresql/RETENTION.md)). The PostgreSQL store can delete the published rows in the
 claim transaction instead: `new PostgreSqlOutboxStore($pdo, PublishedRows::Delete)` (see
-[../postgresql/STORAGE.md](../postgresql/STORAGE.md#published-rows-mark-or-delete)). Workers never block each
+[postgresql/STORAGE.md](postgresql/STORAGE.md#published-rows-mark-or-delete)). Workers never block each
 other — concurrent claimers skip each other's locked rows.
 
 **No ordering promise.** Rows publish in any order, across workers and past
@@ -68,7 +68,7 @@ Consumers must be order-insensitive.
   row that the transport refuses on each try keeps its backoff until an
   operator acts. To stop a message that is too large before it enters the
   outbox, give `LaneLimits` to the producer (see
-  [../amqp/TRANSPORT.md](../amqp/TRANSPORT.md), *Size limits at produce time*).
+  [amqp/TRANSPORT.md](amqp/TRANSPORT.md), *Size limits at produce time*).
 
 The relay has no dead-letter path. A worker that crashes after publishing but
 before its claim commits leaves the rows unpublished; the next claim
@@ -167,7 +167,7 @@ the options of `message-broker:relay:run`; see [CLI_REFERENCE.md](CLI_REFERENCE.
 `Relay` constructor arguments: `outbox`, `publisher`, `lane = 'default'`,
 `batchSize = 500`, `backoff`, `errorHandler`, `idleSleepMs = 200`, `logger`,
 `events`. The `AmqpMessagePublisher` arguments are in
-[../amqp/TRANSPORT.md](../amqp/TRANSPORT.md).
+[amqp/TRANSPORT.md](amqp/TRANSPORT.md).
 
 The relay publishes the fresh rows of a claim in chunks of
 `OutboxPublisher::maxBatchSize()`; each chunk is one `publishBatch()` call.
