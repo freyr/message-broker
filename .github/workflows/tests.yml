@@ -640,6 +640,6 @@ jobs:
     needs: [ecs, phpstan, deptrac, functional-tests, mutation, split-rehearsal, pgbouncer, valkey]
     runs-on: ubuntu-latest
     steps:
-      - uses: freyr/.github/actions/ci-gate@b0c5431e29887b95f0031751c6d92506a2b2fc81 # v2.0.0
+      - uses: freyr/.github/actions/ci-gate@93b8d0f624ac287b129f2d33c838959329fdaf9d # v2.1.0
         with:
           results: ${{ join(needs.*.result, ' ') }}
